@@ -1,1 +1,15 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor/OS
+.DS_Store
+
+# Old Babel-in-browser build pipeline (being removed)
 build/output/
