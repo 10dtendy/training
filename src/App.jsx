@@ -4257,7 +4257,7 @@ button:focus {
 .daytype-video-wrap { max-width: 320px; margin: 0 auto 20px; }
 .daytype-video-wrap .video { margin-bottom: 0; }
 .daytype-cue { color: var(--text-dim); font-size: 15px; margin-top: 10px; }
-.daytype-empty { color: var(--text-dim); font-size: 14px; margin: 0; }
+.daytype-empty { color: var(--text-dim); font-size: 14px; margin: 0 0 14px; }
 .daytype-note { margin-top: 18px; font-size: 15px; font-weight: 500; }
 .daytype-clear { width: 100%; justify-content: center; }
 .restnote-textarea { width: 100%; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; color: var(--text); font-size: 14px; font-family: inherit; resize: vertical; margin-top: 6px; }
