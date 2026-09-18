@@ -3604,7 +3604,7 @@ function AdminConfirmationEmail({ content, updateContent }) {
 
       <div className="admin-panel">
         <h3>First-time setup</h3>
-        <p className="planner-hint">Publishing requires a one-time secret set directly in the Supabase dashboard (never through this app): generate a Personal Access Token under Account → Access Tokens, then add it as <code>SUPABASE_MANAGEMENT_TOKEN</code> under Project Settings → Edge Functions → Secrets. Until that's done, Publish will show an error explaining what's missing.</p>
+        <p className="planner-hint">Publishing requires a one-time secret set directly in the Supabase dashboard (never through this app): generate a Personal Access Token under Account → Access Tokens, then add it as <code>MANAGEMENT_API_TOKEN</code> under Project Settings → Edge Functions → Secrets. Until that's done, Publish will show an error explaining what's missing.</p>
       </div>
 
       {showPreview && (

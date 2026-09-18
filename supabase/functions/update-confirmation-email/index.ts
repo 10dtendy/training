@@ -2,8 +2,10 @@
 // (subject + layout) from the app's own admin panel. The Management API this
 // calls needs an account-level Personal Access Token — far broader than this
 // one setting — so that token is never sent by the client. It must be set as
-// this function's own secret (SUPABASE_MANAGEMENT_TOKEN) directly in the
-// Supabase dashboard: Project Settings -> Edge Functions -> Secrets.
+// this function's own secret (MANAGEMENT_API_TOKEN) directly in the Supabase
+// dashboard: Project Settings -> Edge Functions -> Secrets. (Can't be named
+// with a SUPABASE_ prefix — that's reserved for Supabase's own auto-injected
+// secrets like SUPABASE_URL below.)
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const PROJECT_REF = "cylzjvrzikgakethelst";
@@ -81,9 +83,9 @@ Deno.serve(async (req) => {
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
     if (profile?.role !== "coach") return json({ error: "Coaches only" }, 403);
 
-    const managementToken = Deno.env.get("SUPABASE_MANAGEMENT_TOKEN");
+    const managementToken = Deno.env.get("MANAGEMENT_API_TOKEN");
     if (!managementToken) {
-      return json({ error: "Not set up yet: this project's edge function is missing the SUPABASE_MANAGEMENT_TOKEN secret. Add it in the Supabase dashboard under Project Settings -> Edge Functions -> Secrets." }, 500);
+      return json({ error: "Not set up yet: this project's edge function is missing the MANAGEMENT_API_TOKEN secret. Add it in the Supabase dashboard under Project Settings -> Edge Functions -> Secrets." }, 500);
     }
 
     const body = await req.json().catch(() => ({}));
