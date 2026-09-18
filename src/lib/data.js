@@ -183,6 +183,7 @@ export async function getContent() {
     accentColor: settingsByKey.accent_color || undefined,
     welcome: settingsByKey.welcome || {},
     announcement: settingsByKey.announcement || {},
+    confirmationEmail: settingsByKey.confirmation_email || undefined,
     media: (media || []).map((m) => ({
       id: m.id, url: m.url, contentType: m.content_type, sizeBytes: m.size_bytes,
       name: m.name, uploadedAt: m.uploaded_at, storagePath: m.storage_path,
@@ -259,7 +260,7 @@ export async function updateContentFields(patch) {
         name: m.name, storage_path: m.storagePath || null,
       })));
     }
-    for (const [patchKey, settingsKey] of [["gameDay", "game_day"], ["restDay", "rest_day"], ["branding", "branding"], ["welcome", "welcome"], ["announcement", "announcement"], ["accentColor", "accent_color"]]) {
+    for (const [patchKey, settingsKey] of [["gameDay", "game_day"], ["restDay", "rest_day"], ["branding", "branding"], ["welcome", "welcome"], ["announcement", "announcement"], ["accentColor", "accent_color"], ["confirmationEmail", "confirmation_email"]]) {
       if (patch[patchKey] !== undefined) {
         const { error } = await supabase.from("app_settings").upsert({ key: settingsKey, value: patch[patchKey] });
         ok.push(!error);
@@ -286,4 +287,18 @@ export async function uploadImage(file, pathPrefix = "content") {
 export async function deleteStorageObject(path) {
   if (!path) return;
   await supabase.storage.from("media").remove([path]);
+}
+
+// Pushes the confirmation-email template live via the update-confirmation-email
+// Edge Function, which calls Supabase's Management API on our behalf (that API
+// needs an account-level token the client must never hold — see the function's
+// own source for details). Returns { ok } or { ok: false, error }.
+export async function publishConfirmationEmail(fields) {
+  const { data, error } = await supabase.functions.invoke("update-confirmation-email", { body: fields });
+  if (error) {
+    const message = (await error.context?.json?.().catch(() => null))?.error || error.message || "Failed to publish";
+    return { ok: false, error: message };
+  }
+  if (data?.error) return { ok: false, error: data.error };
+  return { ok: true };
 }

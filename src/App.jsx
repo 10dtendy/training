@@ -10,7 +10,7 @@ import {
 import { supabase } from "./lib/supabase.js";
 import {
   fetchCurrentProfile, getUsersMap, updateUserFields, getContent, updateContentFields,
-  uploadImage as uploadToStorage, deleteStorageObject,
+  uploadImage as uploadToStorage, deleteStorageObject, publishConfirmationEmail,
 } from "./lib/data.js";
 
 /* ============================================================================
@@ -76,6 +76,39 @@ const DEFAULT_WELCOME = {
   videoUrl: "", videoAssetId: null,
 };
 const DEFAULT_ANNOUNCEMENT = { enabled: false, id: null, title: "", body: "", videoUrl: "", videoAssetId: null };
+const DEFAULT_CONFIRMATION_EMAIL = {
+  subject: "Confirm your 10DTendy account",
+  heading: "Welcome to 10DTendy",
+  body: "Thanks for signing up. Confirm your email to activate your account and start training.",
+  buttonText: "Confirm email",
+  footer: "If you didn't create this account, you can safely ignore this email.",
+};
+
+// Mirrors the HTML the update-confirmation-email Edge Function builds, so the
+// admin preview matches the real email. Keep the two in sync by hand if either
+// changes — see supabase/functions/update-confirmation-email/index.ts.
+function buildConfirmationEmailHtml({ heading, body, buttonText, footer, accentColor, confirmUrl }) {
+  const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const paragraphs = String(body || "").split("\n").map((p) => p.trim()).filter(Boolean)
+    .map((p) => `<p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#3f3f46;">${esc(p)}</p>`).join("");
+  return `<!DOCTYPE html><html><body style="margin:0;padding:0;background-color:#f4f4f5;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5;padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;">
+        <tr><td style="background-color:${esc(accentColor)};padding:22px 32px;"><span style="color:#ffffff;font-size:18px;font-weight:700;letter-spacing:0.06em;">10DTENDY</span></td></tr>
+        <tr><td style="padding:32px;">
+          <h1 style="margin:0 0 16px;font-size:21px;color:#18181b;">${esc(heading)}</h1>
+          ${paragraphs}
+          <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 28px;"><tr><td style="border-radius:8px;background-color:${esc(accentColor)};">
+            <a href="${esc(confirmUrl)}" style="display:inline-block;padding:14px 30px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">${esc(buttonText)}</a>
+          </td></tr></table>
+          <p style="margin:0;font-size:12px;line-height:1.5;color:#a1a1aa;">${esc(footer)}</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+}
 
 function dateKey(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -3517,6 +3550,78 @@ function AdminWelcome({ content, updateContent }) {
   );
 }
 
+function AdminConfirmationEmail({ content, updateContent }) {
+  const email = content.confirmationEmail || DEFAULT_CONFIRMATION_EMAIL;
+  const accentColor = content.accentColor || DEFAULT_ACCENT;
+  const [showPreview, setShowPreview] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [status, setStatus] = useState(null); // { ok, message }
+
+  const setField = (patch) => {
+    setStatus(null);
+    updateContent((c) => ({ ...c, confirmationEmail: { ...(c.confirmationEmail || DEFAULT_CONFIRMATION_EMAIL), ...patch } }));
+  };
+
+  const publish = async () => {
+    setPublishing(true);
+    setStatus(null);
+    const res = await publishConfirmationEmail({ ...email, accentColor });
+    setPublishing(false);
+    setStatus(res.ok
+      ? { ok: true, message: "Live — new confirmation emails will use this." }
+      : { ok: false, message: res.error || "Failed to publish." });
+  };
+
+  const previewHtml = buildConfirmationEmailHtml({ ...email, accentColor, confirmUrl: "#" });
+
+  return (
+    <div className="admin-page">
+      <h1 className="admin-h1">Confirmation Email</h1>
+      <p className="admin-sub">This is the one email Supabase sends a new goalie or coach — it both welcomes them and verifies their address. Edits here only take effect once you publish.</p>
+
+      <div className="admin-form">
+        <h3>Content</h3>
+        <div className="admin-form-grid">
+          <label className="admin-form-span2">Subject line<input value={email.subject} onChange={(e) => setField({ subject: e.target.value })} /></label>
+          <label className="admin-form-span2">Heading<input value={email.heading} onChange={(e) => setField({ heading: e.target.value })} /></label>
+          <label className="admin-form-span2">Message (one paragraph per line)<textarea rows={4} value={email.body} onChange={(e) => setField({ body: e.target.value })} /></label>
+          <label>Button text<input value={email.buttonText} onChange={(e) => setField({ buttonText: e.target.value })} /></label>
+          <label className="admin-form-span2">Footer note<input value={email.footer} onChange={(e) => setField({ footer: e.target.value })} /></label>
+        </div>
+        <p className="planner-hint">The button always links to the real confirmation link Supabase generates — that part can't be edited. Layout and accent color match the app's Settings page accent.</p>
+        <div className="admin-form-actions">
+          <button className="btn btn--ghost btn--small" onClick={() => setShowPreview(true)}><Eye size={13} /> Preview</button>
+          <button className="btn btn--primary btn--small" disabled={publishing || !email.subject.trim() || !email.heading.trim() || !email.buttonText.trim()} onClick={publish}>
+            <Mail size={13} /> {publishing ? "Publishing…" : "Publish"}
+          </button>
+        </div>
+        {status && (
+          <div className={"email-status" + (status.ok ? " email-status--ok" : " email-status--error")}>
+            {status.ok ? <Check size={14} /> : <AlertTriangle size={14} />} {status.message}
+          </div>
+        )}
+      </div>
+
+      <div className="admin-panel">
+        <h3>First-time setup</h3>
+        <p className="planner-hint">Publishing requires a one-time secret set directly in the Supabase dashboard (never through this app): generate a Personal Access Token under Account → Access Tokens, then add it as <code>SUPABASE_MANAGEMENT_TOKEN</code> under Project Settings → Edge Functions → Secrets. Until that's done, Publish will show an error explaining what's missing.</p>
+      </div>
+
+      {showPreview && (
+        <div className="content-preview-overlay no-print" onClick={() => setShowPreview(false)}>
+          <div className="content-preview-panel email-preview-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="content-preview-header">
+              <span className="content-preview-label">Preview</span>
+              <button className="icon-btn" onClick={() => setShowPreview(false)} aria-label="Close"><X size={16} /></button>
+            </div>
+            <iframe title="Email preview" className="email-preview-frame" srcDoc={previewHtml} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ============================================================================
    ADMIN SHELL
    ============================================================================ */
@@ -3534,6 +3639,7 @@ function AdminApp({ content, updateContent }) {
     { key: "restday", label: "Rest Day", icon: Armchair, bold: true },
     { key: "frontpage", label: "Front Page", icon: LayoutTemplate },
     { key: "welcome", label: "Welcome", icon: Megaphone },
+    { key: "email", label: "Confirmation Email", icon: Mail },
     { key: "users", label: "Users", icon: UsersIcon },
     { key: "media", label: "Media", icon: ImageIcon },
     { key: "settings", label: "Settings", icon: SettingsIcon },
@@ -3558,6 +3664,7 @@ function AdminApp({ content, updateContent }) {
         {section === "restday" && <AdminRestDay content={content} updateContent={updateContent} />}
         {section === "frontpage" && <AdminFrontPage content={content} updateContent={updateContent} />}
         {section === "welcome" && <AdminWelcome content={content} updateContent={updateContent} />}
+        {section === "email" && <AdminConfirmationEmail content={content} updateContent={updateContent} />}
         {section === "users" && <AdminUsers />}
         {section === "media" && <AdminMedia content={content} updateContent={updateContent} />}
         {section === "settings" && <AdminSettings content={content} updateContent={updateContent} />}
@@ -4513,6 +4620,12 @@ button:focus {
 .settings-accent-row { display: flex; align-items: center; gap: 12px; }
 .settings-color-swatch { width: 40px !important; height: 40px; padding: 2px !important; border-radius: 8px; cursor: pointer; }
 .settings-accent-hex { font-family: monospace; font-size: 13px; color: var(--text); }
+
+.email-status { display: flex; align-items: center; gap: 6px; margin-top: 14px; padding: 10px 12px; border-radius: 8px; font-size: 12px; }
+.email-status--ok { background: rgba(34,197,94,0.12); color: #22c55e; }
+.email-status--error { background: rgba(239,68,68,0.12); color: #ef4444; }
+.email-preview-panel { max-width: 560px; }
+.email-preview-frame { width: 100%; height: 520px; border: 0; background: #fff; border-radius: 0 0 var(--radius) var(--radius); }
 
 .admin-sub { font-size: 13px; color: var(--text-dim); margin: -12px 0 20px; max-width: 620px; line-height: 1.5; }
 .front-page-panel-title { font-size: 14px; margin-bottom: 14px; }
