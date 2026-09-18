@@ -4061,7 +4061,9 @@ const CSS = `
   --radius: 14px;
 }
 * { box-sizing: border-box; }
-.app { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; min-height: 100vh; -webkit-font-smoothing: antialiased; }
+html, body { margin: 0; padding: 0; background: var(--bg); height: 100%; overscroll-behavior-y: none; }
+#root { min-height: 100%; }
+.app { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; min-height: 100vh; min-height: 100dvh; -webkit-font-smoothing: antialiased; }
 h1, h2, h3, h4 { font-family: 'Archivo', sans-serif; margin: 0; letter-spacing: -0.02em; }
 button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
 input, select, textarea { font-family: inherit; }
@@ -4118,7 +4120,7 @@ button:focus {
 
 /* ---------------- NAV ---------------- */
 .nav { position: sticky; top: 0; z-index: 20; background: rgba(10,10,12,0.85); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); }
-.nav-inner { max-width: 1280px; margin: 0 auto; padding: 16px 28px; display: flex; align-items: center; justify-content: space-between; }
+.nav-inner { max-width: 1280px; margin: 0 auto; padding: calc(16px + env(safe-area-inset-top)) 28px 16px; display: flex; align-items: center; justify-content: space-between; }
 .nav-logo { display: flex; align-items: center; gap: 10px; font-family: 'Archivo'; font-weight: 900; font-size: 16px; letter-spacing: 0.02em; flex-shrink: 0; }
 .brand-logo { display: block; width: auto; }
 .brand-logo--nav { height: 20px; }
@@ -4186,10 +4188,10 @@ button:focus {
 @media (prefers-reduced-motion: reduce) {
   .t-icon-swap .t-icon { transition: none !important; }
 }
-.admin-topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; padding: 16px 28px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.admin-topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; padding: calc(16px + env(safe-area-inset-top)) 28px 16px; border-bottom: 1px solid var(--border); background: var(--bg); }
 
 /* ---------------- LAYOUT ---------------- */
-.main { max-width: 1280px; margin: 0 auto; padding: 0 28px 80px; }
+.main { max-width: 1280px; margin: 0 auto; padding: 0 28px calc(80px + env(safe-area-inset-bottom)); }
 .page { padding-top: 40px; }
 .detail { max-width: 760px; margin: 0 auto; padding-top: 32px; }
 .back-link { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text-dim); margin-bottom: 28px; }
