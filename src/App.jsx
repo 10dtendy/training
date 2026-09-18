@@ -724,7 +724,8 @@ function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, o
             <button className="icon-btn" onClick={onPrevDay} disabled={!canGoBack} aria-label="Previous day"><ChevronLeft size={15} /></button>
             <div className="eyebrow daytype-eyebrow-stack">
               <span>{weekday}</span>
-              <span className="daytype-eyebrow-date">{dateStr}</span>
+              <span className="daytype-eyebrow-sep"> · </span>
+              <span>{dateStr}</span>
             </div>
             <span className="day-nav-badge">{isGame ? "Game day" : "Rest day"}</span>
             <button className="icon-btn" onClick={onNextDay} disabled={!canGoForward} aria-label="Next day"><ChevronRight size={15} /></button>
@@ -4204,8 +4205,7 @@ button:focus {
 .eyebrow { font-size: 12px; letter-spacing: 0.10em; color: var(--accent); font-weight: 600; margin-bottom: 14px; }
 .eyebrow-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .eyebrow-row .eyebrow { margin-bottom: 0; }
-.daytype-eyebrow-stack { display: flex; flex-direction: column; gap: 2px; line-height: 1.3; }
-.daytype-eyebrow-date { font-size: 11px; letter-spacing: 0.06em; color: var(--text-dim); font-weight: 500; }
+.daytype-eyebrow-stack { display: inline-flex; align-items: baseline; gap: 0; line-height: 1.3; }
 .day-nav-badge { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint); background: var(--surface-2); border: 1px solid var(--border); border-radius: 20px; padding: 3px 8px; white-space: nowrap; flex-shrink: 0; }
 .hero-title { font-size: 44px; font-weight: 900; line-height: 1.02; }
 .hero-sub { color: var(--text-dim); font-size: 16px; margin-top: 10px; }
@@ -4705,6 +4705,8 @@ button:focus {
   .auth-form-wrap { padding: 32px 24px 48px; }
 }
 @media (max-width: 640px) {
+  .daytype-eyebrow-stack { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .daytype-eyebrow-sep { display: none; }
   .hero { flex-direction: column; align-items: flex-start; gap: 20px; }
   .hero-title { font-size: 32px; }
   .ticket {
