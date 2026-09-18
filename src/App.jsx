@@ -4678,6 +4678,7 @@ button:focus {
   .nav-links, .nav-admin-toggle, .nav-level-select { display: none; }
   .nav-mobile-toggle { display: flex; }
   .nav-mobile-panel { display: flex; }
+  .admin-topbar .nav-admin-toggle { display: flex; }
   .bento { grid-template-columns: 1fr; grid-template-rows: auto; }
   .card--drill { grid-row: auto; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
