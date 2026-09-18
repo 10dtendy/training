@@ -4707,8 +4707,8 @@ button:focus {
 .exercise-editor-grid input, .exercise-editor-instructions textarea { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; color: var(--text); font-size: 13px; font-family: inherit; resize: vertical; }
 .exercise-editor-media { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 
-.content-preview-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; }
-.content-preview-panel { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); width: 100%; max-width: 760px; }
+.content-preview-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; display: flex; align-items: flex-start; justify-content: center; padding: 0 16px; overflow-y: auto; }
+.content-preview-panel { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); width: 100%; max-width: 760px; margin: 40px 0; }
 .content-preview-header { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; background: var(--surface); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; z-index: 1; }
 .content-preview-label { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
 .content-preview-panel .main { padding-top: 24px; }
