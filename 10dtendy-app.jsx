@@ -1245,11 +1245,12 @@ function YouTubeEmbed({ url, title, size }) {
         src={`https://www.youtube.com/embed/${id}`} title={title || "YouTube video"}
         allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
         allowFullScreen
+        onContextMenu={(e) => e.preventDefault()}
       />
     );
   }
   return (
-    <button type="button" className="youtube-thumb" onClick={() => setPlaying(true)} aria-label="Play video">
+    <button type="button" className="youtube-thumb" onClick={() => setPlaying(true)} onContextMenu={(e) => e.preventDefault()} aria-label="Play video">
       <img src={`https://img.youtube.com/vi/${id}/hqdefault.jpg`} alt="" className="youtube-thumb-img" />
       <span className={"youtube-play-btn" + (size === "sm" ? " youtube-play-btn--sm" : "")}><Play size={size === "sm" ? 16 : 26} fill="var(--bg)" /></span>
     </button>
@@ -1267,7 +1268,10 @@ function VideoPlayer({ title, poster, src }) {
   if (src) {
     return (
       <div className="video">
-        <video className="video-native" src={src} poster={poster || undefined} controls playsInline />
+        <video
+          className="video-native" src={src} poster={poster || undefined} controls playsInline
+          controlsList="nodownload noremoteplayback" onContextMenu={(e) => e.preventDefault()}
+        />
       </div>
     );
   }
