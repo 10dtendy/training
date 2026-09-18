@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import {
   Play, Pause, Volume2, VolumeX, Maximize, ChevronLeft, ChevronRight,
   Check, Bell, Menu, X, Plus, Pencil, Trash2, Eye, EyeOff,
@@ -803,7 +803,7 @@ function TodayPage({ content, progress, viewDate, experience, canGoBack, canGoFo
   );
 
   const calendarModal = calendarOpen && (
-    <PreviewModal label="Games & Rest" onClose={() => setCalendarOpen(false)}>
+    <PreviewModal label="Games & Rest" onClose={() => setCalendarOpen(false)} resizeIn>
       <ProfileCalendar dayTypes={dayTypes || {}} onSetDayType={onSetDayType} onClose={() => setCalendarOpen(false)} gameLogs={gameLogs} restNotes={restNotes} onLogGame={onLogGame} />
     </PreviewModal>
   );
@@ -994,7 +994,7 @@ function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, o
       </section>
 
       {calendarOpen && (
-        <PreviewModal label="Games & Rest" onClose={() => setCalendarOpen(false)}>
+        <PreviewModal label="Games & Rest" onClose={() => setCalendarOpen(false)} resizeIn>
           <ProfileCalendar dayTypes={dayTypes || {}} onSetDayType={onSetDayType} onClose={() => setCalendarOpen(false)} gameLogs={gameLogs} restNotes={restNotes} onLogGame={onLogGame} />
         </PreviewModal>
       )}
@@ -2229,10 +2229,45 @@ function MediaFields({ draft, media }) {
   );
 }
 
-function PreviewModal({ label, onClose, children }) {
+function PreviewModal({ label, onClose, children, resizeIn }) {
+  const panelRef = useRef(null);
+  const [size, setSize] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [settled, setSettled] = useState(false);
+
+  useLayoutEffect(() => {
+    if (!resizeIn) return;
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setSettled(true);
+      return;
+    }
+    const el = panelRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setSize({ w: rect.width, h: rect.height });
+  }, [resizeIn]);
+
+  useEffect(() => {
+    if (!resizeIn || !size) return;
+    const raf = requestAnimationFrame(() => setOpen(true));
+    return () => cancelAnimationFrame(raf);
+  }, [resizeIn, size]);
+
+  const resizeStyle = !resizeIn || settled
+    ? undefined
+    : size
+      ? { width: open ? size.w : 44, height: open ? size.h : 44, overflow: "hidden" }
+      : { visibility: "hidden" };
+
   return (
     <div className="content-preview-overlay" onClick={onClose}>
-      <div className="content-preview-panel" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={panelRef}
+        className={"content-preview-panel" + (resizeIn ? " t-resize" : "")}
+        style={resizeStyle}
+        onClick={(e) => e.stopPropagation()}
+        onTransitionEnd={() => resizeIn && open && setSettled(true)}
+      >
         <div className="content-preview-header">
           <span className="content-preview-label">{label}</span>
           <button className="icon-btn" onClick={onClose} aria-label="Close preview"><X size={16} /></button>
@@ -4677,6 +4712,24 @@ button:focus {
 .content-preview-header { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; background: var(--surface); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; z-index: 1; }
 .content-preview-label { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
 .content-preview-panel .main { padding-top: 24px; }
+
+/* Transitions.dev — Card resize. Grows a panel from a small box to its
+   natural size on mount; put .t-resize on the element and change its
+   width/height (see PreviewModal's resizeIn prop for how the size is
+   measured and applied). */
+:root {
+  --resize-dur: 300ms;
+  --resize-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+.t-resize {
+  transition:
+    width  var(--resize-dur) var(--resize-ease),
+    height var(--resize-dur) var(--resize-ease);
+  will-change: width, height;
+}
+@media (prefers-reduced-motion: reduce) {
+  .t-resize { transition: none !important; }
+}
 .welcome-panel { max-width: 560px; }
 .welcome-modal-body { padding: 8px 28px 28px; }
 .welcome-title { font-size: 24px; font-weight: 900; margin-bottom: 16px; }
