@@ -669,6 +669,20 @@ function AuthScreen({ onAuthed }) {
 
 function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen, user, onLogout, previewLevel, setPreviewLevel, dayType, onGoToday, reminders }) {
   const [notifOpen, setNotifOpen] = useState(false);
+  const mobileMorphRef = useRef(null);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    // The plus/× trigger fades out (opacity 0, pointer-events none) while the
+    // menu is open, so tapping outside is the only way to dismiss without
+    // picking an item.
+    const onDocPointerDown = (e) => {
+      if (mobileMorphRef.current && !mobileMorphRef.current.contains(e.target)) setMobileOpen(false);
+    };
+    document.addEventListener("pointerdown", onDocPointerDown);
+    return () => document.removeEventListener("pointerdown", onDocPointerDown);
+  }, [mobileOpen, setMobileOpen]);
+
   const items = dayType
     ? [
         { key: "today", label: dayType === "game" ? "Game Day" : "Rest Day", view: "today" },
@@ -682,6 +696,7 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
         { key: "progress", label: "Progress", view: "progress" },
       ];
   return (
+    <>
     <header className="nav">
       <div className="nav-inner">
         <button className="nav-logo" onClick={() => { setIsAdmin(false); onGoToday(); }}>
@@ -736,37 +751,38 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
             {user.photoUrl ? <img src={user.photoUrl} alt="" className="nav-avatar-img" /> : initials(user.name)}
           </button>
           <button className="nav-icon-btn" aria-label="Log out" onClick={onLogout}><LogOut size={16} /></button>
-          <button className="nav-icon-btn nav-mobile-toggle" aria-label="Menu" onClick={() => setMobileOpen((v) => !v)}>
-            {mobileOpen ? <X size={19} /> : <Menu size={19} />}
-          </button>
         </div>
       </div>
-
-      {mobileOpen && (
-        <div className="nav-mobile-panel">
-          {items.map((it) => (
-            <button key={it.key} className="nav-mobile-link"
-              onClick={() => { setIsAdmin(false); if (it.key === "today") onGoToday(); else setView(it.view); setMobileOpen(false); }}>
-              {it.label}
-            </button>
-          ))}
-          {user.role === "coach" && (
-            <div className="nav-mobile-level">
-              <span>Preview level</span>
-              <select value={previewLevel} onChange={(e) => setPreviewLevel(e.target.value)}>
-                {EXPERIENCE_LEVELS.map((lv) => <option key={lv} value={lv}>{lv}</option>)}
-              </select>
-            </div>
-          )}
-          {user.role === "coach" && (
-            <button className="nav-mobile-link"
-              onClick={() => { setIsAdmin((v) => !v); setMobileOpen(false); }}>
-              {isAdmin ? "Exit admin" : "Admin"}
-            </button>
-          )}
-        </div>
-      )}
     </header>
+
+    <div className="t-morph nav-mobile-morph" data-open={mobileOpen} ref={mobileMorphRef}>
+      <div className="t-morph-menu">
+        {items.map((it) => (
+          <button key={it.key} className="nav-mobile-link"
+            onClick={() => { setIsAdmin(false); if (it.key === "today") onGoToday(); else setView(it.view); setMobileOpen(false); }}>
+            {it.label}
+          </button>
+        ))}
+        {user.role === "coach" && (
+          <div className="nav-mobile-level">
+            <span>Preview level</span>
+            <select value={previewLevel} onChange={(e) => setPreviewLevel(e.target.value)}>
+              {EXPERIENCE_LEVELS.map((lv) => <option key={lv} value={lv}>{lv}</option>)}
+            </select>
+          </div>
+        )}
+        {user.role === "coach" && (
+          <button className="nav-mobile-link"
+            onClick={() => { setIsAdmin((v) => !v); setMobileOpen(false); }}>
+            {isAdmin ? "Exit admin" : "Admin"}
+          </button>
+        )}
+      </div>
+      <button className="t-morph-plus" aria-expanded={mobileOpen} aria-label={mobileOpen ? "Close menu" : "Open menu"} onClick={() => setMobileOpen((v) => !v)}>
+        <Plus size={19} />
+      </button>
+    </div>
+    </>
   );
 }
 
@@ -4306,9 +4322,105 @@ button:focus {
 .nav-notif-empty { padding: 16px 14px; font-size: 13px; color: var(--text-dim); margin: 0; }
 .nav-notif-list { list-style: none; margin: 0; padding: 6px; display: flex; flex-direction: column; gap: 4px; }
 .nav-notif-list li { font-size: 13px; line-height: 1.4; padding: 10px; border-radius: 8px; background: var(--surface-2); }
-.nav-mobile-toggle { display: none; }
-.nav-mobile-panel { display: none; flex-direction: column; padding: 8px 20px 16px; gap: 2px; border-top: 1px solid var(--border); }
 .nav-mobile-link { text-align: left; padding: 12px 8px; font-size: 15px; color: var(--text-dim); border-bottom: 1px solid var(--border); }
+
+/* Transitions.dev — Plus to menu morph */
+:root {
+  --morph-open-dur: 350ms;
+  --morph-close-dur: 250ms;
+  --morph-ease: cubic-bezier(0.34, 1.25, 0.64, 1);
+  --morph-close-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --morph-r-closed: 40px;
+  --morph-r-open: 20px;
+  --morph-fade-dur: 200ms;
+  --morph-slide: 40px;
+  --morph-rotate: 45deg;
+  --morph-scale: 0.97;
+  --morph-blur: 2px;
+}
+.t-morph {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--morph-r-closed);
+  overflow: hidden;
+  transition:
+    width var(--morph-close-dur) var(--morph-close-ease),
+    height var(--morph-close-dur) var(--morph-close-ease),
+    border-radius var(--morph-close-dur) var(--morph-close-ease);
+}
+.t-morph[data-open="true"] {
+  width: 183px;
+  height: 172px;
+  border-radius: var(--morph-r-open);
+  transition:
+    width var(--morph-open-dur) var(--morph-ease),
+    height var(--morph-open-dur) var(--morph-ease),
+    border-radius var(--morph-open-dur) var(--morph-ease);
+}
+.t-morph-plus {
+  position: absolute;
+  inset: auto 0 0 auto;
+  width: 40px; height: 40px;
+  display: grid; place-items: center;
+  border: 0; background: transparent; cursor: pointer;
+  transition:
+    opacity var(--morph-fade-dur) var(--morph-close-ease),
+    transform var(--morph-open-dur) var(--morph-close-ease),
+    filter var(--morph-fade-dur) var(--morph-close-ease);
+}
+.t-morph-plus svg {
+  transition: transform var(--morph-open-dur) var(--morph-close-ease);
+}
+.t-morph[data-open="true"] .t-morph-plus {
+  opacity: 0;
+  transform: translateX(calc(-1 * var(--morph-slide)));
+  filter: blur(var(--morph-blur));
+  pointer-events: none;
+}
+.t-morph[data-open="true"] .t-morph-plus svg {
+  transform: scale(var(--morph-scale)) rotate(var(--morph-rotate));
+}
+.t-morph-menu {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transform: translateX(var(--morph-slide)) scale(var(--morph-scale));
+  filter: blur(var(--morph-blur));
+  pointer-events: none;
+  transition:
+    opacity var(--morph-fade-dur) var(--morph-close-ease),
+    transform var(--morph-open-dur) var(--morph-close-ease),
+    filter var(--morph-fade-dur) var(--morph-close-ease);
+}
+.t-morph[data-open="true"] .t-morph-menu {
+  opacity: 1;
+  transform: translateX(0) scale(1);
+  filter: blur(0);
+  pointer-events: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .t-morph, .t-morph-plus, .t-morph-menu { transition: none !important; }
+}
+
+/* App wiring: floating mobile nav trigger, grows up-left out of its
+   bottom-right corner (the plus/× button pins to that corner via the
+   .t-morph-plus inset rule above). Hidden above the 900px nav-links
+   breakpoint. */
+.nav-mobile-morph {
+  display: none;
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 90;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 30px rgba(0,0,0,0.4);
+}
+.nav-mobile-morph .t-morph-plus { background: var(--accent); color: var(--bg); border-radius: 50%; }
+.nav-mobile-morph .t-morph-menu { display: flex; flex-direction: column; padding: 8px 10px; overflow-y: auto; }
+.nav-mobile-morph .nav-mobile-link { padding: 8px 6px; font-size: 14px; }
+.nav-mobile-morph .nav-mobile-level { padding: 8px 6px; font-size: 12px; }
 .admin-topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; padding: 16px 28px; border-bottom: 1px solid var(--border); background: var(--bg); }
 
 /* ---------------- LAYOUT ---------------- */
@@ -4791,8 +4903,7 @@ button:focus {
 /* ---------------- RESPONSIVE ---------------- */
 @media (max-width: 900px) {
   .nav-links, .nav-admin-toggle, .nav-level-select { display: none; }
-  .nav-mobile-toggle { display: flex; }
-  .nav-mobile-panel { display: flex; }
+  .nav-mobile-morph { display: block; }
   .bento { grid-template-columns: 1fr; grid-template-rows: auto; }
   .card--drill { grid-row: auto; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
