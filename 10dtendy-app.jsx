@@ -1394,6 +1394,11 @@ function FocusDetailPage({ focus, branding, onBack, complete, onComplete }) {
       </section>
       <section className="detail-block"><h2>Why it matters</h2><p>{focus.explanation}</p></section>
       <section className="detail-block"><h2>Today's cue</h2><div className="cue-highlight">{focus.cue}</div></section>
+      {(focus.blocks || []).map((b) => (
+        b.type === "image" ? (b.imageUrl && <img key={b.id} src={b.imageUrl} alt="" className="focus-block-image" />)
+        : b.type === "video" ? (b.videoUrl && <VideoPlayer key={b.id} title={focus.title} src={b.videoUrl} />)
+        : (b.body && <section key={b.id} className="detail-block">{b.heading && <h2>{b.heading}</h2>}<p>{b.body}</p></section>)
+      ))}
       <button className={"btn btn--complete" + (complete ? " btn--complete-done" : "")} onClick={onComplete}>
         {complete ? <><Check size={16} /> Practice focus complete</> : "Mark practice focus complete"}
       </button>
@@ -2661,7 +2666,137 @@ function AdminCategories({ content, updateContent }) {
 const BLANK_FOCUS = {
   title: "", explanation: "", cue: "", category: "", published: false,
   imageAssetId: null, imageUrl: "", videoAssetId: null, videoUrl: "",
+  blocks: [],
 };
+
+// Uploads/removes photo or video for one block inside draft.blocks, keyed by the
+// block's own id — mirrors useExerciseMedia (see AdminOffIce) so state stays
+// correct even after blocks are added, removed, or reordered.
+function useBlockMedia(setDraft) {
+  const [uploading, setUploading] = useState({});
+  const [errors, setErrors] = useState({});
+  const inputRefs = useRef({});
+
+  const getRef = (blockId) => {
+    if (!inputRefs.current[blockId]) inputRefs.current[blockId] = React.createRef();
+    return inputRefs.current[blockId];
+  };
+
+  const patchBlock = (blockId, patch) => {
+    setDraft((d) => ({ ...d, blocks: d.blocks.map((b) => (b.id === blockId ? { ...b, ...patch } : b)) }));
+  };
+
+  const upload = async (blockId, file) => {
+    setErrors((e) => ({ ...e, [blockId]: "" }));
+    setUploading((u) => ({ ...u, [blockId]: true }));
+    try {
+      const assets = await getAssets();
+      if (!assets) {
+        setErrors((e) => ({ ...e, [blockId]: "Photo uploads aren't available — this artifact needs to be published with the assets capability enabled." }));
+        return;
+      }
+      const res = await assets.upload(file);
+      patchBlock(blockId, { imageAssetId: res.id, imageUrl: res.url });
+    } catch (err) {
+      setErrors((e) => ({ ...e, [blockId]: err?.message || "Upload failed. Please try again." }));
+    } finally {
+      setUploading((u) => ({ ...u, [blockId]: false }));
+    }
+  };
+
+  return {
+    uploading, errors, getRef,
+    onPick: (blockId) => (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) upload(blockId, f); },
+    removeImage: (blockId) => patchBlock(blockId, { imageAssetId: null, imageUrl: "" }),
+    setVideoUrl: (blockId, url) => patchBlock(blockId, { videoAssetId: null, videoUrl: url }),
+    clearError: (blockId) => setErrors((e) => ({ ...e, [blockId]: "" })),
+  };
+}
+
+// Lets a coach build up a practice focus with more than one photo/video plus
+// free-form text, in whatever order they want — on top of the single hero
+// image/video and the two fixed text fields above.
+function FocusBlocksEditor({ blocks, setDraft, blockMedia }) {
+  const setBlocks = (updater) => setDraft((d) => ({ ...d, blocks: updater(d.blocks) }));
+  const updateField = (id, field, value) => setBlocks((list) => list.map((b) => (b.id === id ? { ...b, [field]: value } : b)));
+  const removeBlock = (id) => {
+    if (!window.confirm("Remove this content block?")) return;
+    setBlocks((list) => list.filter((b) => b.id !== id));
+  };
+  const moveBlock = (id, dir) => setBlocks((list) => {
+    const i = list.findIndex((b) => b.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= list.length) return list;
+    const next = list.slice();
+    [next[i], next[j]] = [next[j], next[i]];
+    return next;
+  });
+  const addBlock = (type) => setBlocks((list) => [
+    ...list,
+    type === "image" ? { id: uid("blk"), type, imageAssetId: null, imageUrl: "" }
+      : type === "video" ? { id: uid("blk"), type, videoAssetId: null, videoUrl: "" }
+      : { id: uid("blk"), type, heading: "", body: "" },
+  ]);
+  const typeLabel = { image: "Photo", video: "Video", text: "Text" };
+
+  return (
+    <div className="admin-form-span2 exercise-editor">
+      <span className="media-field-label">Additional content</span>
+      {blocks.length === 0 && <p className="exercise-editor-empty">No additional photos, videos, or text yet — add one below.</p>}
+      <div className="exercise-editor-list">
+        {blocks.map((b, i) => (
+          <div className="exercise-editor-card" key={b.id}>
+            <div className="exercise-editor-card-head">
+              <span className="exercise-editor-num">{i + 1}</span>
+              <span className="block-type-label">{typeLabel[b.type]}</span>
+              <div className="exercise-editor-card-actions">
+                <button type="button" className="icon-btn" onClick={() => moveBlock(b.id, -1)} disabled={i === 0} aria-label="Move up"><ChevronLeft size={14} style={{ transform: "rotate(90deg)" }} /></button>
+                <button type="button" className="icon-btn" onClick={() => moveBlock(b.id, 1)} disabled={i === blocks.length - 1} aria-label="Move down"><ChevronLeft size={14} style={{ transform: "rotate(-90deg)" }} /></button>
+                <button type="button" className="icon-btn" onClick={() => removeBlock(b.id)} aria-label="Remove block"><Trash2 size={14} /></button>
+              </div>
+            </div>
+
+            {b.type === "image" && (
+              <div className="media-field">
+                {b.imageUrl ? (
+                  <div className="media-field-preview">
+                    <img src={b.imageUrl} alt="" className="media-thumb media-thumb--lg" />
+                    <button type="button" className="btn btn--ghost btn--small" onClick={() => blockMedia.removeImage(b.id)}>Remove</button>
+                  </div>
+                ) : (
+                  <button type="button" className="upload-dropzone upload-dropzone--small" onClick={() => blockMedia.getRef(b.id).current?.click()} disabled={blockMedia.uploading[b.id]}>
+                    <UploadCloud size={16} />
+                    <span>{blockMedia.uploading[b.id] ? "Uploading…" : "Click to upload a photo"}</span>
+                  </button>
+                )}
+                <input ref={blockMedia.getRef(b.id)} type="file" accept="image/*" onChange={blockMedia.onPick(b.id)} style={{ display: "none" }} />
+                {blockMedia.errors[b.id] && <div className="auth-error"><AlertTriangle size={13} /> {blockMedia.errors[b.id]}</div>}
+              </div>
+            )}
+
+            {b.type === "video" && (
+              <YouTubeField value={b.videoUrl} onChange={(url) => blockMedia.setVideoUrl(b.id, url)} label="Video" className="media-field" />
+            )}
+
+            {b.type === "text" && (
+              <>
+                <label className="exercise-editor-instructions">Heading (optional)
+                  <input className="exercise-editor-title" value={b.heading} onChange={(e) => updateField(b.id, "heading", e.target.value)} placeholder="e.g. Coaching point" />
+                </label>
+                <label className="exercise-editor-instructions">Text<textarea rows={3} value={b.body} onChange={(e) => updateField(b.id, "body", e.target.value)} /></label>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="block-add-row">
+        <button type="button" className="btn btn--ghost btn--small" onClick={() => addBlock("image")}><Camera size={13} /> Add photo</button>
+        <button type="button" className="btn btn--ghost btn--small" onClick={() => addBlock("video")}><VideoIcon size={13} /> Add video</button>
+        <button type="button" className="btn btn--ghost btn--small" onClick={() => addBlock("text")}><FileText size={13} /> Add text</button>
+      </div>
+    </div>
+  );
+}
 
 function AdminFocusPoints({ content, updateContent }) {
   const [editingId, setEditingId] = useState(null);
@@ -2669,6 +2804,7 @@ function AdminFocusPoints({ content, updateContent }) {
   const [draft, setDraft] = useState(BLANK_FOCUS);
   const [previewFocus, setPreviewFocus] = useState(null);
   const media = useMediaFields(setDraft);
+  const blockMedia = useBlockMedia(setDraft);
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
 
@@ -2679,7 +2815,7 @@ function AdminFocusPoints({ content, updateContent }) {
     return matchesSearch && matchesCategory;
   });
 
-  const startEdit = (f) => { setEditingId(f.id); setDraft({ ...f }); setCreating(false); media.clearError(); };
+  const startEdit = (f) => { setEditingId(f.id); setDraft({ ...f, blocks: f.blocks || [] }); setCreating(false); media.clearError(); };
   const startCreate = () => { setCreating(true); setEditingId(null); setDraft(BLANK_FOCUS); media.clearError(); };
   const cancel = () => { setCreating(false); setEditingId(null); setDraft(BLANK_FOCUS); media.clearError(); };
   const commit = (built) => {
@@ -2710,7 +2846,7 @@ function AdminFocusPoints({ content, updateContent }) {
 
   // Duplicating opens the new copy straight into edit mode so it's easy to rename/adjust.
   const duplicate = (f) => {
-    const copy = { ...f, id: uid("f"), title: `${f.title} (Copy)` };
+    const copy = { ...f, id: uid("f"), title: `${f.title} (Copy)`, blocks: f.blocks || [] };
     updateContent((c) => ({ ...c, focusPoints: [...c.focusPoints, copy] }));
     setCreating(false);
     setEditingId(copy.id);
@@ -2741,6 +2877,8 @@ function AdminFocusPoints({ content, updateContent }) {
             <label className="admin-form-span2">Today's cue<input value={draft.cue} onChange={(e) => setDraft({ ...draft, cue: e.target.value })} /></label>
 
             <MediaFields draft={draft} media={media} />
+
+            <FocusBlocksEditor blocks={draft.blocks} setDraft={setDraft} blockMedia={blockMedia} />
 
             <label className="auth-field admin-form-span2" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <input type="checkbox" checked={!!draft.published} onChange={(e) => setDraft({ ...draft, published: e.target.checked })} style={{ width: "auto" }} />
@@ -4529,6 +4667,7 @@ button:focus {
 .mistake-col p { margin: 6px 0 0; font-size: 14px; color: var(--text-dim); }
 .mistake-col--right p { color: var(--accent); opacity: 0.9; }
 .cue-highlight { background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 12px; padding: 18px 20px; font-size: 17px; font-weight: 600; color: var(--text); }
+.focus-block-image { width: 100%; display: block; border-radius: var(--radius); margin-bottom: 28px; }
 .focus-hero { margin-bottom: 36px; position: relative; }
 .focus-hero-title { font-size: 34px; font-weight: 900; line-height: 1.15; margin-top: 14px; max-width: 520px; }
 .focus-hero-glow { height: 2px; width: 70px; background: var(--accent); box-shadow: 0 0 18px 2px var(--accent); margin-top: 22px; border-radius: 2px; }
@@ -4744,6 +4883,8 @@ button:focus {
 .exercise-editor-grid label, .exercise-editor-instructions { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-dim); }
 .exercise-editor-grid input, .exercise-editor-instructions textarea { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; color: var(--text); font-size: 13px; font-family: inherit; resize: vertical; }
 .exercise-editor-media { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.block-type-label { flex: 1; font-size: 12px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
+.block-add-row { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .content-preview-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; display: flex; align-items: flex-start; justify-content: center; padding: 0 16px; overflow-y: auto; }
 .content-preview-panel { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); width: 100%; max-width: 760px; margin: 40px 0; }
