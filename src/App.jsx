@@ -2989,6 +2989,8 @@ function AdminTrainingDays({ content, updateContent }) {
   const [drillCat, setDrillCat] = useState("");
   const [focusCat, setFocusCat] = useState("");
   const [officeCat, setOfficeCat] = useState("");
+  const [copyingId, setCopyingId] = useState(null);
+  const [copyAfter, setCopyAfter] = useState(0);
 
   const list = content.trainingDays?.[level] || [];
   const setList = (next) =>
@@ -3006,6 +3008,13 @@ function AdminTrainingDays({ content, updateContent }) {
   const removeDay = (i) => {
     if (!window.confirm(`Delete Day ${i + 1}? Every later day moves up one, so goalies partway through this list will see different training next.`)) return;
     setList(list.filter((_, idx) => idx !== i));
+  };
+
+  const openCopy = (day) => { setCopyingId(day.id); setCopyAfter(list.length); };
+  const copyDay = (i) => {
+    const copy = { ...list[i], id: crypto.randomUUID() };
+    setList([...list.slice(0, copyAfter), copy, ...list.slice(copyAfter)]);
+    setCopyingId(null);
   };
 
   const dayIsEmpty = (d) => !d.drillId && !d.focusId && !d.workoutId;
@@ -3036,9 +3045,25 @@ function AdminTrainingDays({ content, updateContent }) {
             <div className="admin-row-actions">
               <button className="icon-btn" onClick={() => moveDay(i, -1)} disabled={i === 0} aria-label={`Move Day ${i + 1} up`}><ChevronUp size={15} /></button>
               <button className="icon-btn" onClick={() => moveDay(i, 1)} disabled={i === list.length - 1} aria-label={`Move Day ${i + 1} down`}><ChevronDown size={15} /></button>
+              <button className="icon-btn" onClick={() => (copyingId === day.id ? setCopyingId(null) : openCopy(day))} aria-label={`Copy Day ${i + 1}`}><Copy size={15} /></button>
               <button className="icon-btn" onClick={() => removeDay(i)} aria-label={`Delete Day ${i + 1}`}><Trash2 size={15} /></button>
             </div>
           </div>
+
+          {copyingId === day.id && (
+            <div className="training-day-copy">
+              <label>Insert a copy of Day {i + 1} after
+                <select value={copyAfter} onChange={(e) => setCopyAfter(Number(e.target.value))}>
+                  {list.map((_, k) => <option key={k} value={k + 1}>Day {k + 1}{k + 1 === list.length ? " (end of list)" : ""}</option>)}
+                </select>
+              </label>
+              <p className="planner-hint">The copy becomes Day {copyAfter + 1}{copyAfter < list.length ? `, and every day after it moves down one` : ""}.</p>
+              <div className="admin-form-actions" style={{ marginTop: 0 }}>
+                <button className="btn btn--ghost btn--small" onClick={() => setCopyingId(null)}>Cancel</button>
+                <button className="btn btn--primary btn--small" onClick={() => copyDay(i)}><Copy size={13} /> Insert copy</button>
+              </div>
+            </div>
+          )}
 
           <div className="admin-form-grid" style={{ marginBottom: 20 }}>
             <label>Title (optional)
@@ -4474,6 +4499,10 @@ button:focus {
 .admin-form-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-dim); }
 .admin-form-grid input, .admin-form-grid select, .admin-form-grid textarea { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; color: var(--text); font-size: 13px; font-family: inherit; resize: vertical; }
 .admin-form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.training-day-copy { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 18px; display: flex; flex-direction: column; gap: 10px; }
+.training-day-copy label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-dim); }
+.training-day-copy select { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; color: var(--text); font-size: 13px; }
+.training-day-copy .planner-hint { margin: 0; }
 .admin-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .admin-table th { text-align: left; padding: 10px 12px; color: var(--text-faint); font-weight: 500; border-bottom: 1px solid var(--border); font-size: 11px; letter-spacing: 0.04em; }
 .admin-table td { padding: 12px; border-bottom: 1px solid var(--border); color: var(--text-dim); }
