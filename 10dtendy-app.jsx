@@ -4242,14 +4242,14 @@ button:focus {
 /* ---------------- NAV ---------------- */
 .nav { position: sticky; top: 0; z-index: 20; background: rgba(10,10,12,0.85); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); }
 .nav-inner { max-width: 1280px; margin: 0 auto; padding: 16px 28px; display: flex; align-items: center; justify-content: space-between; }
-.nav-logo { display: flex; align-items: center; gap: 10px; font-family: 'Archivo'; font-weight: 900; font-size: 16px; letter-spacing: 0.02em; }
+.nav-logo { display: flex; align-items: center; gap: 10px; font-family: 'Archivo'; font-weight: 900; font-size: 16px; letter-spacing: 0.02em; flex-shrink: 0; }
 .brand-logo { display: block; width: auto; }
 .brand-logo--nav { height: 20px; }
 .brand-logo--auth { height: 26px; }
 .brand-logo--print { height: 16px; }
 .admin-badge { font-size: 11px; letter-spacing: 0.1em; color: var(--text-dim); font-weight: 600; }
 .nav-links { display: flex; gap: 6px; }
-.nav-link { padding: 8px 14px; border-radius: 20px; font-size: 14px; color: var(--text-dim); transition: all .18s ease; }
+.nav-link { padding: 8px 14px; border-radius: 20px; font-size: 14px; color: var(--text-dim); transition: all .18s ease; white-space: nowrap; flex-shrink: 0; }
 .nav-link:hover { color: var(--text); }
 .nav-link--active { color: var(--bg); background: var(--accent); font-weight: 600; }
 .nav-right { display: flex; align-items: center; gap: 8px; }
@@ -4288,7 +4288,7 @@ button:focus {
 .eyebrow { font-size: 12px; letter-spacing: 0.10em; color: var(--accent); font-weight: 600; margin-bottom: 14px; }
 .eyebrow-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .eyebrow-row .eyebrow { margin-bottom: 0; }
-.day-nav-badge { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint); background: var(--surface-2); border: 1px solid var(--border); border-radius: 20px; padding: 3px 8px; }
+.day-nav-badge { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint); background: var(--surface-2); border: 1px solid var(--border); border-radius: 20px; padding: 3px 8px; white-space: nowrap; flex-shrink: 0; }
 .hero-title { font-size: 44px; font-weight: 900; line-height: 1.02; }
 .hero-sub { color: var(--text-dim); font-size: 16px; margin-top: 10px; }
 .ticket-ring-wrap { position: relative; width: 64px; height: 64px; flex-shrink: 0; }
@@ -4737,6 +4737,9 @@ button:focus {
 
 /* ---------------- RESPONSIVE ---------------- */
 @media (max-width: 900px) {
+  .nav-links, .nav-admin-toggle, .nav-level-select { display: none; }
+  .nav-mobile-toggle { display: flex; }
+  .nav-mobile-panel { display: flex; }
   .bento { grid-template-columns: 1fr; grid-template-rows: auto; }
   .card--drill { grid-row: auto; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
@@ -4757,9 +4760,6 @@ button:focus {
   .auth-form-wrap { padding: 32px 24px 48px; }
 }
 @media (max-width: 640px) {
-  .nav-links, .nav-admin-toggle, .nav-level-select { display: none; }
-  .nav-mobile-toggle { display: flex; }
-  .nav-mobile-panel { display: flex; }
   .hero { flex-direction: column; align-items: flex-start; gap: 20px; }
   .hero-title { font-size: 32px; }
   .ticket {
