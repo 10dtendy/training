@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import {
-  Play, Pause, Volume2, VolumeX, Maximize, ChevronLeft, ChevronRight,
+  Play, Pause, Volume2, VolumeX, Maximize, ChevronLeft, ChevronRight, ChevronUp, ChevronDown,
   Check, Bell, Menu, X, Plus, Pencil, Trash2, Eye, EyeOff,
   Calendar as CalendarIcon, LayoutGrid, Target, Users as UsersIcon,
   Image as ImageIcon, Settings as SettingsIcon, Download, Gauge, LogOut,
@@ -18,7 +18,7 @@ import {
    users_v1   — shared  — { [emailLower]: { name, email, password, position,
                             experience, role, createdAt } }
    session_v1 — personal — { email }  (keeps this browser/account signed in)
-   content_v1 — shared  — { drills, focusPoints, offIceWorkouts, dailyAssignments }
+   content_v1 — shared  — { drills, focusPoints, offIceWorkouts, trainingDays }
 
    NOTE ON SECURITY: this is a UX prototype, not production auth. Passwords
    are stored in plain text in the artifact's shared `db` capability, which
@@ -126,16 +126,29 @@ function uid(prefix) {
   return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-// A goalie's own calendar marking always wins; "none" is an explicit personal override
-// (e.g. "I know the coach scheduled a rest day, but I'm playing") that beats the coach's
-// team-wide schedule for that date + experience level. Absent personal marking falls back
-// to whatever the coach scheduled for that level in the Daily Training planner.
-function resolveDayType(u, content, dateKeyStr, level) {
+// A goalie's own calendar marking: "game", "rest", or nothing (a normal training day).
+// "none" is what the calendar writes when a day is cleared back to normal.
+function resolveDayType(u, dateKeyStr) {
   const personal = (u.dayTypes || {})[dateKeyStr];
-  if (personal === "none") return null;
-  if (personal) return personal;
-  const scheduled = content.dailyAssignments[dateKeyStr]?.[level];
-  return scheduled && scheduled.isRestDay ? "rest" : null;
+  return personal === "game" || personal === "rest" ? personal : null;
+}
+
+// Each goalie walks their level's ordered training-day list at their own pace: Day 1 is
+// the day they signed up, and every later calendar day advances one step — except days
+// they've marked as a game or rest day, which don't use up a training day. Returns the
+// training-day object for `dateKeyStr`, or null if that date is itself a game/rest day
+// or the coach hasn't created that many training days yet.
+function trainingDayForDate(content, user, dateKeyStr, level) {
+  if (resolveDayType(user, dateKeyStr)) return null;
+  const signup = new Date(user.createdAt || TODAY_DATE.getTime());
+  let cursor = new Date(signup.getFullYear(), signup.getMonth(), signup.getDate());
+  if (dateKeyStr < dateKey(cursor)) return null;
+  let index = 0;
+  while (dateKey(cursor) < dateKeyStr) {
+    if (!resolveDayType(user, dateKey(cursor))) index++;
+    cursor = addDays(cursor, 1);
+  }
+  return (content.trainingDays?.[level] || [])[index] || null;
 }
 
 // The notification bell's content — always computed fresh from today's date and the
@@ -145,10 +158,10 @@ function resolveDayType(u, content, dateKeyStr, level) {
 function getReminders(user, content, level) {
   if (!user || user.role === "coach" || !content) return [];
   const reminders = [];
-  if (resolveDayType(user, content, dateKey(TODAY_DATE), level) === "game") {
+  if (resolveDayType(user, dateKey(TODAY_DATE)) === "game") {
     reminders.push({ id: "game", text: "Game day today — good luck out there." });
   }
-  if (resolveDayType(user, content, dateKey(addDays(TODAY_DATE, -1)), level) === "rest") {
+  if (resolveDayType(user, dateKey(addDays(TODAY_DATE, -1))) === "rest") {
     reminders.push({ id: "rest", text: "You rested yesterday — time to get back to training today." });
   }
   return reminders;
@@ -516,10 +529,8 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
    TODAY PAGE
    ============================================================================ */
 
-function TodayPage({ content, progress, viewDate, experience, canGoBack, canGoForward, onPrevDay, onNextDay, openDrill, openFocus, openOffice, onDownloadPDF, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame }) {
+function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoForward, onPrevDay, onNextDay, openDrill, openFocus, openOffice, onDownloadPDF, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame }) {
   const [calendarOpen, setCalendarOpen] = useState(false);
-  const dayAssignments = content.dailyAssignments[dateKey(viewDate)];
-  const assignment = dayAssignments && dayAssignments[experience];
   const drill = assignment && content.drills.find((d) => d.id === assignment.drillId && d.published);
   const focus = assignment && content.focusPoints.find((f) => f.id === assignment.focusId && f.published);
   const office = assignment && content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published);
@@ -1606,7 +1617,7 @@ function ProgressPage({ user, content }) {
   const joinedKey = dateKey(activeUser?.createdAt ? new Date(activeUser.createdAt) : TODAY_DATE);
   const cells = Array.from({ length: 35 }, (_, i) => {
     const dateStr = dateKey(addDays(TODAY_DATE, -(34 - i)));
-    const dayType = activeUser ? resolveDayType(activeUser, content, dateStr, level) : null;
+    const dayType = activeUser ? resolveDayType(activeUser, dateStr) : null;
     if (dayType === "game") return "game";
     if (dayType === "rest") return "rest";
     if (joinedKey && dateStr < joinedKey) return "none";
@@ -1754,22 +1765,12 @@ function ProgressPage({ user, content }) {
 
 const ONLINE_THRESHOLD_MS = 3 * 60 * 1000;
 const SCHEDULE_HEALTH_WINDOW_DAYS = 7;
-const DAYS_AHEAD_CHECK_CAP = 60;
 
-function levelHasPlan(content, level, dayOffset) {
-  const a = content.dailyAssignments[dateKey(addDays(TODAY_DATE, dayOffset))]?.[level];
-  return !!(a && (a.drillId || a.focusId || a.workoutId || a.isRestDay));
-}
-function daysPlannedAhead(content, level) {
-  let count = 0;
-  while (count < DAYS_AHEAD_CHECK_CAP && levelHasPlan(content, level, count)) count++;
-  return count;
+function trainingDayCount(content, level) {
+  return (content.trainingDays?.[level] || []).length;
 }
 function levelScheduleIsHealthy(content, level) {
-  for (let i = 0; i < SCHEDULE_HEALTH_WINDOW_DAYS; i++) {
-    if (!levelHasPlan(content, level, i)) return false;
-  }
-  return true;
+  return trainingDayCount(content, level) >= SCHEDULE_HEALTH_WINDOW_DAYS;
 }
 
 function AdminDashboard({ content }) {
@@ -1779,7 +1780,6 @@ function AdminDashboard({ content }) {
   const goalies = users ? Object.values(users).filter((u) => u.role !== "coach") : [];
   const onlineCount = goalies.filter((u) => u.lastActive && Date.now() - u.lastActive < ONLINE_THRESHOLD_MS).length;
 
-  const dayAssignments = content.dailyAssignments[dateKey(TODAY_DATE)] || {};
   return (
     <div className="admin-page">
       <h1 className="admin-h1">Dashboard</h1>
@@ -1792,18 +1792,18 @@ function AdminDashboard({ content }) {
 
       <div className="admin-panel">
         <h3>Training schedule health</h3>
-        <p className="planner-hint">Green means the next {SCHEDULE_HEALTH_WINDOW_DAYS} days are fully planned for that level; red means a day in that window has nothing assigned.</p>
+        <p className="planner-hint">Green means at least {SCHEDULE_HEALTH_WINDOW_DAYS} training days are queued for that level; red means fewer than that are ready, so goalies could run out soon.</p>
         <div className="dashboard-health-grid">
           {EXPERIENCE_LEVELS.map((lv) => {
             const healthy = levelScheduleIsHealthy(content, lv);
-            const ahead = daysPlannedAhead(content, lv);
+            const ahead = trainingDayCount(content, lv);
             return (
               <div className="dashboard-health-card" key={lv}>
                 <div className="dashboard-health-head">
                   <span className={"dashboard-health-dot" + (healthy ? " dashboard-health-dot--ok" : " dashboard-health-dot--warn")} />
                   <span>{lv}</span>
                 </div>
-                <span className="dashboard-health-days">{ahead} day{ahead === 1 ? "" : "s"} planned ahead</span>
+                <span className="dashboard-health-days">{ahead} training day{ahead === 1 ? "" : "s"} queued</span>
               </div>
             );
           })}
@@ -1811,24 +1811,18 @@ function AdminDashboard({ content }) {
       </div>
 
       <div className="admin-panel">
-        <h3>Today's assignment — {dateKey(TODAY_DATE)}</h3>
+        <h3>What new signups see first — Day 1</h3>
         {EXPERIENCE_LEVELS.map((lv) => {
-          const assignment = dayAssignments[lv];
+          const assignment = content.trainingDays?.[lv]?.[0];
           const drill = assignment && content.drills.find((d) => d.id === assignment.drillId);
           const focus = assignment && content.focusPoints.find((f) => f.id === assignment.focusId);
           const office = assignment && content.offIceWorkouts.find((o) => o.id === assignment.workoutId);
           return (
             <div className="dashboard-level-block" key={lv}>
               <div className="dashboard-level-title">{lv}</div>
-              {assignment?.isRestDay ? (
-                <div className="assign-row"><span className="assign-label">Status</span><span>Rest day</span></div>
-              ) : (
-                <>
-                  <div className="assign-row"><span className="assign-label">Drill</span><span>{drill ? drill.title : "Not assigned"}{drill && !drill.published && <span className="chip" style={{ marginLeft: 6 }}>Draft — hidden from goalies</span>}</span></div>
-                  <div className="assign-row"><span className="assign-label">Focus</span><span>{focus ? focus.title : "Not assigned"}{focus && !focus.published && <span className="chip" style={{ marginLeft: 6 }}>Draft — hidden from goalies</span>}</span></div>
-                  <div className="assign-row"><span className="assign-label">Off-ice</span><span>{office ? office.title : "Not assigned"}{office && !office.published && <span className="chip" style={{ marginLeft: 6 }}>Draft — hidden from goalies</span>}</span></div>
-                </>
-              )}
+              <div className="assign-row"><span className="assign-label">Drill</span><span>{drill ? drill.title : "Not assigned"}{drill && !drill.published && <span className="chip" style={{ marginLeft: 6 }}>Draft — hidden from goalies</span>}</span></div>
+              <div className="assign-row"><span className="assign-label">Focus</span><span>{focus ? focus.title : "Not assigned"}{focus && !focus.published && <span className="chip" style={{ marginLeft: 6 }}>Draft — hidden from goalies</span>}</span></div>
+              <div className="assign-row"><span className="assign-label">Off-ice</span><span>{office ? office.title : "Not assigned"}{office && !office.published && <span className="chip" style={{ marginLeft: 6 }}>Draft — hidden from goalies</span>}</span></div>
             </div>
           );
         })}
@@ -1849,14 +1843,14 @@ const BLANK_DRILL = {
 
 function parseLines(text) { return text.split("\n").map((s) => s.trim()).filter(Boolean); }
 
-// How many day+level slots in the daily planner currently point at this id — surfaced in
+// How many training days (across all levels) currently point at this id — surfaced in
 // the delete confirmation so a coach knows deleting will leave those days with a gap,
 // rather than finding out only when a goalie sees "not assigned yet" with no explanation.
 function countDailyAssignmentUses(content, field, id) {
   let count = 0;
-  for (const day of Object.values(content.dailyAssignments || {})) {
-    for (const lvl of EXPERIENCE_LEVELS) {
-      if (day?.[lvl]?.[field] === id) count++;
+  for (const lvl of EXPERIENCE_LEVELS) {
+    for (const day of content.trainingDays?.[lvl] || []) {
+      if (day[field] === id) count++;
     }
   }
   return count;
@@ -2113,7 +2107,7 @@ function AdminDrills({ content, updateContent }) {
   const remove = (id) => {
     const uses = countDailyAssignmentUses(content, "drillId", id);
     const msg = uses > 0
-      ? `This drill is assigned on ${uses} day${uses === 1 ? "" : "s"} in the daily planner — deleting it will leave those days without a drill. Delete anyway?`
+      ? `This drill is used in ${uses} training day${uses === 1 ? "" : "s"} — deleting it will leave those days without a drill. Delete anyway?`
       : "Delete this drill? This can't be undone.";
     if (!window.confirm(msg)) return;
     updateContent((c) => ({ ...c, drills: c.drills.filter((d) => d.id !== id) }));
@@ -2571,7 +2565,7 @@ function AdminFocusPoints({ content, updateContent }) {
       + (content.gameDay?.focusId === id ? 1 : 0)
       + (content.restDay?.focusId === id ? 1 : 0);
     const msg = uses > 0
-      ? `This practice focus is assigned in ${uses} place${uses === 1 ? "" : "s"} (the daily planner and/or Game Day/Rest Day) — deleting it will leave those without a focus. Delete anyway?`
+      ? `This practice focus is assigned in ${uses} place${uses === 1 ? "" : "s"} (a training day and/or Game Day/Rest Day) — deleting it will leave those without a focus. Delete anyway?`
       : "Delete this practice focus? This can't be undone.";
     if (!window.confirm(msg)) return;
     updateContent((c) => ({ ...c, focusPoints: c.focusPoints.filter((f) => f.id !== id) }));
@@ -2852,7 +2846,7 @@ function AdminOffIce({ content, updateContent }) {
   const remove = (id) => {
     const uses = countDailyAssignmentUses(content, "workoutId", id);
     const msg = uses > 0
-      ? `This workout is assigned on ${uses} day${uses === 1 ? "" : "s"} in the daily planner — deleting it will leave those days without an off-ice workout. Delete anyway?`
+      ? `This workout is used in ${uses} training day${uses === 1 ? "" : "s"} — deleting it will leave those days without an off-ice workout. Delete anyway?`
       : "Delete this workout? This can't be undone.";
     if (!window.confirm(msg)) return;
     updateContent((c) => ({ ...c, offIceWorkouts: c.offIceWorkouts.filter((o) => o.id !== id) }));
@@ -2990,103 +2984,89 @@ function AssignmentPicker({ label, icon: Icon, items, categories, value, onChang
   );
 }
 
-function AdminCalendar({ content, updateContent }) {
-  const [monthOffset, setMonthOffset] = useState(0);
-  const [selected, setSelected] = useState(dateKey(TODAY_DATE));
+function AdminTrainingDays({ content, updateContent }) {
   const [level, setLevel] = useState("Youth");
   const [drillCat, setDrillCat] = useState("");
   const [focusCat, setFocusCat] = useState("");
   const [officeCat, setOfficeCat] = useState("");
 
-  const base = new Date(TODAY_DATE.getFullYear(), TODAY_DATE.getMonth() + monthOffset, 1);
-  const year = base.getFullYear(), month = base.getMonth();
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const cells = [...Array(firstDay).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
-
-  const dayAssignments = content.dailyAssignments[selected] || {};
-  const current = dayAssignments[level] || { drillId: "", focusId: "", workoutId: "", title: "", subtitle: "", isRestDay: false };
-
-  const levelHasAssignment = (lv) => {
-    const a = dayAssignments[lv];
-    return !!(a && (a.drillId || a.focusId || a.workoutId || a.isRestDay));
+  const list = content.trainingDays?.[level] || [];
+  const setList = (next) =>
+    updateContent((c) => ({ ...c, trainingDays: { ...c.trainingDays, [level]: next } }));
+  const updateDay = (i, patch) => setList(list.map((d, idx) => (idx === i ? { ...d, ...patch } : d)));
+  const addDay = () =>
+    setList([...list, { id: crypto.randomUUID(), drillId: "", focusId: "", workoutId: "", title: "", subtitle: "" }]);
+  const moveDay = (i, dir) => {
+    const j = i + dir;
+    if (j < 0 || j >= list.length) return;
+    const next = [...list];
+    [next[i], next[j]] = [next[j], next[i]];
+    setList(next);
   };
-  const dateHasAnyAssignment = (key) => {
-    const day = content.dailyAssignments[key];
-    return !!(day && EXPERIENCE_LEVELS.some((lv) => day[lv] && (day[lv].drillId || day[lv].focusId || day[lv].workoutId || day[lv].isRestDay)));
+  const removeDay = (i) => {
+    if (!window.confirm(`Delete Day ${i + 1}? Every later day moves up one, so goalies partway through this list will see different training next.`)) return;
+    setList(list.filter((_, idx) => idx !== i));
   };
 
-  const setField = (field, value) =>
-    updateContent((c) => {
-      const day = c.dailyAssignments[selected] || {};
-      const dayLevel = day[level] || { drillId: "", focusId: "", workoutId: "", title: "", subtitle: "", isRestDay: false };
-      return { ...c, dailyAssignments: { ...c.dailyAssignments, [selected]: { ...day, [level]: { ...dayLevel, [field]: value } } } };
-    });
+  const dayIsEmpty = (d) => !d.drillId && !d.focusId && !d.workoutId;
 
   return (
     <div className="admin-page">
-      <h1 className="admin-h1">Daily training</h1>
-      <div className="calendar-admin">
-        <div className="calendar-admin-nav">
-          <button className="icon-btn" onClick={() => setMonthOffset((m) => m - 1)}><ChevronLeft size={16} /></button>
-          <span>{MONTH_NAMES[month]} {year}</span>
-          <button className="icon-btn" onClick={() => setMonthOffset((m) => m + 1)}><ChevronRight size={16} /></button>
-        </div>
-        <div className="calendar-admin-grid">
-          {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <div key={i} className="calendar-admin-dow">{d}</div>)}
-          {cells.map((day, i) => {
-            if (!day) return <div key={i} />;
-            const key = dateKey(new Date(year, month, day));
-            return <button key={i} className={"calendar-admin-cell" + (key === selected ? " selected" : "") + (dateHasAnyAssignment(key) ? " assigned" : "")} onClick={() => setSelected(key)}>{day}</button>;
-          })}
-        </div>
-      </div>
+      <h1 className="admin-h1">Training days</h1>
+      <p className="admin-sub">Build the ordered list each level works through. A new goalie starts at Day 1 the day they sign up and moves to the next day each calendar day — days they mark as a game or rest day don't use one up.</p>
 
       <div className="admin-panel">
         <div className="planner-header">
-          <h3>Assign — {selected}</h3>
+          <h3>{level} — {list.length} training day{list.length === 1 ? "" : "s"}</h3>
           <div className="level-tabs">
             {EXPERIENCE_LEVELS.map((lv) => (
               <button key={lv} type="button" className={"level-tab" + (level === lv ? " active" : "")} onClick={() => setLevel(lv)}>
-                {lv}{levelHasAssignment(lv) && <span className="level-tab-dot" />}
+                {lv}{(content.trainingDays?.[lv] || []).length > 0 && <span className="level-tab-dot" />}
               </button>
             ))}
           </div>
         </div>
-        <p className="planner-hint">Each experience level gets its own drill, practice focus, and off-ice workout — a goalie only sees the plan for their own level.</p>
+        <p className="planner-hint">Goalies are already partway through this list once they've signed up, so inserting, deleting, or reordering days changes what each of them sees next. Adding new days at the end is always safe.</p>
+      </div>
 
-        <div className="admin-form-grid" style={{ marginBottom: 20 }}>
-          <label className="admin-form-span2">Title (optional)
-            <input value={current.title || ""} onChange={(e) => setField("title", e.target.value)} placeholder="e.g. Today's training." />
-          </label>
-          <label className="admin-form-span2">Subtitle (optional)
-            <input value={current.subtitle || ""} onChange={(e) => setField("subtitle", e.target.value)} placeholder="e.g. Three things to focus on today." />
-          </label>
-          <label className="auth-field admin-form-span2" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <input type="checkbox" checked={!!current.isRestDay} onChange={(e) => setField("isRestDay", e.target.checked)} style={{ width: "auto" }} />
-            <span>Mark as a rest day for {level} goalies</span>
-          </label>
-        </div>
+      {list.map((day, i) => (
+        <div className="admin-panel training-day-card" key={day.id}>
+          <div className="planner-header">
+            <h3>Day {i + 1}{dayIsEmpty(day) && <span className="chip" style={{ marginLeft: 8 }}>Empty</span>}</h3>
+            <div className="admin-row-actions">
+              <button className="icon-btn" onClick={() => moveDay(i, -1)} disabled={i === 0} aria-label={`Move Day ${i + 1} up`}><ChevronUp size={15} /></button>
+              <button className="icon-btn" onClick={() => moveDay(i, 1)} disabled={i === list.length - 1} aria-label={`Move Day ${i + 1} down`}><ChevronDown size={15} /></button>
+              <button className="icon-btn" onClick={() => removeDay(i)} aria-label={`Delete Day ${i + 1}`}><Trash2 size={15} /></button>
+            </div>
+          </div>
 
-        {current.isRestDay ? (
-          <p className="planner-hint">{level} goalies will see your Rest Day content (set in the Rest Day section) on this date instead of a drill, practice focus, or off-ice workout — unless they've personally logged something different for themselves.</p>
-        ) : (
+          <div className="admin-form-grid" style={{ marginBottom: 20 }}>
+            <label>Title (optional)
+              <input defaultValue={day.title} placeholder="e.g. Today's training." onBlur={(e) => e.target.value !== day.title && updateDay(i, { title: e.target.value })} />
+            </label>
+            <label>Subtitle (optional)
+              <input defaultValue={day.subtitle} placeholder="e.g. Three things to focus on today." onBlur={(e) => e.target.value !== day.subtitle && updateDay(i, { subtitle: e.target.value })} />
+            </label>
+          </div>
+
           <div className="planner-grid">
             <AssignmentPicker
               label="Drill of the day" icon={Goal} items={content.drills} categories={categoriesOfType(content, "drill")}
-              value={current.drillId} onChange={(v) => setField("drillId", v)} categoryFilter={drillCat} onCategoryFilterChange={setDrillCat}
+              value={day.drillId} onChange={(v) => updateDay(i, { drillId: v })} categoryFilter={drillCat} onCategoryFilterChange={setDrillCat}
             />
             <AssignmentPicker
               label="Practice focus" icon={Target} items={content.focusPoints} categories={categoriesOfType(content, "focus")}
-              value={current.focusId} onChange={(v) => setField("focusId", v)} categoryFilter={focusCat} onCategoryFilterChange={setFocusCat}
+              value={day.focusId} onChange={(v) => updateDay(i, { focusId: v })} categoryFilter={focusCat} onCategoryFilterChange={setFocusCat}
             />
             <AssignmentPicker
               label="Off-Ice" icon={CircleDot} items={content.offIceWorkouts} categories={categoriesOfType(content, "office")}
-              value={current.workoutId} onChange={(v) => setField("workoutId", v)} categoryFilter={officeCat} onCategoryFilterChange={setOfficeCat}
+              value={day.workoutId} onChange={(v) => updateDay(i, { workoutId: v })} categoryFilter={officeCat} onCategoryFilterChange={setOfficeCat}
             />
           </div>
-        )}
-      </div>
+        </div>
+      ))}
+
+      <button className="btn btn--primary" onClick={addDay}><Plus size={15} /> Add training day</button>
     </div>
   );
 }
@@ -3633,7 +3613,7 @@ function AdminApp({ content, updateContent }) {
   const [section, setSection] = useState("dashboard");
   const nav = [
     { key: "dashboard", label: "Dashboard", icon: LayoutGrid },
-    { key: "calendar", label: "Daily Training", icon: CalendarIcon },
+    { key: "calendar", label: "Training Days", icon: CalendarIcon },
     { key: "categories", label: "Categories", icon: Tag },
     { key: "drills", label: "Drills", icon: Goal, bold: true },
     { key: "focus", label: "Practice Focus", icon: Target, bold: true },
@@ -3658,7 +3638,7 @@ function AdminApp({ content, updateContent }) {
       </aside>
       <div className="admin-content">
         {section === "dashboard" && <AdminDashboard content={content} />}
-        {section === "calendar" && <AdminCalendar content={content} updateContent={updateContent} />}
+        {section === "calendar" && <AdminTrainingDays content={content} updateContent={updateContent} />}
         {section === "drills" && <AdminDrills content={content} updateContent={updateContent} />}
         {section === "categories" && <AdminCategories content={content} updateContent={updateContent} />}
         {section === "focus" && <AdminFocusPoints content={content} updateContent={updateContent} />}
@@ -3680,10 +3660,8 @@ function AdminApp({ content, updateContent }) {
    PRINT SHEET
    ============================================================================ */
 
-function PrintSheet({ content, date, experience }) {
+function PrintSheet({ content, date, assignment }) {
   const printDate = date || TODAY_DATE;
-  const dayAssignments = content.dailyAssignments[dateKey(printDate)];
-  const assignment = dayAssignments && dayAssignments[experience || "Junior"];
   const drill = assignment && content.drills.find((d) => d.id === assignment.drillId && d.published);
   const focus = assignment && content.focusPoints.find((f) => f.id === assignment.focusId && f.published);
   const office = assignment && content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published);
@@ -3893,7 +3871,17 @@ function AppInner() {
       const next = fn(prev);
       const patch = {};
       for (const key of Object.keys(next)) {
-        if (next[key] !== prev[key]) patch[key] = next[key];
+        if (next[key] === prev[key]) continue;
+        if (key === "trainingDays") {
+          // Only the levels whose list actually changed, so editing one level never rewrites the others.
+          const changed = {};
+          for (const lv of EXPERIENCE_LEVELS) {
+            if (next.trainingDays[lv] !== prev.trainingDays?.[lv]) changed[lv] = next.trainingDays[lv];
+          }
+          patch.trainingDays = changed;
+        } else {
+          patch[key] = next[key];
+        }
       }
       updateContentFields(patch);
       return next;
@@ -3908,7 +3896,12 @@ function AppInner() {
     });
   };
 
-  const onAuthed = (u) => setUser(u);
+  // Content tables are only readable once signed in, so the fetch at page load (before
+  // login) comes back empty — pull it again now that there's a session.
+  const onAuthed = async (u) => {
+    setContent(await getContent());
+    setUser(u);
+  };
   const changePassword = async (newPassword) => {
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     return !error;
@@ -3970,12 +3963,11 @@ function AppInner() {
 
   const isCoach = user.role === "coach";
   const experience = isCoach ? previewLevel : (EXPERIENCE_LEVELS.includes(user.experience) ? user.experience : "Junior");
-  const dayAssignments = content.dailyAssignments[dateKey(viewDate)];
-  const assignment = dayAssignments && dayAssignments[experience];
+  const assignment = trainingDayForDate(content, user, dateKey(viewDate), experience);
   const drill = assignment && content.drills.find((d) => d.id === assignment.drillId && d.published);
   const focus = assignment && content.focusPoints.find((f) => f.id === assignment.focusId && f.published);
   const office = assignment && content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published);
-  const dayType = resolveDayType(user, content, dateKey(viewDate), experience);
+  const dayType = resolveDayType(user, dateKey(viewDate));
   const reminders = getReminders(user, content, experience);
 
   return (
@@ -4017,7 +4009,7 @@ function AppInner() {
                 />
               ) : (
                 <TodayPage
-                  content={content} progress={progress} viewDate={viewDate} experience={experience}
+                  content={content} progress={progress} viewDate={viewDate} assignment={assignment}
                   canGoBack={canGoBack} canGoForward={canGoForward} onPrevDay={goPrevDay} onNextDay={goNextDay}
                   openDrill={() => goTo("drill")} openFocus={() => goTo("focus")} openOffice={() => goTo("office")} onDownloadPDF={handlePDF}
                   dayTypes={user.dayTypes || {}} onSetDayType={setDayType}
@@ -4036,7 +4028,7 @@ function AppInner() {
         )}
       </main>
 
-      <PrintSheet content={content} date={viewDate} experience={experience} />
+      <PrintSheet content={content} date={viewDate} assignment={assignment} />
 
       {welcomeOpen && <WelcomeModal label="Welcome" data={content.welcome} onClose={markWelcomeSeen} />}
       {announcementOpen && <WelcomeModal label="Announcement" data={content.announcement} onClose={markAnnouncementSeen} />}

@@ -133,13 +133,13 @@ const LEVELS = ["Youth", "Junior", "Pro"];
 export async function getContent() {
   const [
     { data: drills }, { data: focusPoints }, { data: offIceWorkouts },
-    { data: categories }, { data: dailyAssignments }, { data: media }, { data: settings },
+    { data: categories }, { data: trainingDays }, { data: media }, { data: settings },
   ] = await Promise.all([
     supabase.from("drills").select("*").order("created_at"),
     supabase.from("focus_points").select("*").order("created_at"),
     supabase.from("off_ice_workouts").select("*").order("created_at"),
     supabase.from("categories").select("*"),
-    supabase.from("daily_assignments").select("*"),
+    supabase.from("training_days").select("*").order("position"),
     supabase.from("media").select("*").order("uploaded_at", { ascending: false }),
     supabase.from("app_settings").select("*"),
   ]);
@@ -161,11 +161,12 @@ export async function getContent() {
     published: o.published, imageAssetId: null, imageUrl: o.image_url || "", videoAssetId: null, videoUrl: o.video_url || "",
   });
 
-  const dailyAssignmentsShape = {};
-  for (const row of dailyAssignments || []) {
-    (dailyAssignmentsShape[row.date] ||= {})[row.level] = {
-      drillId: row.drill_id, focusId: row.focus_id, workoutId: row.workout_id,
-    };
+  const trainingDaysShape = { Youth: [], Junior: [], Pro: [] };
+  for (const row of trainingDays || []) {
+    trainingDaysShape[row.level]?.push({
+      id: row.id, drillId: row.drill_id || "", focusId: row.focus_id || "", workoutId: row.workout_id || "",
+      title: row.title || "", subtitle: row.subtitle || "",
+    });
   }
 
   const settingsByKey = {};
@@ -176,7 +177,7 @@ export async function getContent() {
     focusPoints: (focusPoints || []).map(toFocusShape),
     offIceWorkouts: (offIceWorkouts || []).map(toWorkoutShape),
     categories: (categories || []).map((c) => ({ name: c.name, type: c.type })),
-    dailyAssignments: dailyAssignmentsShape,
+    trainingDays: trainingDaysShape,
     gameDay: settingsByKey.game_day || {},
     restDay: settingsByKey.rest_day || {},
     branding: settingsByKey.branding || {},
@@ -204,6 +205,27 @@ async function reconcileTable(table, nextRows, toRow) {
   if (toDelete.length) ops.push(supabase.from(table).delete().in("id", toDelete));
   const results = await Promise.all(ops);
   return results.every((r) => !r.error);
+}
+
+// Each level's list is saved as delete-then-insert (so a reorder/removal can never trip
+// unique(level, position) mid-write). Writes are chained one after another: two quick
+// edits running concurrently could interleave their delete and insert steps and lose rows.
+let trainingDaysWriteChain = Promise.resolve();
+async function writeTrainingDays(byLevel) {
+  let allOk = true;
+  for (const level of LEVELS) {
+    const list = byLevel[level];
+    if (!list) continue;
+    const { error: delErr } = await supabase.from("training_days").delete().eq("level", level);
+    const rows = list.map((d, position) => ({
+      id: d.id, level, position,
+      drill_id: d.drillId || null, focus_id: d.focusId || null, workout_id: d.workoutId || null,
+      title: d.title || null, subtitle: d.subtitle || null,
+    }));
+    const { error: insErr } = rows.length ? await supabase.from("training_days").insert(rows) : { error: null };
+    if (delErr || insErr) allOk = false;
+  }
+  return allOk;
 }
 
 export async function updateContentFields(patch) {
@@ -240,19 +262,10 @@ export async function updateContentFields(patch) {
         ok.push(!insErr);
       } else ok.push(false);
     }
-    if (patch.dailyAssignments) {
-      const rows = [];
-      for (const [date, byLevel] of Object.entries(patch.dailyAssignments)) {
-        for (const level of LEVELS) {
-          const a = byLevel?.[level];
-          if (a && (a.drillId || a.focusId || a.workoutId)) {
-            rows.push({ date, level, drill_id: a.drillId || null, focus_id: a.focusId || null, workout_id: a.workoutId || null });
-          }
-        }
-      }
-      const { error: delErr } = await supabase.from("daily_assignments").delete().in("date", Object.keys(patch.dailyAssignments));
-      const { error: insErr } = rows.length ? await supabase.from("daily_assignments").upsert(rows) : { error: null };
-      ok.push(!delErr && !insErr);
+    if (patch.trainingDays) {
+      const run = trainingDaysWriteChain.then(() => writeTrainingDays(patch.trainingDays));
+      trainingDaysWriteChain = run.catch(() => {});
+      ok.push(await run);
     }
     if (patch.media) {
       ok.push(await reconcileTable("media", patch.media, (m) => ({
