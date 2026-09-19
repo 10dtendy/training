@@ -151,18 +151,35 @@ function trainingDayForDate(content, user, dateKeyStr, level) {
   return (content.trainingDays?.[level] || [])[index] || null;
 }
 
-// The notification bell's content — always computed fresh from today's date and the
-// goalie's own calendar marking, never stored, so it can't go stale or need a "seen"
-// flag: a game-day reminder for today, and a "get back to training" nudge the day
-// after a marked rest day. Coaches don't have a personal schedule, so they get none.
-function getReminders(user, content, level) {
-  if (!user || user.role === "coach" || !content) return [];
+// The notification bell's content — always computed fresh from the goalie's own calendar
+// markings and logs, never stored, so it can't go stale or need a "seen" flag. For today and
+// the days goalies can still go back to, a game day with no stats logged (or a rest day with
+// no note) asks them to fill it in; each entry carries its date so tapping it opens that day.
+// Also a "get back to training" nudge the day after a rest day. Coaches have no personal
+// schedule, so they get none.
+function getReminders(user) {
+  if (!user || user.role === "coach") return [];
   const reminders = [];
-  if (resolveDayType(user, dateKey(TODAY_DATE)) === "game") {
-    reminders.push({ id: "game", text: "Game day today — good luck out there." });
+  for (let offset = 0; offset <= MAX_DAYS_BACK; offset++) {
+    const day = addDays(TODAY_DATE, -offset);
+    const key = dateKey(day);
+    const type = resolveDayType(user, key);
+    const when = offset === 0 ? "today" : offset === 1 ? "yesterday" : "on " + WEEKDAY_NAMES[day.getDay()];
+    if (type === "game" && !(user.gameLogs || {})[key]) {
+      reminders.push({
+        id: "game-" + key, date: key,
+        text: offset === 0 ? "Game day today — good luck out there. Log your stats when it's done." : "You had a game " + when + " — log your stats.",
+      });
+    }
+    if (type === "rest" && !(user.restNotes || {})[key]) {
+      reminders.push({
+        id: "restnote-" + key, date: key,
+        text: offset === 0 ? "Rest day today — jot down what you did." : "You rested " + when + " — add a note about what you did.",
+      });
+    }
   }
-  if (resolveDayType(user, dateKey(addDays(TODAY_DATE, -1))) === "rest") {
-    reminders.push({ id: "rest", text: "You rested yesterday — time to get back to training today." });
+  if (resolveDayType(user, dateKey(addDays(TODAY_DATE, -1))) === "rest" && !resolveDayType(user, dateKey(TODAY_DATE))) {
+    reminders.push({ id: "rest-back", text: "You rested yesterday — time to get back to training today." });
   }
   return reminders;
 }
@@ -419,7 +436,7 @@ function AuthScreen({ onAuthed }) {
    NAV
    ============================================================================ */
 
-function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen, user, onLogout, previewLevel, setPreviewLevel, dayType, onGoToday, reminders }) {
+function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen, user, onLogout, previewLevel, setPreviewLevel, dayType, onGoToday, reminders, onOpenReminder }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const items = dayType
     ? [
@@ -478,7 +495,13 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
                   <p className="nav-notif-empty">No reminders right now.</p>
                 ) : (
                   <ul className="nav-notif-list">
-                    {reminders.map((r) => <li key={r.id}>{r.text}</li>)}
+                    {reminders.map((r) => (
+                      <li key={r.id}>
+                        {r.date ? (
+                          <button className="nav-notif-item" onClick={() => { setNotifOpen(false); onOpenReminder(r.date); }}>{r.text}</button>
+                        ) : r.text}
+                      </li>
+                    ))}
                   </ul>
                 )}
               </div>
@@ -3966,6 +3989,14 @@ function AppInner() {
   // the day I was already looking at", but the nav's "Today" (and the logo) mean
   // literally today — without this, browsing a past day and clicking "Today" left
   // you stuck on that past date since only the view changed, never viewDate.
+  const openReminderDate = (dateStr) => {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    setIsAdmin(false);
+    setMobileOpen(false);
+    setView("today");
+    setViewDate(new Date(y, m - 1, d));
+    window.scrollTo?.({ top: 0, behavior: "smooth" });
+  };
   const goToToday = () => { setView("today"); setViewDate(TODAY_DATE); window.scrollTo?.({ top: 0, behavior: "smooth" }); };
   const handlePDF = () => window.print();
 
@@ -3993,7 +4024,7 @@ function AppInner() {
   const focus = assignment && content.focusPoints.find((f) => f.id === assignment.focusId && f.published);
   const office = assignment && content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published);
   const dayType = resolveDayType(user, dateKey(viewDate));
-  const reminders = getReminders(user, content, experience);
+  const reminders = getReminders(user);
 
   return (
     <div className="app">
@@ -4004,7 +4035,7 @@ function AppInner() {
         <NavBar
           view={view} setView={goTo} isAdmin={isAdmin} setIsAdmin={setIsAdmin} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen}
           user={user} onLogout={onLogout} previewLevel={previewLevel} setPreviewLevel={setPreviewLevel} dayType={dayType} onGoToday={goToToday}
-          reminders={reminders}
+          reminders={reminders} onOpenReminder={openReminderDate}
         />
       )}
       {isAdmin && (
@@ -4170,6 +4201,9 @@ button:focus {
 .nav-notif-empty { padding: 16px 14px; font-size: 13px; color: var(--text-dim); margin: 0; }
 .nav-notif-list { list-style: none; margin: 0; padding: 6px; display: flex; flex-direction: column; gap: 4px; }
 .nav-notif-list li { font-size: 13px; line-height: 1.4; padding: 10px; border-radius: 8px; background: var(--surface-2); }
+.nav-notif-list li:has(.nav-notif-item) { padding: 0; }
+.nav-notif-item { display: block; width: 100%; text-align: left; padding: 10px; border-radius: 8px; font-size: 13px; line-height: 1.4; color: var(--text); }
+.nav-notif-item:hover { background: var(--accent-dim); }
 .nav-mobile-toggle { display: none; }
 .nav-mobile-panel { display: none; flex-direction: column; padding: 8px 20px 16px; gap: 2px; border-top: 1px solid var(--border); }
 .nav-mobile-link { text-align: left; padding: 12px 8px; font-size: 15px; color: var(--text-dim); border-bottom: 1px solid var(--border); }
