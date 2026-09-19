@@ -169,8 +169,13 @@ export async function getContent() {
     });
   }
 
+  // Rows are seeded as an empty {} until the coach first saves them; hand those to the app
+  // as "not set" so each screen falls back to its own defaults instead of a blank object.
   const settingsByKey = {};
-  for (const row of settings || []) settingsByKey[row.key] = row.value;
+  for (const row of settings || []) {
+    const v = row.value;
+    settingsByKey[row.key] = v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0 ? undefined : v;
+  }
 
   return {
     drills: (drills || []).map(toDrillShape),
@@ -178,12 +183,12 @@ export async function getContent() {
     offIceWorkouts: (offIceWorkouts || []).map(toWorkoutShape),
     categories: (categories || []).map((c) => ({ name: c.name, type: c.type })),
     trainingDays: trainingDaysShape,
-    gameDay: settingsByKey.game_day || {},
-    restDay: settingsByKey.rest_day || {},
+    gameDay: settingsByKey.game_day,
+    restDay: settingsByKey.rest_day,
     branding: settingsByKey.branding || {},
     accentColor: settingsByKey.accent_color || undefined,
-    welcome: settingsByKey.welcome || {},
-    announcement: settingsByKey.announcement || {},
+    welcome: settingsByKey.welcome,
+    announcement: settingsByKey.announcement,
     confirmationEmail: settingsByKey.confirmation_email || undefined,
     media: (media || []).map((m) => ({
       id: m.id, url: m.url, contentType: m.content_type, sizeBytes: m.size_bytes,
