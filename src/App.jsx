@@ -56,14 +56,10 @@ const REST_DAY_BANNER_SRC = "https://cylzjvrzikgakethelst.supabase.co/storage/v1
 
 
 
-// Coach/admin sign-up is invite-only: the public form only ever creates a
-// "goalie" account. Sharing a link with #invite=<code> appended pre-fills
-// this code and offers the coach role during sign-up. Change this to your
-// own private value before sharing — since this is a client-side prototype
-// with no server, anyone who reads the page source could find this string,
-// so treat it as a shared secret between you and people you trust, not as
-// real access control. A production build should check invites server-side.
-const COACH_INVITE_CODE = "10DTENDY-COACH-2026";
+// Coach/admin sign-up is invite-only: the public form only ever creates a "goalie"
+// account unless a valid invite code is entered. The code is checked by the database
+// (handle_new_user) and lives only there — never in this file, since this repo is public.
+// Sharing a link with #invite=<code> appended pre-fills the field during sign-up.
 
 const _now = new Date();
 const TODAY_DATE = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate());
@@ -283,7 +279,7 @@ function AuthScreen({ onAuthed }) {
   const [inviteCode, setInviteCode] = useState("");
   const [checkEmail, setCheckEmail] = useState(false);
 
-  // A shared link can look like ...#invite=10DTENDY-COACH-2026 — when present,
+  // A shared link can look like ...#invite=<code> — when present,
   // switch to sign-up and pre-fill the code so the recipient doesn't need to
   // know it's even a thing unless you've told them.
   useEffect(() => {
@@ -307,10 +303,6 @@ function AuthScreen({ onAuthed }) {
       return;
     }
     const trimmedInvite = inviteCode.trim();
-    if (mode === "signup" && inviteOpen && trimmedInvite && trimmedInvite !== COACH_INVITE_CODE) {
-      setError("That invite code isn't valid.");
-      return;
-    }
     setBusy(true);
     try {
       if (mode === "signup") {
@@ -321,7 +313,9 @@ function AuthScreen({ onAuthed }) {
         if (signUpError) {
           setError(signUpError.message === "User already registered"
             ? "An account with this email already exists — try logging in instead."
-            : signUpError.message);
+            : trimmedInvite && /database error|invite code/i.test(signUpError.message)
+              ? "That invite code isn't valid."
+              : signUpError.message);
           return;
         }
         if (!data.session) {
