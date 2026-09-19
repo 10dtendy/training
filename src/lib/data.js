@@ -13,7 +13,7 @@ function rowsToMapByDate(rows) {
   return out;
 }
 
-function shapeUser(p, dayTypes, gameLogs, restNotes) {
+function shapeUser(p, dayTypes, gameLogs, restNotes, loginDays) {
   return {
     id: p.id, email: p.email, name: p.name, role: p.role,
     position: p.position, experience: p.experience,
@@ -23,6 +23,7 @@ function shapeUser(p, dayTypes, gameLogs, restNotes) {
     lastActive: p.last_active ? new Date(p.last_active).getTime() : null,
     removed: p.removed, createdAt: p.created_at ? new Date(p.created_at).getTime() : null,
     dayTypes: dayTypes || {}, gameLogs: gameLogs || {}, restNotes: restNotes || {},
+    loginDays: loginDays || {},
   };
 }
 
@@ -31,11 +32,12 @@ function shapeUser(p, dayTypes, gameLogs, restNotes) {
 export async function fetchCurrentProfile() {
   const { data: { user: authUser } } = await supabase.auth.getUser();
   if (!authUser) return null;
-  const [{ data: p }, { data: dt }, { data: gl }, { data: rn }] = await Promise.all([
+  const [{ data: p }, { data: dt }, { data: gl }, { data: rn }, { data: ld }] = await Promise.all([
     supabase.from("profiles").select("*").eq("id", authUser.id).single(),
     supabase.from("day_types").select("*").eq("user_id", authUser.id),
     supabase.from("game_logs").select("*").eq("user_id", authUser.id),
     supabase.from("rest_notes").select("*").eq("user_id", authUser.id),
+    supabase.from("login_days").select("date").eq("user_id", authUser.id),
   ]);
   if (!p) return null;
   const dayTypes = {}; for (const r of dt || []) dayTypes[r.date] = r.type;
@@ -48,7 +50,8 @@ export async function fetchCurrentProfile() {
     };
   }
   const restNotes = {}; for (const r of rn || []) restNotes[r.date] = r.note;
-  return shapeUser(p, dayTypes, gameLogs, restNotes);
+  const loginDays = {}; for (const r of ld || []) loginDays[r.date] = true;
+  return shapeUser(p, dayTypes, gameLogs, restNotes, loginDays);
 }
 
 export async function getUsersMap() {
@@ -78,6 +81,13 @@ export async function getUsersMap() {
     out[p.email] = shapeUser(p, dayTypesByUser[p.id], gameLogsByUser[p.id], restNotesByUser[p.id]);
   }
   return out;
+}
+
+// Notes that the goalie opened the app on this calendar day (idempotent). The training
+// list pauses across 3+ days in a row with no such record — see trainingDayForDate.
+export async function recordLoginDay(userId, date) {
+  const { error } = await supabase.from("login_days").upsert({ user_id: userId, date }, { onConflict: "user_id,date", ignoreDuplicates: true });
+  return !error;
 }
 
 // Fans a users_v1-style patch (keyed however updateUserFields is called throughout

@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
 import {
-  fetchCurrentProfile, getUsersMap, updateUserFields, getContent, updateContentFields,
+  fetchCurrentProfile, getUsersMap, updateUserFields, recordLoginDay, getContent, updateContentFields,
   uploadImage as uploadToStorage, deleteStorageObject, publishConfirmationEmail,
 } from "./lib/data.js";
 
@@ -117,6 +117,9 @@ function addDays(d, n) {
 }
 // Goalies can only look back this many days from TODAY_DATE — older content isn't reachable.
 const MAX_DAYS_BACK = 2;
+// A goalie who doesn't open the app for this many days in a row has that whole absence
+// skipped over by the training list (it pauses, then picks up where they left off).
+const ABSENCE_PAUSE_DAYS = 3;
 
 function uid(prefix) {
   return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -130,19 +133,35 @@ function resolveDayType(u, dateKeyStr) {
 }
 
 // Each goalie walks their level's ordered training-day list at their own pace: Day 1 is
-// the day they signed up, and every later calendar day advances one step — except days
-// they've marked as a game or rest day, which don't use up a training day. Returns the
-// training-day object for `dateKeyStr`, or null if that date is itself a game/rest day
-// or the coach hasn't created that many training days yet.
+// the first day they open the app, and every later calendar day advances one step — except
+// days they've marked as a game or rest day, and any stretch of `ABSENCE_PAUSE_DAYS` or more
+// days in a row they didn't open the app (the list pauses, then resumes where they left
+// off). One or two missed days still use up a training day. Returns the training-day
+// object for `dateKeyStr`, or null if that date is itself a game/rest day or the coach
+// hasn't created that many training days yet.
 function trainingDayForDate(content, user, dateKeyStr, level) {
   if (resolveDayType(user, dateKeyStr)) return null;
+  // Being in the app right now counts as today's activity, even before the record is saved.
+  const loginDays = { ...(user.loginDays || {}), [dateKey(TODAY_DATE)]: true };
+  const firstLogin = Object.keys(loginDays).sort()[0];
   const signup = new Date(user.createdAt || TODAY_DATE.getTime());
-  let cursor = new Date(signup.getFullYear(), signup.getMonth(), signup.getDate());
-  if (dateKeyStr < dateKey(cursor)) return null;
+  const signupKey = dateKey(new Date(signup.getFullYear(), signup.getMonth(), signup.getDate()));
+  // Before activity tracking existed there's no login history, so those days aren't judged.
+  const startKey = firstLogin && firstLogin > signupKey ? firstLogin : signupKey;
+  if (dateKeyStr < startKey) return null;
+  const [sy, sm, sd] = startKey.split("-").map(Number);
+  const days = [];
+  for (let d = new Date(sy, sm - 1, sd); dateKey(d) < dateKeyStr; d = addDays(d, 1)) {
+    const key = dateKey(d);
+    days.push({ key, away: !!firstLogin && key !== startKey && !loginDays[key] });
+  }
   let index = 0;
-  while (dateKey(cursor) < dateKeyStr) {
-    if (!resolveDayType(user, dateKey(cursor))) index++;
-    cursor = addDays(cursor, 1);
+  for (let i = 0; i < days.length; ) {
+    let j = i;
+    if (days[i].away) { while (j < days.length && days[j].away) j++; } else { j = i + 1; }
+    const paused = days[i].away && j - i >= ABSENCE_PAUSE_DAYS;
+    for (let k = i; k < j; k++) if (!paused && !resolveDayType(user, days[k].key)) index++;
+    i = j;
   }
   return (content.trainingDays?.[level] || [])[index] || null;
 }
@@ -3878,6 +3897,17 @@ function AppInner() {
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.email]);
+
+  // Record that this account opened the app today (drives the away-3-days pause rule).
+  useEffect(() => {
+    if (!user?.id) return;
+    const today = dateKey(TODAY_DATE);
+    if (user.loginDays?.[today]) return;
+    recordLoginDay(user.id, today).then((ok) => {
+      if (ok) setUser((prev) => (prev ? { ...prev, loginDays: { ...(prev.loginDays || {}), [today]: true } } : prev));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   // First-time-login welcome screen, and/or a coach-published announcement — checked
   // once per session, right after both the account and the shared content are loaded.
