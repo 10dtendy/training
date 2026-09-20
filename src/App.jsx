@@ -120,6 +120,8 @@ const MAX_DAYS_BACK = 2;
 // A goalie who doesn't open the app for this many days in a row has that whole absence
 // skipped over by the training list (it pauses, then picks up where they left off).
 const ABSENCE_PAUSE_DAYS = 3;
+// Each training day is shown for this many calendar days in a row.
+const TRAINING_DAY_SPAN = 2;
 
 function uid(prefix) {
   return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -132,13 +134,14 @@ function resolveDayType(u, dateKeyStr) {
   return personal === "game" || personal === "rest" ? personal : null;
 }
 
-// Each goalie walks their level's ordered training-day list at their own pace: Day 1 is
-// the first day they open the app, and every later calendar day advances one step — except
-// days they've marked as a game or rest day, and any stretch of `ABSENCE_PAUSE_DAYS` or more
-// days in a row they didn't open the app (the list pauses, then resumes where they left
-// off). One or two missed days still use up a training day. Returns the training-day
-// object for `dateKeyStr`, or null if that date is itself a game/rest day or the coach
-// hasn't created that many training days yet.
+// Each goalie walks their level's ordered training-day list at their own pace. Day 1 is
+// the first day they open the app, and each training day is shown for TRAINING_DAY_SPAN
+// calendar days in a row. A game or rest day ends the current training day early (it
+// lasts 1 day instead) and the next one starts after it. A stretch of ABSENCE_PAUSE_DAYS or
+// more days in a row without opening the app is skipped entirely (the list pauses, then
+// resumes where they left off); one or two missed days still count as days. Returns the
+// training-day object for dateKeyStr, or null if that date is itself a game/rest day or
+// the coach hasn't created that many training days yet.
 function trainingDayForDate(content, user, dateKeyStr, level) {
   if (resolveDayType(user, dateKeyStr)) return null;
   // Being in the app right now counts as today's activity, even before the record is saved.
@@ -156,13 +159,23 @@ function trainingDayForDate(content, user, dateKeyStr, level) {
     days.push({ key, away: !!firstLogin && key !== startKey && !loginDays[key] });
   }
   let index = 0;
+  let daysShown = 0; // how many days the current training day has been on screen so far
+  const elapse = (key) => {
+    if (resolveDayType(user, key)) {
+      if (daysShown > 0) { index++; daysShown = 0; }
+    } else {
+      if (daysShown === TRAINING_DAY_SPAN) { index++; daysShown = 0; }
+      daysShown++;
+    }
+  };
   for (let i = 0; i < days.length; ) {
     let j = i;
     if (days[i].away) { while (j < days.length && days[j].away) j++; } else { j = i + 1; }
     const paused = days[i].away && j - i >= ABSENCE_PAUSE_DAYS;
-    for (let k = i; k < j; k++) if (!paused && !resolveDayType(user, days[k].key)) index++;
+    if (!paused) for (let k = i; k < j; k++) elapse(days[k].key);
     i = j;
   }
+  if (daysShown === TRAINING_DAY_SPAN) index++;
   return (content.trainingDays?.[level] || [])[index] || null;
 }
 
@@ -1828,7 +1841,7 @@ function AdminDashboard({ content }) {
 
       <div className="admin-panel">
         <h3>Training schedule health</h3>
-        <p className="planner-hint">Green means at least {SCHEDULE_HEALTH_WINDOW_DAYS} training days are queued for that level; red means fewer than that are ready, so goalies could run out soon.</p>
+        <p className="planner-hint">Each training day lasts about 2 days, so {SCHEDULE_HEALTH_WINDOW_DAYS} queued is roughly two weeks of practice. Green means at least that many are queued for the level; red means fewer are ready, so goalies could run out soon.</p>
         <div className="dashboard-health-grid">
           {EXPERIENCE_LEVELS.map((lv) => {
             const healthy = levelScheduleIsHealthy(content, lv);
@@ -3058,7 +3071,7 @@ function AdminTrainingDays({ content, updateContent }) {
   return (
     <div className="admin-page">
       <h1 className="admin-h1">Training days</h1>
-      <p className="admin-sub">Build the ordered list each level works through. A new goalie starts at Day 1 the day they sign up and moves to the next day each calendar day — days they mark as a game or rest day don't use one up.</p>
+      <p className="admin-sub">Build the ordered list each level works through. Each training day is shown for 2 days in a row (about 3 different practices a week); a game or rest day cuts the current training day short and the next one starts after it. A new goalie starts at Day 1 the first day they open the app, and being away 3 or more days in a row pauses their list until they're back.</p>
 
       <div className="admin-panel">
         <div className="planner-header">
