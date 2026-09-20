@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useContext } from "react";
 import {
   Play, Pause, Volume2, VolumeX, Maximize, ChevronLeft, ChevronRight, ChevronUp, ChevronDown,
   Check, Bell, Menu, X, Plus, Pencil, Trash2, Eye, EyeOff,
@@ -1763,6 +1763,8 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile }) {
   );
 }
 
+const MonthPlanContext = React.createContext(null);
+
 function ProfileCalendar({ dayTypes, onSetDayType, onClose, gameLogs, restNotes, onLogGame }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [selected, setSelected] = useState(dateKey(TODAY_DATE));
@@ -1776,8 +1778,28 @@ function ProfileCalendar({ dayTypes, onSetDayType, onClose, gameLogs, restNotes,
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const cells = [...Array(firstDay).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
-  const rawSelectedType = localDayTypes[selected];
-  const selectedType = rawSelectedType === "none" ? null : rawSelectedType;
+  const plan = useContext(MonthPlanContext);
+  const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
+  const chosenPlan = plan?.monthPlans?.[monthKey];
+  // A current or upcoming month with no answer yet asks how Sundays should work; until then its
+  // Sundays aren't shown as rest days. Past months just follow the default.
+  const needsAsk = !!plan?.isGoalie && monthOffset >= 0 && !chosenPlan;
+  const calUser = { dayTypes: localDayTypes, monthPlans: plan?.monthPlans || {} };
+  const typeFor = (key) => {
+    const t = localDayTypes[key];
+    if (t === "game" || t === "rest") return t;
+    if (needsAsk && key.startsWith(monthKey)) return null;
+    return isAutoRest(calUser, key) ? "rest" : null;
+  };
+  const [planBusy, setPlanBusy] = useState(false);
+  const [planError, setPlanError] = useState("");
+  const choosePlan = async (mode) => {
+    setPlanBusy(true); setPlanError("");
+    const ok = await plan.setPlan(monthKey, mode);
+    setPlanBusy(false);
+    if (ok === false) setPlanError("Couldn't save that — check your connection and try again.");
+  };
+  const selectedType = typeFor(selected);
   const selectedGameLog = (gameLogs || {})[selected];
 
   const [saveError, setSaveError] = useState("");
@@ -1811,12 +1833,26 @@ function ProfileCalendar({ dayTypes, onSetDayType, onClose, gameLogs, restNotes,
         <span>{MONTH_NAMES[month]} {year}</span>
         <button className="icon-btn" onClick={() => setMonthOffset((m) => m + 1)}><ChevronRight size={16} /></button>
       </div>
+      {needsAsk && (
+        <div className="month-plan-inline">
+          <strong>How should Sundays work in {MONTH_NAMES[month]}?</strong>
+          <button className="month-plan-option" onClick={() => choosePlan("sunday")} disabled={planBusy}>
+            <strong>Set Sundays as default rest days</strong>
+            <span>Every Sunday turns into a rest day.</span>
+          </button>
+          <button className="month-plan-option" onClick={() => choosePlan("own")} disabled={planBusy}>
+            <strong>I'll select my own rest days</strong>
+            <span>You mark the rest days yourself.</span>
+          </button>
+          {planError && <div className="auth-error"><AlertTriangle size={13} /> {planError}</div>}
+        </div>
+      )}
       <div className="calendar-admin-grid calendar-admin-grid--rich">
         {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <div key={i} className="calendar-admin-dow">{d}</div>)}
         {cells.map((day, i) => {
           if (!day) return <div key={i} />;
           const key = dateKey(new Date(year, month, day));
-          const t = localDayTypes[key];
+          const t = typeFor(key);
           const log = t === "game" ? (gameLogs || {})[key] : null;
           const note = t === "rest" ? (restNotes || {})[key] : null;
           return (
@@ -4741,6 +4777,11 @@ function AppInner() {
   const reminders = getReminders(user);
 
   return (
+    <MonthPlanContext.Provider value={{
+      monthPlans: user.monthPlans || {},
+      isGoalie: user.role !== "coach",
+      setPlan: (key, mode) => updateProfile({ monthPlans: { ...(user.monthPlans || {}), [key]: mode } }),
+    }}>
     <div className="app">
       <style>{CSS}</style>
       <AccentOverride color={content.accentColor} />
@@ -4836,6 +4877,7 @@ function AppInner() {
       {welcomeOpen && <WelcomeModal label="Welcome" data={content.welcome || DEFAULT_WELCOME} onClose={markWelcomeSeen} />}
       {announcementOpen && <WelcomeModal label="Announcement" data={content.announcement} onClose={markAnnouncementSeen} />}
     </div>
+    </MonthPlanContext.Provider>
   );
 }
 
@@ -5281,6 +5323,7 @@ button:focus {
 .training-block-search-count { font-size: 12px; white-space: nowrap; }
 .drill-diagram { display: block; width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); }
 .month-plan { display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
+.month-plan-inline { display: flex; flex-direction: column; gap: 10px; margin: 0 0 16px; padding: 14px; border-radius: 12px; border: 1px solid var(--accent); background: var(--surface-2); }
 .month-plan-q { font-size: 16px; margin: 8px 0 0; }
 .month-plan-option { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); }
 .month-plan-option span { font-size: 13px; color: var(--text-dim); }
