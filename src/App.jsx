@@ -3309,6 +3309,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
   const [drafts, setDrafts] = useState({});
   const [editingId, setEditingId] = useState(null);
   const [previewIndex, setPreviewIndex] = useState(null);
+  const [query, setQuery] = useState("");
   const [saving, setSaving] = useState(null);
   const [saveError, setSaveError] = useState(null);
   const [savedIds, setSavedIds] = useState({});
@@ -3346,6 +3347,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
       trainingDays: Object.fromEntries(LEVELS.map((lv) => [lv, [...(c.trainingDays[lv] || []), { id: ids[lv], drillId: "", focusId: "", workoutId: "", title: "", subtitle: "", createdAt: now }]])),
     }));
     setEditingId(ids[level]);
+    setQuery("");
   };
   const moveDay = (i, dir) => {
     const j = i + dir;
@@ -3365,6 +3367,18 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
     setList([...list.slice(0, copyAfter), copy, ...list.slice(copyAfter)]);
     setCopyingId(null);
   };
+
+  const blockMatches = (d, i) => {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return true;
+    const drill = content.drills.find((x) => x.id === d.drillId);
+    const focus = content.focusPoints.find((x) => x.id === d.focusId);
+    const office = content.offIceWorkouts.find((x) => x.id === d.workoutId);
+    const hay = [`block ${i + 1}`, d.title, d.subtitle, drill?.title, drill?.category, focus?.title, focus?.category, office?.title, office?.category, formatCreated(d.createdAt)]
+      .filter(Boolean).join(" ").toLowerCase();
+    return words.every((w) => hay.includes(w));
+  };
+  const matchCount = list.filter((d, i) => blockMatches({ ...d, ...drafts[d.id] }, i)).length;
 
   const dayIsEmpty = (d) => !d.drillId && !d.focusId && !d.workoutId;
 
@@ -3387,9 +3401,22 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
         <p className="planner-hint">Goalies are already partway through this list once they've signed up, so inserting, deleting, or reordering blocks changes what each of them sees next. Adding new blocks at the end is always safe.</p>
       </div>
 
+      {list.length > 0 && (
+        <div className="training-block-search">
+          <Search size={15} />
+          <input
+            type="search" value={query} onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search blocks by title, drill, focus, off-ice, category or date…" aria-label="Search training blocks"
+          />
+          {query && <span className="training-block-search-count">{matchCount} of {list.length}</span>}
+        </div>
+      )}
+      {query && list.length > 0 && matchCount === 0 && <p className="planner-empty-hint">No {level} blocks match "{query}".</p>}
+
       {list.map((saved, i) => {
         const draft = drafts[saved.id];
         const day = { ...saved, ...draft };
+        if (!blockMatches(day, i)) return null;
         const dirty = !!draft && Object.keys(draft).length > 0;
         const editing = editingId === saved.id;
         return (
@@ -5025,6 +5052,9 @@ button:focus {
 .admin-nav-item.active { color: var(--accent); background: var(--accent-dim); }
 .save-failed-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 16px 0; padding: 10px 14px; border-radius: 10px; background: rgba(239,68,68,0.14); color: #ef4444; font-size: 13px; }
 .save-failed-banner button { margin-left: auto; color: inherit; text-decoration: underline; }
+.training-block-search { display: flex; align-items: center; gap: 10px; padding: 0 14px; margin-bottom: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--text-dim); }
+.training-block-search input { flex: 1; min-width: 0; background: transparent; border: none; outline: none; padding: 13px 0; color: var(--text); font-size: 14px; }
+.training-block-search-count { font-size: 12px; white-space: nowrap; }
 .training-block-head { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .training-block-title { color: var(--text-dim); font-weight: 500; }
 .training-block-date { font-size: 12px; color: var(--text-dim); }
