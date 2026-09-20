@@ -2,7 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import {
   Play, Pause, Volume2, VolumeX, Maximize, ChevronLeft, ChevronRight, ChevronUp, ChevronDown,
   Check, Bell, Menu, X, Plus, Pencil, Trash2, Eye, EyeOff,
-  Calendar as CalendarIcon, LayoutGrid, Target, Users as UsersIcon,
+  Calendar as CalendarIcon, LayoutGrid, Users as UsersIcon,
   Image as ImageIcon, Settings as SettingsIcon, Download, Gauge, LogOut,
   Mail, Lock, UploadCloud, FileText, Video as VideoIcon, AlertTriangle,
   Home, BarChart3, Tag, Search, Goal, CircleDot, VenetianMask, Armchair, Copy, LayoutTemplate, Megaphone, Camera
@@ -338,6 +338,18 @@ function initials(name) {
   return name.trim().split(/\s+/).slice(0, 2).map((p) => p[0].toUpperCase()).join("");
 }
 
+function HockeyNet({ size = 24, strokeWidth = 2, className, ...rest }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true" {...rest}>
+      <path d="M3 20V6h18v14" />
+      <path d="M3 6l4 4M21 6l-4 4M3 20l4-4M21 20l-4-4" />
+      <path d="M7 16V10h10v6" />
+      <path d="M12 10v6" strokeWidth={strokeWidth * 0.6} opacity="0.75" />
+    </svg>
+  );
+}
+
 /* ============================================================================
    AUTH SCREEN
    ============================================================================ */
@@ -629,7 +641,7 @@ function BottomNav({ view, onToday, onGoTo, onProgress, onOpenCalendar, showCale
     { key: "today", label: "Today", icon: Home, active: view === "today", onClick: onToday },
     ...(trainingDay ? [
       { key: "drill", label: "Drill of the day", icon: Goal, active: view === "drill", onClick: () => onGoTo("drill") },
-      { key: "focus", label: "Practice focus of the day", icon: Target, active: view === "focus", onClick: () => onGoTo("focus") },
+      { key: "focus", label: "Practice focus of the day", icon: HockeyNet, active: view === "focus", onClick: () => onGoTo("focus") },
       { key: "office", label: "Off-ice of the day", icon: CircleDot, active: view === "office", onClick: () => onGoTo("office") },
     ] : []),
     { key: "progress", label: "Progress", icon: BarChart3, active: view === "progress", onClick: onProgress },
@@ -3467,7 +3479,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
               value={day.drillId} onChange={(v) => setDraft(saved.id, { drillId: v })} categoryFilter={drillCat} onCategoryFilterChange={setDrillCat}
             />
             <AssignmentPicker
-              label="Practice focus" icon={Target} items={content.focusPoints} categories={categoriesOfType(content, "focus")}
+              label="Practice focus" icon={HockeyNet} items={content.focusPoints} categories={categoriesOfType(content, "focus")}
               value={day.focusId} onChange={(v) => setDraft(saved.id, { focusId: v })} categoryFilter={focusCat} onCategoryFilterChange={setFocusCat}
             />
             <AssignmentPicker
@@ -4144,7 +4156,7 @@ function AdminApp({ content, updateContent, saveContent }) {
     { key: "calendar", label: "Training Blocks", icon: CalendarIcon },
     { key: "categories", label: "Categories", icon: Tag },
     { key: "drills", label: "Drills", icon: Goal, bold: true },
-    { key: "focus", label: "Practice Focus", icon: Target, bold: true },
+    { key: "focus", label: "Practice Focus", icon: HockeyNet, bold: true },
     { key: "office", label: "Off-Ice", icon: CircleDot, bold: true },
     { key: "gameday", label: "Game Day", icon: VenetianMask, bold: true },
     { key: "restday", label: "Rest Day", icon: Armchair, bold: true },
