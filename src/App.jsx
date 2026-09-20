@@ -2686,7 +2686,20 @@ function useBlockMedia(setDraft) {
 // Lets a coach build up a practice focus with more than one photo/video plus
 // free-form text, in whatever order they want — on top of the single hero
 // image/video and the two fixed text fields above.
-function FocusBlocksEditor({ blocks, setDraft, blockMedia, drills = [] }) {
+// Pick a drill for a practice focus: narrow by category first, then choose the drill.
+function FocusDrillPicker({ block, drills, categories, onChange }) {
+  const current = drills.find((d) => d.id === block.drillId);
+  const [category, setCategory] = useState(current?.category || "");
+  return (
+    <AssignmentPicker
+      label="Drill" icon={Goal} items={drills} categories={categories}
+      value={block.drillId || ""} onChange={onChange}
+      categoryFilter={category} onCategoryFilterChange={setCategory}
+    />
+  );
+}
+
+function FocusBlocksEditor({ blocks, setDraft, blockMedia, drills = [], drillCategories = [] }) {
   const setBlocks = (updater) => setDraft((d) => ({ ...d, blocks: updater(d.blocks) }));
   const updateField = (id, field, value) => setBlocks((list) => list.map((b) => (b.id === id ? { ...b, [field]: value } : b)));
   const removeBlock = (id) => {
@@ -2750,13 +2763,10 @@ function FocusBlocksEditor({ blocks, setDraft, blockMedia, drills = [] }) {
             )}
 
             {b.type === "drill" && (
-              <label className="exercise-editor-instructions">Drill
-                <select value={b.drillId || ""} onChange={(e) => updateField(b.id, "drillId", e.target.value)}>
-                  <option value="">Choose a drill…</option>
-                  {drills.map((d) => <option key={d.id} value={d.id}>{d.title}{d.category ? " — " + d.category : ""}{!d.published ? " (Draft — hidden from goalies)" : ""}</option>)}
-                </select>
-                {drills.length === 0 && <span className="planner-hint" style={{ margin: 0 }}>No drills yet — create one in the Drills section first.</span>}
-              </label>
+              <>
+                <FocusDrillPicker block={b} drills={drills} categories={drillCategories} onChange={(v) => updateField(b.id, "drillId", v)} />
+                {drills.length === 0 && <p className="planner-hint" style={{ margin: 0 }}>No drills yet — create one in the Drills section first.</p>}
+              </>
             )}
 
             {b.type === "text" && (
@@ -2858,7 +2868,7 @@ function AdminFocusPoints({ content, updateContent }) {
 
             <MediaFields draft={draft} media={media} />
 
-            <FocusBlocksEditor blocks={draft.blocks} setDraft={setDraft} blockMedia={blockMedia} drills={content.drills} />
+            <FocusBlocksEditor blocks={draft.blocks} setDraft={setDraft} blockMedia={blockMedia} drills={content.drills} drillCategories={categoriesOfType(content, "drill")} />
 
             <label className="auth-field admin-form-span2" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <input type="checkbox" checked={!!draft.published} onChange={(e) => setDraft({ ...draft, published: e.target.checked })} style={{ width: "auto" }} />
