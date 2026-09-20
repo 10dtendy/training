@@ -215,8 +215,11 @@ function trainingDayForDate(content, user, dateKeyStr, level) {
   for (let d = targetMonday; dateKey(d) < dateKeyStr; d = addDays(d, 1)) if (isAvailable(d, sundayOk)) before++;
   const blockIndex = Math.floor(before / 2);
   const index = entriesBefore + blockIndex;
+  let availableThisWeek = 0;
+  for (let i = 0; i < 7; i++) if (isAvailable(addDays(targetMonday, i), sundayOk)) availableThisWeek++;
+  const blockDays = Math.min(2, availableThisWeek - blockIndex * 2);
   const entry = (content.trainingDays?.[level] || [])[index];
-  return entry ? { ...entry, index, block: blockIndex + 1 } : null;
+  return entry ? { ...entry, index, block: blockIndex + 1, dayInBlock: (before % 2) + 1, blockDays } : null;
 }
 
 // The notification bell's content — always computed fresh from the goalie's own calendar
@@ -708,6 +711,7 @@ function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoFo
     <div className="eyebrow-row">
       <button className="icon-btn" onClick={onPrevDay} disabled={!canGoBack} aria-label="Previous day"><ChevronLeft size={15} /></button>
       <div className="eyebrow">{weekday} · {dateStr}</div>
+      {assignment?.blockDays > 1 && <span className="day-nav-badge">Day {assignment.dayInBlock} of {assignment.blockDays}</span>}
       {!isToday && <span className="day-nav-badge">Past</span>}
       <button className="icon-btn" onClick={onNextDay} disabled={!canGoForward} aria-label="Next day"><ChevronRight size={15} /></button>
     </div>
