@@ -339,9 +339,17 @@ function initials(name) {
 }
 
 function GoalieMask({ size = 24, className, ...rest }) {
+  const maskId = "goalie-mask-" + React.useId().replace(/:/g, "");
+  const cutouts = "M318 420Q375 407 437 405V500Q350 490 318 420Z M352 568Q385 535 437 525V590Q385 585 352 568Z M295 428Q283 480 300 522Q312 542 332 552Q316 520 320 482Q322 452 295 428Z M268 356L312 362Q322 364 320 372L270 366Q262 362 268 356Z M386 262L397 258L412 296Q405 302 400 298Z M288 602L330 606Q340 612 333 620L292 610Q283 606 288 602Z";
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="currentColor" fillRule="evenodd" className={className} aria-hidden="true" {...rest}>
-      <path d="M10 2.4H14L14.3 3.4Q17.4 4.2 18.7 7L19 7.3Q20.3 8 19.9 10.5L19.4 14.5Q19.2 15.8 17.8 16.4L18 16.5L16 20Q14.5 22.4 12 22.4Q9.5 22.4 8 20L6 16.5L6.2 16.4Q4.8 15.8 4.6 14.5L4.1 10.5Q3.7 8 5 7.3L5.3 7Q6.6 4.2 9.7 3.4ZM7.1 9.6Q9.5 9.1 11.8 9.1V12.1Q8.6 12.2 7.1 9.6ZM16.9 9.6Q14.5 9.1 12.2 9.1V12.1Q15.4 12.2 16.9 9.6ZM8.2 15.1Q9.8 13.7 11.8 13.4V15.8Q9.6 15.9 8.2 15.1ZM15.8 15.1Q14.2 13.7 12.2 13.4V15.8Q14.4 15.9 15.8 15.1ZM5.7 9.9Q6.4 10.3 6.7 11.3Q6.8 13 7.6 14.2Q6.3 13.5 6 12.4ZM18.3 9.9Q17.6 10.3 17.3 11.3Q17.2 13 16.4 14.2Q17.7 13.5 18 12.4Z" />
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="230 225 440 550" fill="currentColor" className={className} aria-hidden="true" {...rest}>
+      <defs>
+        <mask id={maskId} maskUnits="userSpaceOnUse" x="230" y="225" width="440" height="550">
+          <path d="M420 241H480Q490 243 490 255L487 262Q580 285 628 362L640 385Q660 400 656 430L645 540Q642 570 612 588L608 606L552 703Q510 760 450 760Q390 760 348 703L292 606L288 588Q258 570 255 540L243 430Q240 400 260 385L272 362Q320 285 413 262L410 255Q410 243 420 241Z" fill="#fff" />
+          <g fill="#000"><path d={cutouts} /><path d={cutouts} transform="translate(900 0) scale(-1 1)" /></g>
+        </mask>
+      </defs>
+      <rect x="230" y="225" width="440" height="550" mask={`url(#${maskId})`} />
     </svg>
   );
 }
