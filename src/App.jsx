@@ -1290,6 +1290,66 @@ function VideoPlayer({ title, poster, src }) {
    DETAIL PAGES
    ============================================================================ */
 
+// The written part of a drill (objective, steps, coaching points, common mistakes), shared by the
+// drill's own page and by the drill cards inside a practice focus.
+function DrillBody({ drill }) {
+  return (
+    <>
+        <section className="detail-block"><h2>Objective</h2><p>{drill.objective}</p></section>
+        <section className="detail-block">
+          <h2>How to perform</h2>
+          <ol className="steps">{drill.steps.map((s, i) => <li key={i}><span className="step-num">{i + 1}</span><span>{s}</span></li>)}</ol>
+        </section>
+        <section className="detail-block">
+          <h2>Coaching points</h2>
+          <div className="chip-grid">{drill.coachingPoints.map((c, i) => <div className="cue-card" key={i}>{c}</div>)}</div>
+        </section>
+        <section className="detail-block">
+          <h2>Common mistakes</h2>
+          <div className="mistake-list">
+            {drill.mistakes.map((m, i) => (
+              <div className="mistake-row" key={i}>
+                <div className="mistake-col mistake-col--wrong"><span className="mistake-label">Mistake</span><p>{m.mistake}</p></div>
+                <div className="mistake-col mistake-col--right"><span className="mistake-label">Correction</span><p>{m.correction}</p></div>
+              </div>
+            ))}
+          </div>
+        </section>
+    </>
+  );
+}
+
+// A drill attached to a practice focus: a card that expands to show the whole drill.
+function FocusDrillCard({ drill, branding }) {
+  const [open, setOpen] = useState(false);
+  const img = brandImage(drill.imageUrl, branding?.drill, DRILL_IMG);
+  return (
+    <section className="focus-drill-card">
+      <button type="button" className="focus-drill-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        <img src={img.src} style={img.style} alt="" className="focus-drill-thumb" />
+        <span className="focus-drill-info">
+          <span className="label">DRILL</span>
+          <span className="focus-drill-title">{drill.title}</span>
+          {(drill.duration || drill.equipment) && (
+            <span className="meta-row">
+              {drill.duration && <span>{drill.duration}</span>}
+              {drill.duration && drill.equipment && <span className="dot">•</span>}
+              {drill.equipment && <span>{drill.equipment}</span>}
+            </span>
+          )}
+        </span>
+        <ChevronDown size={18} className={"focus-drill-chevron" + (open ? " focus-drill-chevron--open" : "")} />
+      </button>
+      {open && (
+        <div className="focus-drill-body">
+          {drill.videoUrl && <VideoPlayer title={drill.title} poster={img.src} src={drill.videoUrl} />}
+          <DrillBody drill={drill} />
+        </div>
+      )}
+    </section>
+  );
+}
+
 function DrillDetailPage({ drill, branding, onBack, complete, onComplete }) {
   const drillImg = brandImage(drill.imageUrl, branding?.drill, DRILL_IMG);
   return (
@@ -1300,26 +1360,7 @@ function DrillDetailPage({ drill, branding, onBack, complete, onComplete }) {
         <h1 className="detail-title">{drill.title}</h1>
         <div className="meta-row meta-row--lg"><span>{drill.duration}</span><span className="dot">•</span><span>{drill.equipment}</span></div>
       </div>
-      <section className="detail-block"><h2>Objective</h2><p>{drill.objective}</p></section>
-      <section className="detail-block">
-        <h2>How to perform</h2>
-        <ol className="steps">{drill.steps.map((s, i) => <li key={i}><span className="step-num">{i + 1}</span><span>{s}</span></li>)}</ol>
-      </section>
-      <section className="detail-block">
-        <h2>Coaching points</h2>
-        <div className="chip-grid">{drill.coachingPoints.map((c, i) => <div className="cue-card" key={i}>{c}</div>)}</div>
-      </section>
-      <section className="detail-block">
-        <h2>Common mistakes</h2>
-        <div className="mistake-list">
-          {drill.mistakes.map((m, i) => (
-            <div className="mistake-row" key={i}>
-              <div className="mistake-col mistake-col--wrong"><span className="mistake-label">Mistake</span><p>{m.mistake}</p></div>
-              <div className="mistake-col mistake-col--right"><span className="mistake-label">Correction</span><p>{m.correction}</p></div>
-            </div>
-          ))}
-        </div>
-      </section>
+      <DrillBody drill={drill} />
       <button className={"btn btn--complete" + (complete ? " btn--complete-done" : "")} onClick={onComplete}>
         {complete ? <><Check size={16} /> Drill complete</> : "Mark drill complete"}
       </button>
@@ -1327,7 +1368,7 @@ function DrillDetailPage({ drill, branding, onBack, complete, onComplete }) {
   );
 }
 
-function FocusDetailPage({ focus, branding, onBack, complete, onComplete }) {
+function FocusDetailPage({ focus, branding, drills = [], onBack, complete, onComplete }) {
   const focusImg = brandImage(focus.imageUrl, branding?.focus, FOCUS_IMG);
   return (
     <div className="page detail">
@@ -1350,6 +1391,7 @@ function FocusDetailPage({ focus, branding, onBack, complete, onComplete }) {
       {(focus.blocks || []).map((b) => (
         b.type === "image" ? (b.imageUrl && <img key={b.id} src={b.imageUrl} alt="" className="focus-block-image" />)
         : b.type === "video" ? (b.videoUrl && <VideoPlayer key={b.id} title={focus.title} src={b.videoUrl} />)
+        : b.type === "drill" ? (() => { const d = drills.find((x) => x.id === b.drillId && x.published); return d ? <FocusDrillCard key={b.id} drill={d} branding={branding} /> : null; })()
         : (b.body && <section key={b.id} className="detail-block">{b.heading && <h2>{b.heading}</h2>}<p>{b.body}</p></section>)
       ))}
       <button className={"btn btn--complete" + (complete ? " btn--complete-done" : "")} onClick={onComplete}>
@@ -2302,9 +2344,14 @@ function AdminDrills({ content, updateContent }) {
   };
 
   const remove = (id) => {
-    const uses = countDailyAssignmentUses(content, "drillId", id);
-    const msg = uses > 0
-      ? `This drill is used in ${uses} training day${uses === 1 ? "" : "s"} — deleting it will leave those days without a drill. Delete anyway?`
+    const dayUses = countDailyAssignmentUses(content, "drillId", id);
+    const focusUses = content.focusPoints.reduce((n, f) => n + (f.blocks || []).filter((b) => b.type === "drill" && b.drillId === id).length, 0);
+    const where = [
+      dayUses > 0 && `${dayUses} training day${dayUses === 1 ? "" : "s"}`,
+      focusUses > 0 && `${focusUses} practice focus${focusUses === 1 ? "" : "es"}`,
+    ].filter(Boolean).join(" and ");
+    const msg = where
+      ? `This drill is used in ${where} — deleting it will remove it from there. Delete anyway?`
       : "Delete this drill? This can't be undone.";
     if (!window.confirm(msg)) return;
     updateContent((c) => ({ ...c, drills: c.drills.filter((d) => d.id !== id) }));
@@ -2639,7 +2686,7 @@ function useBlockMedia(setDraft) {
 // Lets a coach build up a practice focus with more than one photo/video plus
 // free-form text, in whatever order they want — on top of the single hero
 // image/video and the two fixed text fields above.
-function FocusBlocksEditor({ blocks, setDraft, blockMedia }) {
+function FocusBlocksEditor({ blocks, setDraft, blockMedia, drills = [] }) {
   const setBlocks = (updater) => setDraft((d) => ({ ...d, blocks: updater(d.blocks) }));
   const updateField = (id, field, value) => setBlocks((list) => list.map((b) => (b.id === id ? { ...b, [field]: value } : b)));
   const removeBlock = (id) => {
@@ -2658,14 +2705,15 @@ function FocusBlocksEditor({ blocks, setDraft, blockMedia }) {
     ...list,
     type === "image" ? { id: uid("blk"), type, imageAssetId: null, imageUrl: "" }
       : type === "video" ? { id: uid("blk"), type, videoAssetId: null, videoUrl: "" }
+      : type === "drill" ? { id: uid("blk"), type, drillId: "" }
       : { id: uid("blk"), type, heading: "", body: "" },
   ]);
-  const typeLabel = { image: "Photo", video: "Video", text: "Text" };
+  const typeLabel = { image: "Photo", video: "Video", text: "Text", drill: "Drill" };
 
   return (
     <div className="admin-form-span2 exercise-editor">
       <span className="media-field-label">Additional content</span>
-      {blocks.length === 0 && <p className="exercise-editor-empty">No additional photos, videos, or text yet — add one below.</p>}
+      {blocks.length === 0 && <p className="exercise-editor-empty">No additional photos, videos, text, or drills yet — add one below.</p>}
       <div className="exercise-editor-list">
         {blocks.map((b, i) => (
           <div className="exercise-editor-card" key={b.id}>
@@ -2701,6 +2749,16 @@ function FocusBlocksEditor({ blocks, setDraft, blockMedia }) {
               <YouTubeField value={b.videoUrl} onChange={(url) => blockMedia.setVideoUrl(b.id, url)} label="Video" className="media-field" />
             )}
 
+            {b.type === "drill" && (
+              <label className="exercise-editor-instructions">Drill
+                <select value={b.drillId || ""} onChange={(e) => updateField(b.id, "drillId", e.target.value)}>
+                  <option value="">Choose a drill…</option>
+                  {drills.map((d) => <option key={d.id} value={d.id}>{d.title}{d.category ? " — " + d.category : ""}{!d.published ? " (Draft — hidden from goalies)" : ""}</option>)}
+                </select>
+                {drills.length === 0 && <span className="planner-hint" style={{ margin: 0 }}>No drills yet — create one in the Drills section first.</span>}
+              </label>
+            )}
+
             {b.type === "text" && (
               <>
                 <label className="exercise-editor-instructions">Heading (optional)
@@ -2716,6 +2774,7 @@ function FocusBlocksEditor({ blocks, setDraft, blockMedia }) {
         <button type="button" className="btn btn--ghost btn--small" onClick={() => addBlock("image")}><Camera size={13} /> Add photo</button>
         <button type="button" className="btn btn--ghost btn--small" onClick={() => addBlock("video")}><VideoIcon size={13} /> Add video</button>
         <button type="button" className="btn btn--ghost btn--small" onClick={() => addBlock("text")}><FileText size={13} /> Add text</button>
+        <button type="button" className="btn btn--ghost btn--small" onClick={() => addBlock("drill")}><Goal size={13} /> Add drill</button>
       </div>
     </div>
   );
@@ -2799,7 +2858,7 @@ function AdminFocusPoints({ content, updateContent }) {
 
             <MediaFields draft={draft} media={media} />
 
-            <FocusBlocksEditor blocks={draft.blocks} setDraft={setDraft} blockMedia={blockMedia} />
+            <FocusBlocksEditor blocks={draft.blocks} setDraft={setDraft} blockMedia={blockMedia} drills={content.drills} />
 
             <label className="auth-field admin-form-span2" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <input type="checkbox" checked={!!draft.published} onChange={(e) => setDraft({ ...draft, published: e.target.checked })} style={{ width: "auto" }} />
@@ -2857,7 +2916,7 @@ function AdminFocusPoints({ content, updateContent }) {
 
       {previewFocus && (
         <PreviewModal label="Preview — how goalies will see this practice focus" onClose={() => setPreviewFocus(null)}>
-          <FocusDetailPage focus={previewFocus} branding={content.branding} onBack={() => setPreviewFocus(null)} complete={false} onComplete={() => {}} />
+          <FocusDetailPage focus={previewFocus} branding={content.branding} drills={content.drills} onBack={() => setPreviewFocus(null)} complete={false} onComplete={() => {}} />
         </PreviewModal>
       )}
     </div>
@@ -4349,7 +4408,7 @@ function AppInner() {
                 />
               );
               if (view === "drill") return drill ? <DrillDetailPage drill={drill} branding={content.branding} onBack={() => goTo("today")} complete={progress.drill} onComplete={() => toggleComplete("drill")} /> : todayPage;
-              if (view === "focus") return focus ? <FocusDetailPage focus={focus} branding={content.branding} onBack={() => goTo("today")} complete={progress.focus} onComplete={() => toggleComplete("focus")} /> : todayPage;
+              if (view === "focus") return focus ? <FocusDetailPage focus={focus} branding={content.branding} drills={content.drills} onBack={() => goTo("today")} complete={progress.focus} onComplete={() => toggleComplete("focus")} /> : todayPage;
               if (view === "office") return office ? <OffIceDetailPage office={office} branding={content.branding} onBack={() => goTo("today")} complete={progress.office} onComplete={() => toggleComplete("office")} /> : todayPage;
               if (view === "progress") return <ProgressPage user={user} content={content} />;
               if (view === "profile") return <ProfilePage user={user} onLogout={onLogout} onChangePassword={changePassword} onUpdateProfile={updateProfile} />;
@@ -4940,6 +4999,16 @@ button:focus {
 .exercise-editor-grid input, .exercise-editor-instructions textarea { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; color: var(--text); font-size: 13px; font-family: inherit; resize: vertical; }
 .exercise-editor-media { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .exercise-editor-media > * { min-width: 0; }
+.exercise-editor-instructions select { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; color: var(--text); font-size: 13px; font-family: inherit; width: 100%; min-width: 0; }
+.focus-drill-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 28px; overflow: hidden; }
+.focus-drill-head { display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px; text-align: left; }
+.focus-drill-thumb { width: 84px; height: 56px; object-fit: cover; border-radius: 8px; flex: none; }
+.focus-drill-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.focus-drill-title { font-family: 'Archivo', sans-serif; font-size: 17px; font-weight: 800; line-height: 1.2; overflow-wrap: anywhere; }
+.focus-drill-chevron { flex: none; color: var(--text-dim); transition: transform .2s ease; }
+.focus-drill-chevron--open { transform: rotate(180deg); }
+.focus-drill-body { padding: 4px 14px 14px; border-top: 1px solid var(--border); }
+.focus-drill-body .video { margin-top: 16px; }
 .block-type-label { flex: 1; font-size: 12px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
 .block-add-row { display: flex; flex-wrap: wrap; gap: 8px; }
 
