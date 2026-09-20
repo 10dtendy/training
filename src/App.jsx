@@ -705,7 +705,7 @@ function BottomNav({ view, onToday, onGoTo, onProgress, onOpenCalendar, showCale
    TODAY PAGE
    ============================================================================ */
 
-function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoForward, onPrevDay, onNextDay, openDrill, openFocus, openOffice, onDownloadPDF, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame }) {
+function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoForward, onPrevDay, onNextDay, openDrill, openFocus, openOffice, onDownloadPDF, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame, onMakeRest }) {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const drill = assignment && content.drills.find((d) => d.id === assignment.drillId && d.published);
   const focus = assignment && content.focusPoints.find((f) => f.id === assignment.focusId && f.published);
@@ -795,6 +795,7 @@ function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoFo
             <h4>Games &amp; Rest</h4>
             <button className="icon-btn eyebrow-calendar-btn" onClick={() => setCalendarOpen(true)} aria-label="Game days & rest days calendar"><CalendarIcon size={15} /></button>
           </div>
+          {onMakeRest && <button className="btn btn--ghost btn--small" onClick={onMakeRest}>Make today a rest day again</button>}
           <button className="btn btn--primary ticket-download-btn" onClick={onDownloadPDF}><Download size={15} /> Download Training PDF</button>
         </div>
       </section>
@@ -4785,6 +4786,7 @@ function AppInner() {
               ) : (
                 <TodayPage
                   content={content} progress={progress} viewDate={viewDate} assignment={assignment}
+                  onMakeRest={!isCoach && viewDate.getDay() === 0 && (user.dayTypes || {})[dateStr] === "none" ? () => setDayType(dateStr, "rest") : undefined}
                   canGoBack={canGoBack} canGoForward={canGoForward} onPrevDay={goPrevDay} onNextDay={goNextDay}
                   openDrill={() => goTo("drill")} openFocus={() => goTo("focus")} openOffice={() => goTo("office")} onDownloadPDF={handlePDF}
                   dayTypes={user.dayTypes || {}} onSetDayType={setDayType}
