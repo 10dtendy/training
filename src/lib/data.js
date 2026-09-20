@@ -175,7 +175,7 @@ export async function getContent() {
   for (const row of trainingDays || []) {
     trainingDaysShape[row.level]?.push({
       id: row.id, drillId: row.drill_id || "", focusId: row.focus_id || "", workoutId: row.workout_id || "",
-      title: row.title || "", subtitle: row.subtitle || "",
+      title: row.title || "", subtitle: row.subtitle || "", createdAt: row.created_at,
     });
   }
 
@@ -248,6 +248,7 @@ async function writeTrainingDays(byLevel) {
       id: d.id, level, position,
       drill_id: d.drillId || null, focus_id: d.focusId || null, workout_id: d.workoutId || null,
       title: d.title || null, subtitle: d.subtitle || null,
+      created_at: d.createdAt || new Date().toISOString(),
     }));
     const { error: insErr } = rows.length ? await supabase.from("training_days").insert(rows) : { error: null };
     if (delErr || insErr) allOk = false;

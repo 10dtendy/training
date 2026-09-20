@@ -3286,6 +3286,11 @@ function AssignmentPicker({ label, icon: Icon, items, categories, value, onChang
   );
 }
 
+function formatCreated(iso) {
+  const d = iso ? new Date(iso) : null;
+  return d && !isNaN(d) ? d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "—";
+}
+
 function AdminTrainingDays({ content, updateContent, saveContent }) {
   const [level, setLevel] = useState("Youth");
   const [drillCat, setDrillCat] = useState("");
@@ -3302,6 +3307,8 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
   // to the same-numbered block in the other levels while those still match, so a freshly built
   // block stays identical everywhere until the coach tweaks a level by hand.
   const [drafts, setDrafts] = useState({});
+  const [editingId, setEditingId] = useState(null);
+  const [previewIndex, setPreviewIndex] = useState(null);
   const [saving, setSaving] = useState(null);
   const [saveError, setSaveError] = useState(null);
   const [savedIds, setSavedIds] = useState({});
@@ -3331,11 +3338,15 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
       setSavedIds((m) => ({ ...m, [day.id]: true }));
     } else setSaveError(`Block ${i + 1} could not be saved. Check your connection and try again.`);
   };
-  const addDay = () =>
+  const addDay = () => {
+    const now = new Date().toISOString();
+    const ids = Object.fromEntries(LEVELS.map((lv) => [lv, crypto.randomUUID()]));
     updateContent((c) => ({
       ...c,
-      trainingDays: Object.fromEntries(LEVELS.map((lv) => [lv, [...(c.trainingDays[lv] || []), { id: crypto.randomUUID(), drillId: "", focusId: "", workoutId: "", title: "", subtitle: "" }]])),
+      trainingDays: Object.fromEntries(LEVELS.map((lv) => [lv, [...(c.trainingDays[lv] || []), { id: ids[lv], drillId: "", focusId: "", workoutId: "", title: "", subtitle: "", createdAt: now }]])),
     }));
+    setEditingId(ids[level]);
+  };
   const moveDay = (i, dir) => {
     const j = i + dir;
     if (j < 0 || j >= list.length) return;
@@ -3344,13 +3355,13 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
     setList(next);
   };
   const removeDay = (i) => {
-    if (!window.confirm(`Delete Day ${i + 1}? Every later day moves up one, so goalies partway through this list will see different training next.`)) return;
+    if (!window.confirm(`Delete Block ${i + 1}${list[i].title ? ` (${list[i].title})` : ""}? Every later block moves up one, so goalies partway through this list will see different training next.`)) return;
     setList(list.filter((_, idx) => idx !== i));
   };
 
   const openCopy = (day) => { setCopyingId(day.id); setCopyAfter(list.length); };
   const copyDay = (i) => {
-    const copy = { ...list[i], id: crypto.randomUUID() };
+    const copy = { ...list[i], id: crypto.randomUUID(), createdAt: new Date().toISOString() };
     setList([...list.slice(0, copyAfter), copy, ...list.slice(copyAfter)]);
     setCopyingId(null);
   };
@@ -3380,15 +3391,21 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
         const draft = drafts[saved.id];
         const day = { ...saved, ...draft };
         const dirty = !!draft && Object.keys(draft).length > 0;
+        const editing = editingId === saved.id;
         return (
         <div className="admin-panel training-day-card" key={saved.id}>
           <div className="planner-header">
-            <h3>Block {i + 1}{dayIsEmpty(day) && <span className="chip" style={{ marginLeft: 8 }}>Empty</span>}</h3>
+            <div className="training-block-head">
+              <h3>Block {i + 1}{day.title && <span className="training-block-title"> — {day.title}</span>}{dayIsEmpty(day) && <span className="chip" style={{ marginLeft: 8 }}>Empty</span>}</h3>
+              <span className="training-block-date">Created {formatCreated(saved.createdAt)}{dirty && " · unsaved changes"}</span>
+            </div>
             <div className="admin-row-actions">
-              <button className="icon-btn" onClick={() => moveDay(i, -1)} disabled={i === 0} aria-label={`Move Block ${i + 1} up`}><ChevronUp size={15} /></button>
-              <button className="icon-btn" onClick={() => moveDay(i, 1)} disabled={i === list.length - 1} aria-label={`Move Block ${i + 1} down`}><ChevronDown size={15} /></button>
-              <button className="icon-btn" onClick={() => (copyingId === day.id ? setCopyingId(null) : openCopy(day))} aria-label={`Copy Block ${i + 1}`}><Copy size={15} /></button>
-              <button className="icon-btn" onClick={() => removeDay(i)} aria-label={`Delete Block ${i + 1}`}><Trash2 size={15} /></button>
+              <button className="icon-btn" onClick={() => setEditingId(editing ? null : saved.id)} aria-label={`${editing ? "Close editor for" : "Edit"} Block ${i + 1}`} title="Edit"><Pencil size={15} /></button>
+              <button className="icon-btn" onClick={() => setPreviewIndex(i)} aria-label={`Preview Block ${i + 1}`} title="Preview"><Eye size={15} /></button>
+              <button className="icon-btn" onClick={() => (copyingId === day.id ? setCopyingId(null) : openCopy(day))} aria-label={`Copy Block ${i + 1}`} title="Copy"><Copy size={15} /></button>
+              <button className="icon-btn" onClick={() => removeDay(i)} aria-label={`Delete Block ${i + 1}`} title="Delete"><Trash2 size={15} /></button>
+              <button className="icon-btn" onClick={() => moveDay(i, -1)} disabled={i === 0} aria-label={`Move Block ${i + 1} up`} title="Move up"><ChevronUp size={15} /></button>
+              <button className="icon-btn" onClick={() => moveDay(i, 1)} disabled={i === list.length - 1} aria-label={`Move Block ${i + 1} down`} title="Move down"><ChevronDown size={15} /></button>
             </div>
           </div>
 
@@ -3399,7 +3416,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
                   {list.map((_, k) => <option key={k} value={k + 1}>Block {k + 1}{k + 1 === list.length ? " (end of list)" : ""}</option>)}
                 </select>
               </label>
-              <p className="planner-hint">The copy becomes Block {copyAfter + 1}{copyAfter < list.length ? `, and every day after it moves down one` : ""}.</p>
+              <p className="planner-hint">The copy becomes Block {copyAfter + 1}{copyAfter < list.length ? `, and every block after it moves down one` : ""}.</p>
               <div className="admin-form-actions" style={{ marginTop: 0 }}>
                 <button className="btn btn--ghost btn--small" onClick={() => setCopyingId(null)}>Cancel</button>
                 <button className="btn btn--primary btn--small" onClick={() => copyDay(i)}><Copy size={13} /> Insert copy</button>
@@ -3407,6 +3424,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
             </div>
           )}
 
+          {editing && (<>
           <div className="admin-form-grid" style={{ marginBottom: 20 }}>
             <label>Title (optional)
               <input value={day.title || ""} placeholder="e.g. Today's training." onChange={(e) => setDraft(saved.id, { title: e.target.value })} />
@@ -3439,11 +3457,31 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
               {saving === saved.id ? "Saving…" : "Save block"}
             </button>
           </div>
+          </>)}
         </div>
         );
       })}
 
       {saveError && <div className="email-status email-status--error"><AlertTriangle size={14} /> {saveError}</div>}
+      {previewIndex !== null && list[previewIndex] && (() => {
+        const d = { ...list[previewIndex], ...drafts[list[previewIndex].id] };
+        const drill = content.drills.find((x) => x.id === d.drillId);
+        const focus = content.focusPoints.find((x) => x.id === d.focusId);
+        const office = content.offIceWorkouts.find((x) => x.id === d.workoutId);
+        const noop = () => {};
+        return (
+          <PreviewModal label={`Preview — Block ${previewIndex + 1} (${level})`} onClose={() => setPreviewIndex(null)}>
+            <div className="page detail">
+              <h1 className="detail-title">{d.title || `Block ${previewIndex + 1}`}</h1>
+              {d.subtitle && <p className="hero-sub">{d.subtitle}</p>}
+              {!drill && !focus && !office && <p className="planner-empty-hint">Nothing is assigned to this block yet.</p>}
+              {drill && <DrillDetailPage drill={drill} branding={content.branding} onBack={noop} complete={false} onComplete={noop} />}
+              {focus && <FocusDetailPage focus={focus} branding={content.branding} drills={content.drills} onBack={noop} complete={false} onComplete={noop} />}
+              {office && <OffIceDetailPage office={office} branding={content.branding} onBack={noop} complete={false} onComplete={noop} />}
+            </div>
+          </PreviewModal>
+        );
+      })()}
       <button className="btn btn--primary" onClick={addDay}><Plus size={15} /> Add training block</button>
     </div>
   );
@@ -4987,6 +5025,10 @@ button:focus {
 .admin-nav-item.active { color: var(--accent); background: var(--accent-dim); }
 .save-failed-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 16px 0; padding: 10px 14px; border-radius: 10px; background: rgba(239,68,68,0.14); color: #ef4444; font-size: 13px; }
 .save-failed-banner button { margin-left: auto; color: inherit; text-decoration: underline; }
+.training-block-head { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.training-block-title { color: var(--text-dim); font-weight: 500; }
+.training-block-date { font-size: 12px; color: var(--text-dim); }
+.training-day-card .planner-header { align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .training-block-save { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 20px; }
 .admin-nav-item--bold { font-weight: 700; color: #F5B841; }
 .admin-nav-item--bold:hover { color: #FFD27A; }
