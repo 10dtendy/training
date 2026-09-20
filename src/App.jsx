@@ -11,6 +11,7 @@ import { supabase } from "./lib/supabase.js";
 import {
   fetchCurrentProfile, getUsersMap, updateUserFields, recordLoginDay, getContent, updateContentFields,
   uploadImage as uploadToStorage, deleteStorageObject, publishConfirmationEmail, getUsage,
+  storagePathFromUrl, storagePathsIn, deleteUnusedFiles, getUnusedFiles, deleteFiles,
 } from "./lib/data.js";
 
 /* ============================================================================
@@ -1616,9 +1617,11 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile }) {
     setPhotoError("");
     setPhotoUploading(true);
     try {
+      const oldPath = storagePathFromUrl(user.photoUrl);
       const res = await uploadToStorage(file, `profile/${user.id}`);
       const ok = await onUpdateProfile({ photoAssetId: res.id, photoUrl: res.url });
       if (!ok) setPhotoError("Something went wrong. Please try again.");
+      else if (oldPath?.startsWith(`profile/${user.id}/`)) deleteStorageObject(oldPath);
     } catch (err) {
       setPhotoError(err?.message || "Upload failed. Please try again.");
     } finally {
@@ -1627,8 +1630,10 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile }) {
   };
   const removePhoto = async () => {
     setPhotoError("");
+    const oldPath = storagePathFromUrl(user.photoUrl);
     const ok = await onUpdateProfile({ photoAssetId: null, photoUrl: "" });
     if (!ok) setPhotoError("Something went wrong. Please try again.");
+    else if (oldPath?.startsWith(`profile/${user.id}/`)) deleteStorageObject(oldPath);
   };
 
   const submitProfile = async (e) => {
@@ -2184,6 +2189,18 @@ function trainingDayCount(content, level) {
 }
 function levelScheduleIsHealthy(content, level) {
   return trainingDayCount(content, level) >= SCHEDULE_HEALTH_WINDOW_DAYS;
+}
+
+// Files that were used by the changed content before and aren't any more. The database still
+// double-checks that nothing else uses them before anything is deleted.
+function filesDropped(prev, next, patch) {
+  const dropped = new Set();
+  for (const key of Object.keys(patch)) {
+    if (key === "trainingDays" || key === "categories" || key === "media") continue;
+    const after = storagePathsIn(next[key]);
+    for (const path of storagePathsIn(prev[key])) if (!after.has(path)) dropped.add(path);
+  }
+  return [...dropped];
 }
 
 // Supabase Free plan limits; update these if the project is upgraded.
@@ -3978,6 +3995,44 @@ function AdminUsers() {
    persist for every coach and survive reloads/redeploys)
    ============================================================================ */
 
+function UnusedFiles() {
+  const [files, setFiles] = useState(undefined);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const load = () => getUnusedFiles().then(setFiles);
+  useEffect(() => { load(); }, []);
+
+  const total = (files || []).reduce((n, f) => n + f.size, 0);
+  const clean = async () => {
+    if (!window.confirm(`Delete ${files.length} unused file${files.length === 1 ? "" : "s"} (${formatBytes(total)})? Nothing in the app uses them. This can't be undone.`)) return;
+    setBusy(true); setMessage("");
+    const names = files.map((f) => f.name);
+    const removed = await deleteUnusedFiles(names);
+    setBusy(false);
+    setMessage(removed === names.length ? `Deleted ${removed} file${removed === 1 ? "" : "s"}.` : `Deleted ${removed} of ${names.length} files. Try again for the rest.`);
+    load();
+  };
+
+  return (
+    <div className="admin-panel">
+      <h3>Unused files</h3>
+      {files === undefined ? <p className="planner-hint">Checking…</p>
+        : files === null ? <p className="planner-hint">Couldn't check right now.</p>
+        : files.length === 0 ? <p className="planner-hint">No unused files — everything stored is in use.</p>
+        : (
+          <>
+            <p className="planner-hint">{files.length} file{files.length === 1 ? "" : "s"} ({formatBytes(total)}) aren't used by any drill, practice focus, off-ice workout, setting or profile. They only take up space.</p>
+            <ul className="unused-files">
+              {files.map((f) => <li key={f.name}><span>{f.name.split("/").pop()}</span><span>{formatBytes(f.size)} · {formatCreated(f.createdAt)}</span></li>)}
+            </ul>
+            <button className="btn btn--primary btn--small" onClick={clean} disabled={busy}>{busy ? "Deleting…" : `Delete ${files.length} unused file${files.length === 1 ? "" : "s"}`}</button>
+          </>
+        )}
+      {message && <div className="email-status email-status--ok" style={{ marginTop: 12 }}>{message}</div>}
+    </div>
+  );
+}
+
 function AdminMedia({ content, updateContent }) {
   const media = content.media || [];
   const inputRef = useRef(null);
@@ -4010,7 +4065,8 @@ function AdminMedia({ content, updateContent }) {
     setRemovingId(item.id);
     setError("");
     try {
-      await deleteStorageObject(item.storagePath);
+      const deleted = await deleteStorageObject(item.storagePath);
+      if (!deleted) { setError("Couldn't remove that file. Please try again."); return; }
       updateContent((c) => ({ ...c, media: (c.media || []).filter((m) => m.id !== item.id) }));
     } catch (err) {
       setError(err?.message || "Couldn't remove that file. Please try again.");
@@ -4022,7 +4078,8 @@ function AdminMedia({ content, updateContent }) {
   return (
     <div className="admin-page">
       <div className="admin-header-row"><h1 className="admin-h1">Media</h1></div>
-      <p className="planner-hint">Uploaded here or from a drill/focus/off-ice photo & video field — this is the same shared storage, so anything uploaded anywhere in the admin shows up here too.</p>
+      <p className="planner-hint">Files uploaded on this page. Photos you add to drills, practice focuses and off-ice workouts are stored with those items and are deleted from storage when you remove or replace them.</p>
+      <UnusedFiles />
       {error && <div className="auth-error" style={{ marginBottom: 16 }}><AlertTriangle size={13} /> {error}</div>}
 
       <input ref={inputRef} type="file" accept="image/*,video/*" multiple onChange={onPick} style={{ display: "none" }} disabled={uploading} />
@@ -4660,8 +4717,12 @@ function AppInner() {
   // write succeeded, so a screen can show a real "saved" confirmation. The local copy is only
   // updated once the save has gone through.
   const saveContent = async (patch) => {
+    const dropped = filesDropped(content, { ...content, ...patch }, patch);
     const ok = await updateContentFields(patch, content);
-    if (ok) setContent((prev) => ({ ...prev, ...patch }));
+    if (ok) {
+      setContent((prev) => ({ ...prev, ...patch }));
+      if (dropped.length) deleteUnusedFiles(dropped);
+    }
     return ok;
   };
 
@@ -4682,8 +4743,9 @@ function AppInner() {
           patch[key] = next[key];
         }
       }
+      const dropped = filesDropped(prev, next, patch);
       updateContentFields(patch, prev).then(async (ok) => {
-        if (ok) return;
+        if (ok) { if (dropped.length) deleteUnusedFiles(dropped); return; }
         setSaveFailed(true);
         setContent(await getContent());
       });
@@ -5432,6 +5494,10 @@ button:focus {
 .dashboard-level-block { margin-bottom: 18px; }
 .dashboard-level-block:last-child { margin-bottom: 0; }
 .dashboard-level-title { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); margin-bottom: 4px; }
+.unused-files { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.unused-files li { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); }
+.unused-files li span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.unused-files li span:last-child { color: var(--text-dim); white-space: nowrap; }
 .usage-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
 .usage-row-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; font-size: 13px; }
 .usage-label { font-weight: 600; }

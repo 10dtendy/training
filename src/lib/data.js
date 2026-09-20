@@ -324,9 +324,53 @@ export async function uploadImage(file, pathPrefix = "content") {
   return { id: path, url: data.publicUrl, path, contentType: file.type, sizeBytes: file.size };
 }
 
+const PUBLIC_MEDIA_MARKER = "/storage/v1/object/public/media/";
+
+// The bucket path inside a public file URL, or null if it isn't one of ours.
+export function storagePathFromUrl(url) {
+  if (typeof url !== "string") return null;
+  const i = url.indexOf(PUBLIC_MEDIA_MARKER);
+  if (i < 0) return null;
+  try { return decodeURIComponent(url.slice(i + PUBLIC_MEDIA_MARKER.length).split("?")[0]); } catch { return null; }
+}
+
+// Every file path inside a value (a drill, a list of items, settings...) — found by scanning its JSON.
+export function storagePathsIn(value) {
+  const out = new Set();
+  const text = JSON.stringify(value ?? null) || "";
+  for (const m of text.matchAll(/https?:[^"\\]*\/storage\/v1\/object\/public\/media\/[^"\\]+/g)) {
+    const path = storagePathFromUrl(m[0]);
+    if (path) out.add(path);
+  }
+  return out;
+}
+
 export async function deleteStorageObject(path) {
-  if (!path) return;
-  await supabase.storage.from("media").remove([path]);
+  if (!path) return true;
+  const { error } = await supabase.storage.from("media").remove([path]);
+  return !error;
+}
+
+// Deletes the given files, but only those the database confirms nothing refers to any more.
+export async function deleteUnusedFiles(paths) {
+  if (!paths?.length) return 0;
+  const { data, error } = await supabase.rpc("unreferenced_files", { p_paths: paths });
+  if (error || !data?.length) return 0;
+  const { error: removeError } = await supabase.storage.from("media").remove(data);
+  return removeError ? 0 : data.length;
+}
+
+// Files in storage that nothing refers to (older than a few minutes, so an upload in progress is never caught).
+export async function getUnusedFiles() {
+  const { data, error } = await supabase.rpc("unused_media_files");
+  if (error) return null;
+  return (data || []).map((f) => ({ name: f.name, size: Number(f.size), createdAt: f.created_at }));
+}
+
+export async function deleteFiles(paths) {
+  if (!paths?.length) return true;
+  const { error } = await supabase.storage.from("media").remove(paths);
+  return !error;
 }
 
 // Pushes the confirmation-email template live via the update-confirmation-email
