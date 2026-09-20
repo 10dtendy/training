@@ -1066,17 +1066,22 @@ function loadYouTubeApi() {
   return youtubeApiPromise;
 }
 
+// How long YouTube shows its own start-of-playback interface (title, buttons, logo) on a phone.
+// The video is kept behind the thumbnail for this long, then revealed once it has faded.
+const YOUTUBE_OVERLAY_MS = 5000;
+
 // A YouTube video that looks and behaves like part of this app rather than YouTube:
 //  - it shows only the video's thumbnail with our own play button until it's clicked;
-//  - the real player is driven through the iframe API with all of YouTube's controls, title
-//    and logo switched off, it's kept hidden until the video is actually playing, it's taller
-//    than the visible frame so any overlay at its top/bottom edges is cropped off, and it's
-//    never clickable (a transparent layer sits over it and the iframe ignores the mouse), so
-//    there's no way to open YouTube or its menus, and right-click is blocked;
+//  - the real player is driven through the iframe API with YouTube's controls, title and logo
+//    switched off, and it's never clickable (a transparent layer covers it and the iframe
+//    ignores the mouse), so there's no way to open YouTube or its menus; right-click is blocked;
+//  - YouTube still flashes its interface for a few seconds when playback starts (mostly on
+//    phones), so the video plays behind the thumbnail until that has faded, then is revealed
+//    with nothing on it;
 //  - the hidden player is prepared as soon as the video scrolls into view, so the click on the
 //    thumbnail can start playback directly (browsers only allow that inside the click itself);
-//  - clicking the thumbnail plays; clicking the playing video pauses it and goes back to the
-//    thumbnail, so YouTube's paused/ended screens are never shown.
+//  - a click only ever starts the video. If YouTube pauses it, or it ends, we go back to the
+//    thumbnail so YouTube's paused/ended screens are never shown.
 function YouTubeEmbed({ url, title, size }) {
   const id = youtubeVideoId(url);
   const stageRef = useRef(null);
@@ -1085,7 +1090,8 @@ function YouTubeEmbed({ url, title, size }) {
   const readyRef = useRef(false);
   const creatingRef = useRef(false);
   const wantPlayRef = useRef(false);
-  const [status, setStatus] = useState("idle"); // idle | loading | playing
+  const revealTimerRef = useRef(null);
+  const [status, setStatus] = useState("idle"); // idle | loading | covered | playing
   const [thumbTier, setThumbTier] = useState(0);
   const thumbs = ["maxresdefault", "mqdefault"];
 
@@ -1114,9 +1120,17 @@ function YouTubeEmbed({ url, title, size }) {
         },
         onStateChange: (e) => {
           const State = YT.PlayerState;
-          if (e.data === State.PLAYING) { wantPlayRef.current = false; setStatus("playing"); }
-          else if (e.data === State.ENDED) { e.target.stopVideo(); setStatus("idle"); }
-          else if (e.data === State.PAUSED) setStatus("idle");
+          if (e.data === State.PLAYING) {
+            wantPlayRef.current = false;
+            if (!revealTimerRef.current) {
+              setStatus((cur) => (cur === "playing" ? cur : "covered"));
+              revealTimerRef.current = setTimeout(() => { revealTimerRef.current = null; setStatus("playing"); }, YOUTUBE_OVERLAY_MS);
+            }
+          } else if (e.data === State.ENDED || e.data === State.PAUSED) {
+            if (revealTimerRef.current) { clearTimeout(revealTimerRef.current); revealTimerRef.current = null; }
+            if (e.data === State.ENDED) e.target.stopVideo();
+            setStatus("idle");
+          }
         },
         onError: () => { wantPlayRef.current = false; setStatus("idle"); },
       },
@@ -1139,6 +1153,7 @@ function YouTubeEmbed({ url, title, size }) {
     }
     return () => {
       if (observer) observer.disconnect();
+      if (revealTimerRef.current) { clearTimeout(revealTimerRef.current); revealTimerRef.current = null; }
       if (playerRef.current && playerRef.current.destroy) { try { playerRef.current.destroy(); } catch { /* already gone */ } }
       playerRef.current = null; readyRef.current = false; creatingRef.current = false;
     };
@@ -1154,27 +1169,26 @@ function YouTubeEmbed({ url, title, size }) {
     wantPlayRef.current = true;
     ensurePlayer();
   };
-  const pause = () => {
-    if (playerRef.current && playerRef.current.pauseVideo) playerRef.current.pauseVideo();
-    setStatus("idle");
-  };
-
   const playing = status === "playing";
   return (
     <div ref={stageRef} className="youtube-stage" onContextMenu={(e) => e.preventDefault()} onDragStart={(e) => e.preventDefault()}>
       <div ref={hostRef} className={"youtube-frame" + (playing ? "" : " youtube-frame--hidden")} />
       {playing ? (
-        <button type="button" className="youtube-shield" onClick={pause} onContextMenu={(e) => e.preventDefault()} aria-label="Pause video" />
+        <div className="youtube-shield" onContextMenu={(e) => e.preventDefault()} />
       ) : (
-        <button type="button" className="youtube-thumb" onClick={start} onContextMenu={(e) => e.preventDefault()} aria-label="Play video">
+        <button type="button" className="youtube-thumb" onClick={start} onContextMenu={(e) => e.preventDefault()} aria-label="Play video" disabled={status === "covered"}>
           <img
             src={`https://img.youtube.com/vi/${id}/${thumbs[thumbTier]}.jpg`} alt="" draggable={false} className="youtube-thumb-img"
             onLoad={(e) => { if (e.target.naturalWidth < 200 && thumbTier < thumbs.length - 1) setThumbTier(thumbTier + 1); }}
             onError={() => { if (thumbTier < thumbs.length - 1) setThumbTier(thumbTier + 1); }}
           />
-          <span className={"youtube-play-btn" + (size === "sm" ? " youtube-play-btn--sm" : "") + (status === "loading" ? " youtube-play-btn--loading" : "")}>
-            <Play size={size === "sm" ? 16 : 26} fill="var(--bg)" />
-          </span>
+          {status === "covered" ? (
+            <span className={"youtube-spinner" + (size === "sm" ? " youtube-spinner--sm" : "")} />
+          ) : (
+            <span className={"youtube-play-btn" + (size === "sm" ? " youtube-play-btn--sm" : "") + (status === "loading" ? " youtube-play-btn--loading" : "")}>
+              <Play size={size === "sm" ? 16 : 26} fill="var(--bg)" />
+            </span>
+          )}
         </button>
       )}
     </div>
@@ -4776,7 +4790,7 @@ button:focus {
 .upload-dropzone--small:disabled { opacity: 0.6; }
 .youtube-embed-sm { position: relative; width: 160px; aspect-ratio: 16/9; flex: none; border-radius: 8px; overflow: hidden; background: var(--surface-2); }
 .youtube-stage { position: absolute; inset: 0; background: #000; overflow: hidden; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-.youtube-frame { position: absolute; left: 0; right: 0; top: -96px; bottom: -96px; }
+.youtube-frame { position: absolute; inset: 0; }
 .youtube-frame--hidden { visibility: hidden; }
 .youtube-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; pointer-events: none; }
 .youtube-shield { position: absolute; inset: 0; z-index: 2; padding: 0; border: none; background: transparent; cursor: pointer; }
@@ -4786,6 +4800,10 @@ button:focus {
 .youtube-thumb:hover .youtube-play-btn { transform: scale(1.06); }
 .youtube-play-btn--sm { width: 32px; height: 32px; }
 .youtube-play-btn--loading { opacity: 0.6; }
+.youtube-thumb:disabled { cursor: default; }
+.youtube-spinner { position: relative; z-index: 1; width: 44px; height: 44px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.35); border-top-color: #fff; animation: youtube-spin 0.9s linear infinite; }
+.youtube-spinner--sm { width: 26px; height: 26px; border-width: 2px; }
+@keyframes youtube-spin { to { transform: rotate(360deg); } }
 .youtube-input-row { display: flex; gap: 8px; }
 .youtube-input-row input { flex: 1; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; color: var(--text); font-size: 13px; }
 .media-section-label { font-size: 12px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.03em; margin-top: 4px; }
