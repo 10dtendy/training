@@ -1066,9 +1066,12 @@ function loadYouTubeApi() {
   return youtubeApiPromise;
 }
 
-// How long YouTube shows its own start-of-playback interface (title, buttons, logo) on a phone.
-// The video is kept behind the thumbnail for this long, then revealed once it has faded.
-const YOUTUBE_OVERLAY_MS = 5000;
+// YouTube shows its own start-of-playback interface (title, buttons, logo) on phones for about
+// 4 seconds, and it comes back every time playback starts. The video plays behind the thumbnail
+// until BOTH this much real time and this much of the video itself have passed, so a slow
+// connection can't reveal it early and a fast one doesn't wait longer than it has to.
+const YOUTUBE_OVERLAY_MS = 4200;
+const YOUTUBE_OVERLAY_SECONDS = 3.6;
 
 // A YouTube video that looks and behaves like part of this app rather than YouTube:
 //  - it shows only the video's thumbnail with our own play button until it's clicked;
@@ -1124,10 +1127,18 @@ function YouTubeEmbed({ url, title, size }) {
             wantPlayRef.current = false;
             if (!revealTimerRef.current) {
               setStatus((cur) => (cur === "playing" ? cur : "covered"));
-              revealTimerRef.current = setTimeout(() => { revealTimerRef.current = null; setStatus("playing"); }, YOUTUBE_OVERLAY_MS);
+              const startedAt = performance.now();
+              revealTimerRef.current = setInterval(() => {
+                const pl = playerRef.current;
+                const seconds = pl && pl.getCurrentTime ? pl.getCurrentTime() : 0;
+                if (performance.now() - startedAt >= YOUTUBE_OVERLAY_MS && seconds >= YOUTUBE_OVERLAY_SECONDS) {
+                  clearInterval(revealTimerRef.current); revealTimerRef.current = null;
+                  setStatus("playing");
+                }
+              }, 100);
             }
           } else if (e.data === State.ENDED || e.data === State.PAUSED) {
-            if (revealTimerRef.current) { clearTimeout(revealTimerRef.current); revealTimerRef.current = null; }
+            if (revealTimerRef.current) { clearInterval(revealTimerRef.current); revealTimerRef.current = null; }
             if (e.data === State.ENDED) e.target.stopVideo();
             setStatus("idle");
           }
@@ -1153,7 +1164,7 @@ function YouTubeEmbed({ url, title, size }) {
     }
     return () => {
       if (observer) observer.disconnect();
-      if (revealTimerRef.current) { clearTimeout(revealTimerRef.current); revealTimerRef.current = null; }
+      if (revealTimerRef.current) { clearInterval(revealTimerRef.current); revealTimerRef.current = null; }
       if (playerRef.current && playerRef.current.destroy) { try { playerRef.current.destroy(); } catch { /* already gone */ } }
       playerRef.current = null; readyRef.current = false; creatingRef.current = false;
     };
@@ -4795,7 +4806,7 @@ button:focus {
 .youtube-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; pointer-events: none; }
 .youtube-shield { position: absolute; inset: 0; z-index: 2; padding: 0; border: none; background: transparent; cursor: pointer; }
 .youtube-thumb { position: absolute; inset: 0; padding: 0; border: none; background: var(--surface-2); cursor: pointer; display: flex; align-items: center; justify-content: center; }
-.youtube-thumb-img { position: absolute; inset: 0; object-fit: cover; }
+.youtube-thumb-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; }
 .youtube-play-btn { position: relative; z-index: 1; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; transition: transform .18s ease; }
 .youtube-thumb:hover .youtube-play-btn { transform: scale(1.06); }
 .youtube-play-btn--sm { width: 32px; height: 32px; }
