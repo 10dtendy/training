@@ -3289,6 +3289,7 @@ function AdminTrainingDays({ content, updateContent }) {
   );
 }
 
+const NOTE_HISTORY_LIMIT = 50;
 const BLANK_GAME_DAY = { note: "", noteDraft: undefined, quote: "" };
 const BLANK_REST_DAY = { note: "", noteDraft: undefined };
 
@@ -3299,8 +3300,21 @@ function DayNotesEditor({ data, setFields, placeholder }) {
   const saved = data.noteDraft ?? live;
   const [text, setText] = useState(saved);
   const dirty = text !== live;
+  const history = data.noteHistory || [];
   const saveDraft = () => { if (text !== saved) setFields({ noteDraft: text }); };
-  const makeLive = () => setFields({ note: text, noteDraft: text });
+  // Making a note live moves whichever note it replaces into the history list, so it can be
+  // brought back later; a note that's live is never also listed in the history.
+  const makeLive = () => {
+    let nextHistory = history;
+    if (live && live !== text) nextHistory = [{ id: crypto.randomUUID(), text: live, replacedAt: Date.now() }, ...history.filter((h) => h.text !== live)];
+    nextHistory = nextHistory.filter((h) => h.text !== text).slice(0, NOTE_HISTORY_LIMIT);
+    setFields({ note: text, noteDraft: text, noteHistory: nextHistory });
+  };
+  const reuse = (item) => { setText(item.text); setFields({ noteDraft: item.text }); };
+  const removeFromHistory = (item) => {
+    if (!window.confirm("Delete this note from the list? This can't be undone.")) return;
+    setFields({ noteHistory: history.filter((h) => h.id !== item.id) });
+  };
   return (
     <div className="planner-section" style={{ marginTop: 16 }}>
       <div className="planner-section-head"><FileText size={14} /> Coach notes</div>
@@ -3311,7 +3325,25 @@ function DayNotesEditor({ data, setFields, placeholder }) {
         </span>
         <button className="btn btn--primary btn--small" disabled={!dirty} onClick={makeLive}>Make live</button>
       </div>
-      <p className="planner-hint">Goalies see the live version on every day they mark, until you make a new one live. Leave it empty and make it live to remove the notes.</p>
+      <p className="planner-hint">Goalies see the live version on every day they mark, until you make a new one live. Leave it empty and make it live to remove the notes. Each note you replace is kept below so you can use it again.</p>
+
+      <div className="note-history">
+        <div className="planner-section-head"><Copy size={14} /> Previous notes{history.length > 0 ? " (" + history.length + ")" : ""}</div>
+        {history.length === 0 ? (
+          <p className="planner-hint" style={{ margin: 0 }}>Nothing here yet. When you make a new note live, the one it replaces is saved here.</p>
+        ) : history.map((h) => (
+          <div className="note-history-item" key={h.id}>
+            <p className="note-history-text">{h.text || "(empty)"}</p>
+            <div className="note-history-meta">
+              <span>Replaced {new Date(h.replacedAt).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}</span>
+              <div className="admin-row-actions">
+                <button className="btn btn--ghost btn--small" onClick={() => reuse(h)}><Copy size={13} /> Use again</button>
+                <button className="icon-btn" onClick={() => removeFromHistory(h)} aria-label="Delete this note"><Trash2 size={14} /></button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -4528,6 +4560,10 @@ button:focus {
 .daytype-cue { color: var(--text-dim); font-size: 15px; margin-top: 10px; }
 .daytype-empty { color: var(--text-dim); font-size: 14px; margin: 0 0 14px; }
 .daytype-note { margin-top: 18px; font-size: 15px; font-weight: 500; white-space: pre-line; overflow-wrap: anywhere; }
+.note-history { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+.note-history-item { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+.note-history-text { margin: 0 0 10px; font-size: 13px; line-height: 1.5; color: var(--text); white-space: pre-line; overflow-wrap: anywhere; max-height: 9em; overflow-y: auto; }
+.note-history-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--text-faint); }
 .daytype-notes-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
 .daytype-clear { width: 100%; justify-content: center; }
 .restnote-textarea { width: 100%; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; color: var(--text); font-size: 14px; font-family: inherit; resize: vertical; margin-top: 6px; }
@@ -4811,7 +4847,7 @@ button:focus {
 .category-pill { font-size: 11px; padding: 4px 10px; border-radius: 20px; border: 1px solid var(--border); color: var(--text-dim); background: var(--surface-2); }
 .category-pill.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
 .planner-empty-hint { font-size: 11px; color: var(--text-faint); margin: 0; }
-.planner-section select, .planner-section textarea { width: 100%; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; color: var(--text); font-size: 13px; font-family: inherit; resize: vertical; }
+.planner-section select, .planner-section textarea, .planner-section input { width: 100%; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; color: var(--text); font-size: 13px; font-family: inherit; resize: vertical; }
 .dashboard-level-block { margin-bottom: 18px; }
 .dashboard-level-block:last-child { margin-bottom: 0; }
 .dashboard-level-title { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); margin-bottom: 4px; }
