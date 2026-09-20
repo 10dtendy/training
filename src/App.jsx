@@ -502,7 +502,7 @@ function AuthScreen({ onAuthed }) {
    NAV
    ============================================================================ */
 
-function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen, user, onLogout, previewLevel, setPreviewLevel, dayType, onGoToday, reminders, onOpenReminder }) {
+function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen, user, onLogout, previewLevel, setPreviewLevel, dayType, onGoToday, reminders, onOpenReminder, onOpenCalendar }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const items = dayType
     ? [
@@ -544,6 +544,11 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
           {user.role === "coach" && (
             <button className={"nav-admin-toggle" + (isAdmin ? " nav-admin-toggle--active" : "")} onClick={() => setIsAdmin((v) => !v)}>
               {isAdmin ? "Exit admin" : "Admin"}
+            </button>
+          )}
+          {user.role !== "coach" && (
+            <button className="nav-icon-btn" aria-label="Game days & rest days calendar" onClick={onOpenCalendar}>
+              <CalendarIcon size={17} />
             </button>
           )}
           <div className="nav-notif-wrap">
@@ -4211,6 +4216,7 @@ function AppInner() {
 
   const [content, setContent] = useState(null);
   const [saveFailed, setSaveFailed] = useState(false);
+  const [navCalendarOpen, setNavCalendarOpen] = useState(false);
   const [progress, setProgress] = useState({ drill: false, focus: false, office: false });
 
   // Goalies can browse today plus the MAX_DAYS_BACK days before it — nothing older, nothing in the future.
@@ -4435,7 +4441,7 @@ function AppInner() {
         <NavBar
           view={view} setView={goTo} isAdmin={isAdmin} setIsAdmin={setIsAdmin} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen}
           user={user} onLogout={onLogout} previewLevel={previewLevel} setPreviewLevel={setPreviewLevel} dayType={dayType} onGoToday={goToToday}
-          reminders={reminders} onOpenReminder={openReminderDate}
+          reminders={reminders} onOpenReminder={openReminderDate} onOpenCalendar={() => setNavCalendarOpen(true)}
         />
       )}
       {isAdmin && (
@@ -4492,6 +4498,11 @@ function AppInner() {
 
       <PrintSheet content={content} date={viewDate} assignment={assignment} />
 
+      {navCalendarOpen && (
+        <PreviewModal label="Games & Rest" onClose={() => setNavCalendarOpen(false)} resizeIn>
+          <ProfileCalendar dayTypes={user.dayTypes || {}} onSetDayType={setDayType} onClose={() => setNavCalendarOpen(false)} gameLogs={user.gameLogs || {}} restNotes={user.restNotes || {}} onLogGame={setGameLog} />
+        </PreviewModal>
+      )}
       {welcomeOpen && <WelcomeModal label="Welcome" data={content.welcome || DEFAULT_WELCOME} onClose={markWelcomeSeen} />}
       {announcementOpen && <WelcomeModal label="Announcement" data={content.announcement} onClose={markAnnouncementSeen} />}
     </div>
