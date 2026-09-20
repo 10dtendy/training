@@ -347,7 +347,7 @@ function HockeyNet({ size = 24, strokeWidth = 2, className, ...rest }) {
       <defs><clipPath id={clipId}><path d={inner + "Q12 16 5.5 18Z"} /></clipPath></defs>
       <path d="M2.5 19V11A5 5 0 0 1 7.5 6h9A5 5 0 0 1 21.5 11v8" />
       <path d={inner} />
-      <g clipPath={`url(#${clipId})`} strokeWidth={strokeWidth * 0.6}><path d="M-4 6l14 14M10 6l-14 14M2 6l14 14M16 6l-14 14M8 6l14 14M22 6l-14 14M14 6l14 14M28 6l-14 14M20 6l14 14M34 6l-14 14M26 6l14 14M40 6l-14 14" /></g>
+      <g clipPath={`url(#${clipId})`} strokeWidth={strokeWidth * 0.3}><path d="M-4 6l14 14M10 6l-14 14M2 6l14 14M16 6l-14 14M8 6l14 14M22 6l-14 14M14 6l14 14M28 6l-14 14M20 6l14 14M34 6l-14 14M26 6l14 14M40 6l-14 14" /></g>
       <path d="M5.5 18Q12 16 18.5 18" />
     </svg>
   );
