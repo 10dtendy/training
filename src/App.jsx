@@ -5,7 +5,7 @@ import {
   Calendar as CalendarIcon, LayoutGrid, Users as UsersIcon,
   Image as ImageIcon, Settings as SettingsIcon, Download, Gauge, LogOut,
   Mail, Lock, UploadCloud, FileText, Video as VideoIcon, AlertTriangle,
-  Home, BarChart3, Tag, Search, Goal, CircleDot, VenetianMask, Armchair, Copy, LayoutTemplate, Megaphone, Camera
+  Home, BarChart3, Tag, Search, CircleDot, VenetianMask, Armchair, Copy, LayoutTemplate, Megaphone, Camera
 } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
 import {
@@ -338,6 +338,14 @@ function initials(name) {
   return name.trim().split(/\s+/).slice(0, 2).map((p) => p[0].toUpperCase()).join("");
 }
 
+function GoalieMask({ size = 24, className, ...rest }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="currentColor" fillRule="evenodd" className={className} aria-hidden="true" {...rest}>
+      <path d="M10 2.4H14L14.3 3.4Q17.4 4.2 18.7 7L19 7.3Q20.3 8 19.9 10.5L19.4 14.5Q19.2 15.8 17.8 16.4L18 16.5L16 20Q14.5 22.4 12 22.4Q9.5 22.4 8 20L6 16.5L6.2 16.4Q4.8 15.8 4.6 14.5L4.1 10.5Q3.7 8 5 7.3L5.3 7Q6.6 4.2 9.7 3.4ZM7.1 9.6Q9.5 9.1 11.8 9.1V12.1Q8.6 12.2 7.1 9.6ZM16.9 9.6Q14.5 9.1 12.2 9.1V12.1Q15.4 12.2 16.9 9.6ZM8.2 15.1Q9.8 13.7 11.8 13.4V15.8Q9.6 15.9 8.2 15.1ZM15.8 15.1Q14.2 13.7 12.2 13.4V15.8Q14.4 15.9 15.8 15.1ZM5.7 9.9Q6.4 10.3 6.7 11.3Q6.8 13 7.6 14.2Q6.3 13.5 6 12.4ZM18.3 9.9Q17.6 10.3 17.3 11.3Q17.2 13 16.4 14.2Q17.7 13.5 18 12.4Z" />
+    </svg>
+  );
+}
+
 function HockeyNet({ size = 24, strokeWidth = 2, className, ...rest }) {
   const clipId = "hockey-net-" + React.useId().replace(/:/g, "");
   const inner = "M5.5 18V12A3 3 0 0 1 8.5 9h7a3 3 0 0 1 3 3v6";
@@ -643,7 +651,7 @@ function BottomNav({ view, onToday, onGoTo, onProgress, onOpenCalendar, showCale
   const items = [
     { key: "today", label: "Today", icon: Home, active: view === "today", onClick: onToday },
     ...(trainingDay ? [
-      { key: "drill", label: "Drill of the day", icon: Goal, active: view === "drill", onClick: () => onGoTo("drill") },
+      { key: "drill", label: "Drill of the day", icon: GoalieMask, active: view === "drill", onClick: () => onGoTo("drill") },
       { key: "focus", label: "Practice focus of the day", icon: HockeyNet, active: view === "focus", onClick: () => onGoTo("focus") },
       { key: "office", label: "Off-ice of the day", icon: CircleDot, active: view === "office", onClick: () => onGoTo("office") },
     ] : []),
@@ -2747,7 +2755,7 @@ function FocusDrillPicker({ block, drills, categories, onChange }) {
   const [category, setCategory] = useState(current?.category || "");
   return (
     <AssignmentPicker
-      label="Drill" icon={Goal} items={drills} categories={categories}
+      label="Drill" icon={GoalieMask} items={drills} categories={categories}
       value={block.drillId || ""} onChange={onChange}
       categoryFilter={category} onCategoryFilterChange={setCategory}
     />
@@ -2839,7 +2847,7 @@ function FocusBlocksEditor({ blocks, setDraft, blockMedia, drills = [], drillCat
         <button type="button" className="btn btn--ghost btn--small" onClick={() => addBlock("image")}><Camera size={13} /> Add photo</button>
         <button type="button" className="btn btn--ghost btn--small" onClick={() => addBlock("video")}><VideoIcon size={13} /> Add video</button>
         <button type="button" className="btn btn--ghost btn--small" onClick={() => addBlock("text")}><FileText size={13} /> Add text</button>
-        <button type="button" className="btn btn--ghost btn--small" onClick={() => addBlock("drill")}><Goal size={13} /> Add drill</button>
+        <button type="button" className="btn btn--ghost btn--small" onClick={() => addBlock("drill")}><GoalieMask size={13} /> Add drill</button>
       </div>
     </div>
   );
@@ -3478,7 +3486,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
 
           <div className="planner-grid">
             <AssignmentPicker
-              label="Drill of the block" icon={Goal} items={content.drills} categories={categoriesOfType(content, "drill")}
+              label="Drill of the block" icon={GoalieMask} items={content.drills} categories={categoriesOfType(content, "drill")}
               value={day.drillId} onChange={(v) => setDraft(saved.id, { drillId: v })} categoryFilter={drillCat} onCategoryFilterChange={setDrillCat}
             />
             <AssignmentPicker
@@ -4158,7 +4166,7 @@ function AdminApp({ content, updateContent, saveContent }) {
     { key: "dashboard", label: "Dashboard", icon: LayoutGrid },
     { key: "calendar", label: "Training Blocks", icon: CalendarIcon },
     { key: "categories", label: "Categories", icon: Tag },
-    { key: "drills", label: "Drills", icon: Goal, bold: true },
+    { key: "drills", label: "Drills", icon: GoalieMask, bold: true },
     { key: "focus", label: "Practice Focus", icon: HockeyNet, bold: true },
     { key: "office", label: "Off-Ice", icon: CircleDot, bold: true },
     { key: "gameday", label: "Game Day", icon: VenetianMask, bold: true },
