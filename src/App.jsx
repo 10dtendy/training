@@ -3299,10 +3299,9 @@ function AdminOffIce({ content, updateContent }) {
    ============================================================================ */
 
 function AssignmentPicker({ label, icon: Icon, items, categories, value, onChange, categoryFilter, onCategoryFilterChange }) {
-  // Drafts are hidden from new assignment (goalies never see them anyway) — except
-  // whatever's already assigned, which always stays visible/selected so a coach can
-  // see and change it rather than have it silently vanish from the dropdown.
-  const filtered = items.filter((it) => it.id === value || (it.published && (!categoryFilter || it.category === categoryFilter)));
+  // Drafts can be assigned so blocks can be built before content is published; they are labelled,
+  // and goalies only see an item once it is published.
+  const filtered = items.filter((it) => it.id === value || !categoryFilter || it.category === categoryFilter);
   return (
     <div className="planner-section">
       <div className="planner-section-head"><Icon size={14} /> {label}</div>
@@ -3316,7 +3315,7 @@ function AssignmentPicker({ label, icon: Icon, items, categories, value, onChang
       )}
       <select value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">Not assigned</option>
-        {filtered.map((it) => <option key={it.id} value={it.id}>{it.title}{!it.published ? " (Draft — hidden from goalies)" : ""}</option>)}
+        {filtered.map((it) => <option key={it.id} value={it.id}>{it.title}{!it.published ? " (Draft — hidden from goalies until published)" : ""}</option>)}
       </select>
       {filtered.length === 0 && <p className="planner-empty-hint">Nothing in this category yet.</p>}
     </div>
