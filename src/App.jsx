@@ -1484,6 +1484,7 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile }) {
   const [pwSuccess, setPwSuccess] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
+  const [experience, setExperience] = useState(EXPERIENCE_LEVELS.includes(user.experience) ? user.experience : "Junior");
   const [country, setCountry] = useState(user.country || "");
   const [league, setLeague] = useState(user.league || "");
   const [team, setTeam] = useState(user.team || "");
@@ -1519,7 +1520,7 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile }) {
     e.preventDefault();
     setProfileError("");
     setProfileSaving(true);
-    const ok = await onUpdateProfile({ country: country.trim(), league: league.trim(), team: team.trim() });
+    const ok = await onUpdateProfile({ experience, country: country.trim(), league: league.trim(), team: team.trim() });
     setProfileSaving(false);
     if (ok) setEditingProfile(false);
     else setProfileError("Something went wrong. Please try again.");
@@ -1584,9 +1585,16 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile }) {
 
         {!isCoach && (
           !editingProfile ? (
-            <button className="btn btn--ghost" onClick={() => setEditingProfile(true)}><Pencil size={14} /> Edit profile</button>
+            <button className="btn btn--ghost" onClick={() => { setExperience(EXPERIENCE_LEVELS.includes(user.experience) ? user.experience : "Junior"); setEditingProfile(true); }}><Pencil size={14} /> Edit profile</button>
           ) : (
             <form className="profile-password-form" onSubmit={submitProfile}>
+              <label className="auth-field">
+                <span>Experience</span>
+                <select value={experience} onChange={(e) => setExperience(e.target.value)}>
+                  {EXPERIENCE_LEVELS.map((lv) => <option key={lv} value={lv}>{lv}</option>)}
+                </select>
+              </label>
+              <p className="planner-hint" style={{ marginTop: -4 }}>Changing your experience switches you to that level's training right away.</p>
               <label className="auth-field"><span>Country</span><input value={country} onChange={(e) => setCountry(e.target.value)} placeholder="e.g. Canada" /></label>
               <label className="auth-field"><span>League</span><input value={league} onChange={(e) => setLeague(e.target.value)} placeholder="e.g. OHL" /></label>
               <label className="auth-field"><span>Team</span><input value={team} onChange={(e) => setTeam(e.target.value)} placeholder="e.g. London Knights" /></label>
