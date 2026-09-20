@@ -122,6 +122,13 @@ const MAX_DAYS_BACK = 2;
 const ABSENCE_PAUSE_DAYS = 3;
 // Each training day is shown for this many calendar days in a row.
 const TRAINING_DAY_SPAN = 2;
+// Three practices make up a week, so training days are named block 1, 2, 3 and then start
+// over. `index` is the day's 0-based position in its level's list.
+const TRAINING_BLOCKS_PER_WEEK = 3;
+function trainingBlockName(index) {
+  const n = (index % TRAINING_BLOCKS_PER_WEEK) + 1;
+  return n === 1 ? "Weekly training block 1" : "Training block " + n;
+}
 
 function uid(prefix) {
   return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -176,7 +183,8 @@ function trainingDayForDate(content, user, dateKeyStr, level) {
     i = j;
   }
   if (daysShown === TRAINING_DAY_SPAN) index++;
-  return (content.trainingDays?.[level] || [])[index] || null;
+  const entry = (content.trainingDays?.[level] || [])[index];
+  return entry ? { ...entry, index } : null;
 }
 
 // The notification bell's content — always computed fresh from the goalie's own calendar
@@ -592,7 +600,7 @@ function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoFo
   const weekday = WEEKDAY_NAMES[viewDate.getDay()].toUpperCase();
   const dateStr = `${viewDate.getDate()} ${MONTH_NAMES[viewDate.getMonth()]} ${viewDate.getFullYear()}`;
   const isToday = dateKey(viewDate) === dateKey(TODAY_DATE);
-  const dayTitle = assignment?.title || (isToday ? "Today's training." : "Past training.");
+  const dayTitle = assignment?.title || (assignment ? trainingBlockName(assignment.index) : (isToday ? "Today's training." : "Past training."));
   const daySubtitle = assignment?.subtitle || (isToday ? "Three things to focus on today." : "What was assigned this day.");
 
   const eyebrowRow = (
@@ -3749,7 +3757,7 @@ function PrintSheet({ content, date, assignment }) {
         <div className="print-logo"><img src={LOGO_PRINT_SRC} alt="10DTendy" className="brand-logo brand-logo--print" /></div>
         <div className="print-date">{WEEKDAY_NAMES[printDate.getDay()]}, {printDate.getDate()} {MONTH_NAMES[printDate.getMonth()]} {printDate.getFullYear()}</div>
       </div>
-      <h1 className="print-title">{assignment?.title || (dateKey(printDate) === dateKey(TODAY_DATE) ? "Today's Training" : "Training Day")}</h1>
+      <h1 className="print-title">{assignment?.title || (assignment ? trainingBlockName(assignment.index) : (dateKey(printDate) === dateKey(TODAY_DATE) ? "Today's Training" : "Training Day"))}</h1>
 
       <div className="print-card">
         {drill && <img src={drillImg.src} style={drillImg.style} alt="" className="print-card-img" />}
