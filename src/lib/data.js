@@ -211,12 +211,24 @@ export async function getContent() {
 // (drills/focusPoints/offIceWorkouts/categories) are full-replacement arrays
 // from the caller (matching how the admin screens already build them) — upsert
 // what's present, delete whatever existing row isn't in the new array.
-async function reconcileTable(table, nextRows, toRow) {
-  const { data: existing } = await supabase.from(table).select("id");
-  const nextIds = new Set(nextRows.map((r) => r.id).filter(Boolean));
-  const toDelete = (existing || []).map((r) => r.id).filter((id) => !nextIds.has(id));
+async function reconcileTable(table, nextRows, toRow, prevRows) {
+  // With the previous rows known, write only what changed: upsert the new/edited rows and delete
+  // the removed ones. That is cheaper than rewriting the table and means one stale screen can't
+  // wipe rows it never knew about. Without them, fall back to a full reconcile.
+  let changed = nextRows;
+  let toDelete;
+  if (prevRows) {
+    const prevById = new Map(prevRows.map((r) => [r.id, JSON.stringify(r)]));
+    changed = nextRows.filter((r) => prevById.get(r.id) !== JSON.stringify(r));
+    const nextIds = new Set(nextRows.map((r) => r.id));
+    toDelete = prevRows.map((r) => r.id).filter((id) => !nextIds.has(id));
+  } else {
+    const { data: existing } = await supabase.from(table).select("id");
+    const nextIds = new Set(nextRows.map((r) => r.id).filter(Boolean));
+    toDelete = (existing || []).map((r) => r.id).filter((id) => !nextIds.has(id));
+  }
   const ops = [];
-  if (nextRows.length) ops.push(supabase.from(table).upsert(nextRows.map(toRow)).select());
+  if (changed.length) ops.push(supabase.from(table).upsert(changed.map(toRow)).select());
   if (toDelete.length) ops.push(supabase.from(table).delete().in("id", toDelete));
   const results = await Promise.all(ops);
   return results.every((r) => !r.error);
@@ -243,7 +255,7 @@ async function writeTrainingDays(byLevel) {
   return allOk;
 }
 
-export async function updateContentFields(patch) {
+export async function updateContentFields(patch, prev = {}) {
   if (!patch || Object.keys(patch).length === 0) return true;
   try {
     const ok = [];
@@ -253,21 +265,21 @@ export async function updateContentFields(patch) {
         description: d.description, objective: d.objective,
         steps: d.steps || [], coaching_points: d.coachingPoints || [], mistakes: d.mistakes || [],
         published: !!d.published, image_url: d.imageUrl || null, video_url: d.videoUrl || null,
-      })));
+      }), prev.drills));
     }
     if (patch.focusPoints) {
       ok.push(await reconcileTable("focus_points", patch.focusPoints, (f) => ({
         id: f.id, title: f.title, category: f.category, explanation: f.explanation, cue: f.cue,
         blocks: f.blocks || [], published: !!f.published,
         image_url: f.imageUrl || null, video_url: f.videoUrl || null,
-      })));
+      }), prev.focusPoints));
     }
     if (patch.offIceWorkouts) {
       ok.push(await reconcileTable("off_ice_workouts", patch.offIceWorkouts, (o) => ({
         id: o.id, title: o.title, category: o.category, duration: o.duration, equipment: o.equipment,
         description: o.description, objective: o.objective, exercises: o.exercises || [],
         published: !!o.published, image_url: o.imageUrl || null, video_url: o.videoUrl || null,
-      })));
+      }), prev.offIceWorkouts));
     }
     if (patch.categories) {
       const { error } = await supabase.from("categories").delete().neq("id", "00000000-0000-0000-0000-000000000000");

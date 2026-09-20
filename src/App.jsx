@@ -4210,6 +4210,7 @@ function AppInner() {
   const popupsCheckedRef = useRef(false);
 
   const [content, setContent] = useState(null);
+  const [saveFailed, setSaveFailed] = useState(false);
   const [progress, setProgress] = useState({ drill: false, focus: false, office: false });
 
   // Goalies can browse today plus the MAX_DAYS_BACK days before it — nothing older, nothing in the future.
@@ -4304,7 +4305,7 @@ function AppInner() {
   // write succeeded, so a screen can show a real "saved" confirmation. The local copy is only
   // updated once the save has gone through.
   const saveContent = async (patch) => {
-    const ok = await updateContentFields(patch);
+    const ok = await updateContentFields(patch, content);
     if (ok) setContent((prev) => ({ ...prev, ...patch }));
     return ok;
   };
@@ -4326,7 +4327,11 @@ function AppInner() {
           patch[key] = next[key];
         }
       }
-      updateContentFields(patch);
+      updateContentFields(patch, prev).then(async (ok) => {
+        if (ok) return;
+        setSaveFailed(true);
+        setContent(await getContent());
+      });
       return next;
     });
   };
@@ -4440,6 +4445,12 @@ function AppInner() {
         </div>
       )}
 
+      {saveFailed && (
+        <div className="save-failed-banner no-print" role="alert">
+          <AlertTriangle size={15} /> Your last change couldn't be saved, so the page was refreshed to match what is stored. Please make the change again.
+          <button onClick={() => setSaveFailed(false)}>Dismiss</button>
+        </div>
+      )}
       <main className="main no-print">
         {isAdmin ? (
           <AdminApp content={content} updateContent={updateContent} saveContent={saveContent} />
@@ -4915,6 +4926,8 @@ button:focus {
 .admin-nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; font-size: 13px; color: var(--text-dim); text-align: left; }
 .admin-nav-item:hover { color: var(--text); background: var(--surface); }
 .admin-nav-item.active { color: var(--accent); background: var(--accent-dim); }
+.save-failed-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 16px 0; padding: 10px 14px; border-radius: 10px; background: rgba(239,68,68,0.14); color: #ef4444; font-size: 13px; }
+.save-failed-banner button { margin-left: auto; color: inherit; text-decoration: underline; }
 .training-block-save { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 20px; }
 .admin-nav-item--bold { font-weight: 700; color: #F5B841; }
 .admin-nav-item--bold:hover { color: #FFD27A; }
