@@ -3294,23 +3294,41 @@ const BLANK_GAME_DAY = { note: "", noteDraft: undefined, quote: "" };
 const BLANK_REST_DAY = { note: "", noteDraft: undefined };
 
 // The coach's notes for a game/rest day. What they type is a draft; goalies only see the
-// version last made live (data.note), which stays on every such day until replaced.
-function DayNotesEditor({ data, setFields, placeholder }) {
+// version last saved and made live (data.note), which stays on every such day until replaced.
+// "Save & make live" publishes the notes together with any extra fields on the page (extraPatch,
+// e.g. the game day quote), waits for the database to confirm, and reports the result.
+function DayNotesEditor({ data, setFields, onPublish, extraDirty = false, extraPatch = {}, placeholder }) {
   const live = data.note || "";
   const saved = data.noteDraft ?? live;
   const [text, setText] = useState(saved);
-  const dirty = text !== live;
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [savedAt, setSavedAt] = useState(null);
+  const dirty = text !== live || extraDirty;
   const history = data.noteHistory || [];
   const saveDraft = () => { if (text !== saved) setFields({ noteDraft: text }); };
+
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
   // Making a note live moves whichever note it replaces into the history list, so it can be
   // brought back later; a note that's live is never also listed in the history.
-  const makeLive = () => {
+  const saveAndMakeLive = async () => {
     let nextHistory = history;
     if (live && live !== text) nextHistory = [{ id: crypto.randomUUID(), text: live, replacedAt: Date.now() }, ...history.filter((h) => h.text !== live)];
     nextHistory = nextHistory.filter((h) => h.text !== text).slice(0, NOTE_HISTORY_LIMIT);
-    setFields({ note: text, noteDraft: text, noteHistory: nextHistory });
+    setSaving(true);
+    setSaveError("");
+    const ok = await onPublish({ ...extraPatch, note: text, noteDraft: text, noteHistory: nextHistory });
+    setSaving(false);
+    if (ok) setSavedAt(new Date());
+    else setSaveError("Couldn't save — nothing was made live. Check your connection and try again.");
   };
-  const reuse = (item) => { setText(item.text); setFields({ noteDraft: item.text }); };
+  const reuse = (item) => { setSaveError(""); setText(item.text); setFields({ noteDraft: item.text }); };
   const removeFromHistory = (item) => {
     if (!window.confirm("Delete this note from the list? This can't be undone.")) return;
     setFields({ noteHistory: history.filter((h) => h.id !== item.id) });
@@ -3318,14 +3336,18 @@ function DayNotesEditor({ data, setFields, placeholder }) {
   return (
     <div className="planner-section" style={{ marginTop: 16 }}>
       <div className="planner-section-head"><FileText size={14} /> Coach notes</div>
-      <textarea rows={6} value={text} onChange={(e) => setText(e.target.value)} onBlur={saveDraft} placeholder={placeholder} />
+      <textarea rows={6} value={text} onChange={(e) => { setSaveError(""); setText(e.target.value); }} onBlur={saveDraft} placeholder={placeholder} />
+      {saveError && <div className="email-status email-status--error"><AlertTriangle size={14} /> {saveError}</div>}
       <div className="daytype-notes-actions">
-        <span className={"status-pill" + (dirty ? "" : live ? " status-pill--live" : "")}>
-          {dirty ? <EyeOff size={12} /> : <Eye size={12} />} {dirty ? "Draft — goalies still see the last live version" : live ? "Live" : "Nothing live"}
+        <span className={"status-pill" + (dirty ? "" : live || savedAt ? " status-pill--live" : "")}>
+          {dirty ? <EyeOff size={12} /> : <Check size={12} />}
+          {" "}{dirty ? "Unsaved changes — goalies still see the last live version" : savedAt ? "Saved & live — " + savedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : live ? "Saved & live" : "Nothing live"}
         </span>
-        <button className="btn btn--primary btn--small" disabled={!dirty} onClick={makeLive}>Make live</button>
+        <button className="btn btn--primary btn--small" disabled={!dirty || saving} onClick={saveAndMakeLive}>
+          <Check size={13} /> {saving ? "Saving…" : "Save & make live"}
+        </button>
       </div>
-      <p className="planner-hint">Goalies see the live version on every day they mark, until you make a new one live. Leave it empty and make it live to remove the notes. Each note you replace is kept below so you can use it again.</p>
+      <p className="planner-hint">Goalies see the live version on every day they mark, until you make a new one live. Leave the notes empty and make it live to remove them. Each note you replace is kept below so you can use it again.</p>
 
       <div className="note-history">
         <div className="planner-section-head"><Copy size={14} /> Previous notes{history.length > 0 ? " (" + history.length + ")" : ""}</div>
@@ -3348,11 +3370,13 @@ function DayNotesEditor({ data, setFields, placeholder }) {
   );
 }
 
-function AdminGameDay({ content, updateContent }) {
+function AdminGameDay({ content, updateContent, saveContent }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const gameDay = content.gameDay || BLANK_GAME_DAY;
+  const [quote, setQuote] = useState(gameDay.quote || "");
   const setFields = (patch) =>
     updateContent((c) => ({ ...c, gameDay: { ...(c.gameDay || BLANK_GAME_DAY), ...patch } }));
+  const publish = (patch) => saveContent({ gameDay: { ...gameDay, ...patch } });
 
   return (
     <div className="admin-page">
@@ -3360,29 +3384,34 @@ function AdminGameDay({ content, updateContent }) {
         <h1 className="admin-h1">Game Day</h1>
         <button className="btn btn--ghost btn--small" onClick={() => setPreviewOpen(true)}><Play size={13} /> Preview</button>
       </div>
-      <p className="planner-hint">Not tied to a specific date — goalies mark their own game days on their profile calendar, and this is what shows up instead of their normal training that day.</p>
+      <p className="planner-hint">Not tied to a specific date — goalies mark their own game days on their profile calendar, and this is what shows up instead of their normal training that day. The quote and the notes go live together when you press Save & make live.</p>
       <div className="admin-panel">
         <div className="planner-section">
           <div className="planner-section-head"><Megaphone size={14} /> Quote</div>
-          <input value={gameDay.quote || ""} onChange={(e) => setFields({ quote: e.target.value })} placeholder="e.g. Pressure is a privilege." />
+          <input value={quote} onChange={(e) => setQuote(e.target.value)} placeholder="e.g. Pressure is a privilege." />
         </div>
-        <DayNotesEditor data={gameDay} setFields={setFields} placeholder="e.g. Arrive 90 min early, light stretch, visualize your first ten saves." />
+        <DayNotesEditor
+          data={gameDay} setFields={setFields} onPublish={publish}
+          extraDirty={quote !== (gameDay.quote || "")} extraPatch={{ quote }}
+          placeholder="e.g. Arrive 90 min early, light stretch, visualize your first ten saves."
+        />
       </div>
 
       {previewOpen && (
-        <PreviewModal label="Preview — how goalies will see Game Day (with your draft notes)" onClose={() => setPreviewOpen(false)}>
-          <DayTypePage type="game" data={{ ...gameDay, note: gameDay.noteDraft ?? gameDay.note }} content={content} viewDate={TODAY_DATE} canGoBack={false} canGoForward={false} onPrevDay={() => {}} onNextDay={() => {}} onClear={() => true} gameLog={null} onSaveGameLog={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
+        <PreviewModal label="Preview — how goalies will see Game Day (with your draft)" onClose={() => setPreviewOpen(false)}>
+          <DayTypePage type="game" data={{ ...gameDay, quote, note: gameDay.noteDraft ?? gameDay.note }} content={content} viewDate={TODAY_DATE} canGoBack={false} canGoForward={false} onPrevDay={() => {}} onNextDay={() => {}} onClear={() => true} gameLog={null} onSaveGameLog={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
         </PreviewModal>
       )}
     </div>
   );
 }
 
-function AdminRestDay({ content, updateContent }) {
+function AdminRestDay({ content, updateContent, saveContent }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const restDay = content.restDay || BLANK_REST_DAY;
   const setFields = (patch) =>
     updateContent((c) => ({ ...c, restDay: { ...(c.restDay || BLANK_REST_DAY), ...patch } }));
+  const publish = (patch) => saveContent({ restDay: { ...restDay, ...patch } });
 
   return (
     <div className="admin-page">
@@ -3392,11 +3421,11 @@ function AdminRestDay({ content, updateContent }) {
       </div>
       <p className="planner-hint">Not tied to a specific date — goalies mark their own rest days on their profile calendar (and Sunday is a rest day automatically in a week they haven't marked anything), and this is what shows up instead of their normal training that day.</p>
       <div className="admin-panel">
-        <DayNotesEditor data={restDay} setFields={setFields} placeholder="e.g. Full rest, light stretching only, hydrate and sleep 9+ hours." />
+        <DayNotesEditor data={restDay} setFields={setFields} onPublish={publish} placeholder="e.g. Full rest, light stretching only, hydrate and sleep 9+ hours." />
       </div>
 
       {previewOpen && (
-        <PreviewModal label="Preview — how goalies will see Rest Day (with your draft notes)" onClose={() => setPreviewOpen(false)}>
+        <PreviewModal label="Preview — how goalies will see Rest Day (with your draft)" onClose={() => setPreviewOpen(false)}>
           <DayTypePage type="rest" data={{ ...restDay, note: restDay.noteDraft ?? restDay.note }} content={content} viewDate={TODAY_DATE} canGoBack={false} canGoForward={false} onPrevDay={() => {}} onNextDay={() => {}} onClear={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
         </PreviewModal>
       )}
@@ -3917,8 +3946,8 @@ function AdminApp({ content, updateContent, saveContent }) {
         {section === "categories" && <AdminCategories content={content} updateContent={updateContent} />}
         {section === "focus" && <AdminFocusPoints content={content} updateContent={updateContent} />}
         {section === "office" && <AdminOffIce content={content} updateContent={updateContent} />}
-        {section === "gameday" && <AdminGameDay content={content} updateContent={updateContent} />}
-        {section === "restday" && <AdminRestDay content={content} updateContent={updateContent} />}
+        {section === "gameday" && <AdminGameDay content={content} updateContent={updateContent} saveContent={saveContent} />}
+        {section === "restday" && <AdminRestDay content={content} updateContent={updateContent} saveContent={saveContent} />}
         {section === "frontpage" && <AdminFrontPage content={content} updateContent={updateContent} />}
         {section === "welcome" && <AdminWelcome content={content} updateContent={updateContent} saveContent={saveContent} />}
         {section === "email" && <AdminConfirmationEmail content={content} updateContent={updateContent} />}
