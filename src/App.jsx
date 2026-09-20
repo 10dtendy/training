@@ -5876,7 +5876,7 @@ button:focus {
   .eyebrow-calendar-btn { width: 36px; height: 36px; }
   .eyebrow-calendar-btn svg { width: 20px; height: 20px; }
   .mistake-row { grid-template-columns: 1fr; }
-  .main { padding: 0 16px 60px; }
+  .main { padding: 0 16px calc(120px + env(safe-area-inset-bottom)); }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .profile-grid { flex-wrap: wrap; gap: 20px; }
   .auth-side { padding: 36px 20px 28px; }
