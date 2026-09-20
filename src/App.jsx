@@ -3257,9 +3257,29 @@ function AdminTrainingDays({ content, updateContent }) {
   const list = content.trainingDays?.[level] || [];
   const setList = (next) =>
     updateContent((c) => ({ ...c, trainingDays: { ...c.trainingDays, [level]: next } }));
-  const updateDay = (i, patch) => setList(list.map((d, idx) => (idx === i ? { ...d, ...patch } : d)));
+  const LEVELS = ["Youth", "Junior", "Pro"];
+  // Edits mirror to the same-numbered block in the other levels while those still match, so a
+  // freshly built block stays identical everywhere until the coach tweaks a level by hand.
+  const updateDay = (i, patch) =>
+    updateContent((c) => {
+      const old = (c.trainingDays[level] || [])[i];
+      const next = { ...c.trainingDays };
+      for (const lv of LEVELS) {
+        const arr = c.trainingDays[lv] || [];
+        if (lv === level) {
+          next[lv] = arr.map((d, idx) => (idx === i ? { ...d, ...patch } : d));
+        } else if (arr[i] && old) {
+          const follow = Object.fromEntries(Object.entries(patch).filter(([k]) => (arr[i][k] || "") === (old[k] || "")));
+          if (Object.keys(follow).length) next[lv] = arr.map((d, idx) => (idx === i ? { ...d, ...follow } : d));
+        }
+      }
+      return { ...c, trainingDays: next };
+    });
   const addDay = () =>
-    setList([...list, { id: crypto.randomUUID(), drillId: "", focusId: "", workoutId: "", title: "", subtitle: "" }]);
+    updateContent((c) => ({
+      ...c,
+      trainingDays: Object.fromEntries(LEVELS.map((lv) => [lv, [...(c.trainingDays[lv] || []), { id: crypto.randomUUID(), drillId: "", focusId: "", workoutId: "", title: "", subtitle: "" }]])),
+    }));
   const moveDay = (i, dir) => {
     const j = i + dir;
     if (j < 0 || j >= list.length) return;
@@ -3284,7 +3304,7 @@ function AdminTrainingDays({ content, updateContent }) {
   return (
     <div className="admin-page">
       <h1 className="admin-h1">Training blocks</h1>
-      <p className="admin-sub">Build the ordered list of training blocks each level works through. Each week has 3 blocks of about 2 days. With nothing marked it runs block 1 Monday–Tuesday, block 2 Wednesday–Thursday, block 3 Friday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day that week, Sunday opens up as a training day and the blocks shift along the days they have left (a game day Wednesday and a rest day Saturday gives Monday–Tuesday, Thursday–Friday, and Sunday alone as block 3). A new goalie starts at Block 1 the first day they open the app, and being away 3 or more days in a row pauses their list until they're back.</p>
+      <p className="admin-sub">Build the ordered list of training blocks each level works through. A new block is added to Youth, Junior and Pro at once and what you fill in is copied to all three, so open a level afterwards to adjust its text or intensity. Each week has 3 blocks of about 2 days. With nothing marked it runs block 1 Monday–Tuesday, block 2 Wednesday–Thursday, block 3 Friday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day that week, Sunday opens up as a training day and the blocks shift along the days they have left (a game day Wednesday and a rest day Saturday gives Monday–Tuesday, Thursday–Friday, and Sunday alone as block 3). A new goalie starts at Block 1 the first day they open the app, and being away 3 or more days in a row pauses their list until they're back.</p>
 
       <div className="admin-panel">
         <div className="planner-header">
