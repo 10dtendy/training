@@ -886,7 +886,7 @@ function MonthPlanPrompt({ monthName, current, onChoose, onOpenCalendar, onLater
   );
 }
 
-function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, onPrevDay, onNextDay, onClear, gameLog, onSaveGameLog, restNote, onSaveRestNote, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame, autoRest = false }) {
+function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, onPrevDay, onNextDay, onClear, gameLog, onSaveGameLog, restNote, onSaveRestNote, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame, hideClear = false }) {
   const isGame = type === "game";
   const [logging, setLogging] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -1042,9 +1042,9 @@ function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, o
       )}
 
       {clearError && <div className="auth-error"><AlertTriangle size={13} /> {clearError}</div>}
-      {(autoRest || (dayTypes || {})[dateKey(viewDate)] === "game" || (dayTypes || {})[dateKey(viewDate)] === "rest") && (
+      {!hideClear && (
         <button className="btn btn--ghost daytype-clear" onClick={handleClear} disabled={clearBusy}>
-          {clearBusy ? "Saving…" : `${autoRest && dateKey(viewDate) === dateKey(TODAY_DATE) ? "Today" : "This"} isn't a ${isGame ? "game" : "rest"} day — show my training`}
+          {clearBusy ? "Saving…" : `This isn't a ${isGame ? "game" : "rest"} day — show my training`}
         </button>
       )}
     </div>
@@ -3817,7 +3817,7 @@ function AdminGameDay({ content, updateContent, saveContent }) {
 
       {previewOpen && (
         <PreviewModal label="Preview — how goalies will see Game Day (with your draft)" onClose={() => setPreviewOpen(false)}>
-          <DayTypePage type="game" data={{ ...gameDay, quote, note: gameDay.noteDraft ?? gameDay.note }} content={content} viewDate={TODAY_DATE} canGoBack={false} canGoForward={false} onPrevDay={() => {}} onNextDay={() => {}} onClear={() => true} gameLog={null} onSaveGameLog={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
+          <DayTypePage hideClear type="game" data={{ ...gameDay, quote, note: gameDay.noteDraft ?? gameDay.note }} content={content} viewDate={TODAY_DATE} canGoBack={false} canGoForward={false} onPrevDay={() => {}} onNextDay={() => {}} onClear={() => true} gameLog={null} onSaveGameLog={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
         </PreviewModal>
       )}
     </div>
@@ -3844,7 +3844,7 @@ function AdminRestDay({ content, updateContent, saveContent }) {
 
       {previewOpen && (
         <PreviewModal label="Preview — how goalies will see Rest Day (with your draft)" onClose={() => setPreviewOpen(false)}>
-          <DayTypePage type="rest" data={{ ...restDay, note: restDay.noteDraft ?? restDay.note }} content={content} viewDate={TODAY_DATE} canGoBack={false} canGoForward={false} onPrevDay={() => {}} onNextDay={() => {}} onClear={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
+          <DayTypePage hideClear type="rest" data={{ ...restDay, note: restDay.noteDraft ?? restDay.note }} content={content} viewDate={TODAY_DATE} canGoBack={false} canGoForward={false} onPrevDay={() => {}} onNextDay={() => {}} onClear={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
         </PreviewModal>
       )}
     </div>
@@ -4776,7 +4776,7 @@ function AppInner() {
                 <DayTypePage
                   type={dayType} data={(dayType === "game" ? content.gameDay : content.restDay) || {}} content={content}
                   viewDate={viewDate} canGoBack={canGoBack} canGoForward={canGoForward} onPrevDay={goPrevDay} onNextDay={goNextDay}
-                  onClear={() => setDayType(dateStr, null)} autoRest={!isCoach && dayType === "rest" && !personalDayType(user, dateStr)}
+                  onClear={() => setDayType(dateStr, null)}
                   gameLog={(user.gameLogs || {})[dateStr]} onSaveGameLog={(log) => setGameLog(dateStr, log)}
                   restNote={(user.restNotes || {})[dateStr]} onSaveRestNote={(note) => setRestNote(dateStr, note)}
                   dayTypes={user.dayTypes || {}} onSetDayType={setDayType}
