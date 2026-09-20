@@ -4864,7 +4864,9 @@ button:focus {
 .admin-nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; font-size: 13px; color: var(--text-dim); text-align: left; }
 .admin-nav-item:hover { color: var(--text); background: var(--surface); }
 .admin-nav-item.active { color: var(--accent); background: var(--accent-dim); }
-.admin-nav-item--bold { font-weight: 700; }
+.admin-nav-item--bold { font-weight: 700; color: #F5B841; }
+.admin-nav-item--bold:hover { color: #FFD27A; }
+.admin-nav-item--bold.active { color: #F5B841; background: rgba(245,184,65,0.14); }
 .admin-content { flex: 1; padding: 32px; min-width: 0; max-width: 100%; }
 .admin-h1 { font-size: 26px; font-weight: 900; margin-bottom: 24px; }
 .admin-header-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
