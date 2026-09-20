@@ -3246,7 +3246,7 @@ function AssignmentPicker({ label, icon: Icon, items, categories, value, onChang
   );
 }
 
-function AdminTrainingDays({ content, updateContent }) {
+function AdminTrainingDays({ content, updateContent, saveContent }) {
   const [level, setLevel] = useState("Youth");
   const [drillCat, setDrillCat] = useState("");
   const [focusCat, setFocusCat] = useState("");
@@ -3258,23 +3258,39 @@ function AdminTrainingDays({ content, updateContent }) {
   const setList = (next) =>
     updateContent((c) => ({ ...c, trainingDays: { ...c.trainingDays, [level]: next } }));
   const LEVELS = ["Youth", "Junior", "Pro"];
-  // Edits mirror to the same-numbered block in the other levels while those still match, so a
-  // freshly built block stays identical everywhere until the coach tweaks a level by hand.
-  const updateDay = (i, patch) =>
-    updateContent((c) => {
-      const old = (c.trainingDays[level] || [])[i];
-      const next = { ...c.trainingDays };
-      for (const lv of LEVELS) {
-        const arr = c.trainingDays[lv] || [];
-        if (lv === level) {
-          next[lv] = arr.map((d, idx) => (idx === i ? { ...d, ...patch } : d));
-        } else if (arr[i] && old) {
-          const follow = Object.fromEntries(Object.entries(patch).filter(([k]) => (arr[i][k] || "") === (old[k] || "")));
-          if (Object.keys(follow).length) next[lv] = arr.map((d, idx) => (idx === i ? { ...d, ...follow } : d));
-        }
+  // Edits are held as a draft per block until "Save block". Saving also copies each changed field
+  // to the same-numbered block in the other levels while those still match, so a freshly built
+  // block stays identical everywhere until the coach tweaks a level by hand.
+  const [drafts, setDrafts] = useState({});
+  const [saving, setSaving] = useState(null);
+  const [saveError, setSaveError] = useState(null);
+  const [savedIds, setSavedIds] = useState({});
+  const setDraft = (id, patch) => {
+    setDrafts((d) => ({ ...d, [id]: { ...d[id], ...patch } }));
+    setSavedIds((m) => ({ ...m, [id]: false }));
+  };
+  const saveBlock = async (i) => {
+    const day = list[i];
+    const patch = drafts[day.id] || {};
+    if (!Object.keys(patch).length) return;
+    setSaving(day.id); setSaveError(null);
+    const next = { ...content.trainingDays };
+    for (const lv of LEVELS) {
+      const arr = content.trainingDays[lv] || [];
+      if (lv === level) {
+        next[lv] = arr.map((d, idx) => (idx === i ? { ...d, ...patch } : d));
+      } else if (arr[i]) {
+        const follow = Object.fromEntries(Object.entries(patch).filter(([k]) => (arr[i][k] || "") === (day[k] || "")));
+        if (Object.keys(follow).length) next[lv] = arr.map((d, idx) => (idx === i ? { ...d, ...follow } : d));
       }
-      return { ...c, trainingDays: next };
-    });
+    }
+    const ok = await saveContent({ trainingDays: next });
+    setSaving(null);
+    if (ok) {
+      setDrafts((d) => { const { [day.id]: _, ...rest } = d; return rest; });
+      setSavedIds((m) => ({ ...m, [day.id]: true }));
+    } else setSaveError(`Block ${i + 1} could not be saved. Check your connection and try again.`);
+  };
   const addDay = () =>
     updateContent((c) => ({
       ...c,
@@ -3304,7 +3320,7 @@ function AdminTrainingDays({ content, updateContent }) {
   return (
     <div className="admin-page">
       <h1 className="admin-h1">Training blocks</h1>
-      <p className="admin-sub">Build the ordered list of training blocks each level works through. A new block is added to Youth, Junior and Pro at once and what you fill in is copied to all three, so open a level afterwards to adjust its text or intensity. Each week has 3 blocks of about 2 days. With nothing marked it runs block 1 Monday–Tuesday, block 2 Wednesday–Thursday, block 3 Friday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day that week, Sunday opens up as a training day and the blocks shift along the days they have left (a game day Wednesday and a rest day Saturday gives Monday–Tuesday, Thursday–Friday, and Sunday alone as block 3). A new goalie starts at Block 1 the first day they open the app, and being away 3 or more days in a row pauses their list until they're back.</p>
+      <p className="admin-sub">Build the ordered list of training blocks each level works through. A new block is added to Youth, Junior and Pro at once and what you fill in and save is copied to all three, so open a level afterwards to adjust its text or intensity. Each week has 3 blocks of about 2 days. With nothing marked it runs block 1 Monday–Tuesday, block 2 Wednesday–Thursday, block 3 Friday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day that week, Sunday opens up as a training day and the blocks shift along the days they have left (a game day Wednesday and a rest day Saturday gives Monday–Tuesday, Thursday–Friday, and Sunday alone as block 3). A new goalie starts at Block 1 the first day they open the app, and being away 3 or more days in a row pauses their list until they're back.</p>
 
       <div className="admin-panel">
         <div className="planner-header">
@@ -3320,8 +3336,12 @@ function AdminTrainingDays({ content, updateContent }) {
         <p className="planner-hint">Goalies are already partway through this list once they've signed up, so inserting, deleting, or reordering blocks changes what each of them sees next. Adding new blocks at the end is always safe.</p>
       </div>
 
-      {list.map((day, i) => (
-        <div className="admin-panel training-day-card" key={day.id}>
+      {list.map((saved, i) => {
+        const draft = drafts[saved.id];
+        const day = { ...saved, ...draft };
+        const dirty = !!draft && Object.keys(draft).length > 0;
+        return (
+        <div className="admin-panel training-day-card" key={saved.id}>
           <div className="planner-header">
             <h3>Block {i + 1}{dayIsEmpty(day) && <span className="chip" style={{ marginLeft: 8 }}>Empty</span>}</h3>
             <div className="admin-row-actions">
@@ -3349,30 +3369,41 @@ function AdminTrainingDays({ content, updateContent }) {
 
           <div className="admin-form-grid" style={{ marginBottom: 20 }}>
             <label>Title (optional)
-              <input defaultValue={day.title} placeholder="e.g. Today's training." onBlur={(e) => e.target.value !== day.title && updateDay(i, { title: e.target.value })} />
+              <input value={day.title || ""} placeholder="e.g. Today's training." onChange={(e) => setDraft(saved.id, { title: e.target.value })} />
             </label>
             <label>Subtitle (optional)
-              <input defaultValue={day.subtitle} placeholder="e.g. Three things to focus on today." onBlur={(e) => e.target.value !== day.subtitle && updateDay(i, { subtitle: e.target.value })} />
+              <input value={day.subtitle || ""} placeholder="e.g. Three things to focus on today." onChange={(e) => setDraft(saved.id, { subtitle: e.target.value })} />
             </label>
           </div>
 
           <div className="planner-grid">
             <AssignmentPicker
               label="Drill of the block" icon={Goal} items={content.drills} categories={categoriesOfType(content, "drill")}
-              value={day.drillId} onChange={(v) => updateDay(i, { drillId: v })} categoryFilter={drillCat} onCategoryFilterChange={setDrillCat}
+              value={day.drillId} onChange={(v) => setDraft(saved.id, { drillId: v })} categoryFilter={drillCat} onCategoryFilterChange={setDrillCat}
             />
             <AssignmentPicker
               label="Practice focus" icon={Target} items={content.focusPoints} categories={categoriesOfType(content, "focus")}
-              value={day.focusId} onChange={(v) => updateDay(i, { focusId: v })} categoryFilter={focusCat} onCategoryFilterChange={setFocusCat}
+              value={day.focusId} onChange={(v) => setDraft(saved.id, { focusId: v })} categoryFilter={focusCat} onCategoryFilterChange={setFocusCat}
             />
             <AssignmentPicker
               label="Off-Ice" icon={CircleDot} items={content.offIceWorkouts} categories={categoriesOfType(content, "office")}
-              value={day.workoutId} onChange={(v) => updateDay(i, { workoutId: v })} categoryFilter={officeCat} onCategoryFilterChange={setOfficeCat}
+              value={day.workoutId} onChange={(v) => setDraft(saved.id, { workoutId: v })} categoryFilter={officeCat} onCategoryFilterChange={setOfficeCat}
             />
           </div>
-        </div>
-      ))}
 
+          <div className="training-block-save">
+            <span className={"status-pill" + (dirty ? "" : savedIds[saved.id] ? " status-pill--live" : "")}>
+              {dirty ? "Unsaved changes" : savedIds[saved.id] ? "Saved" : "No changes"}
+            </span>
+            <button className="btn btn--primary btn--small" onClick={() => saveBlock(i)} disabled={!dirty || saving === saved.id}>
+              {saving === saved.id ? "Saving…" : "Save block"}
+            </button>
+          </div>
+        </div>
+        );
+      })}
+
+      {saveError && <div className="email-status email-status--error"><AlertTriangle size={14} /> {saveError}</div>}
       <button className="btn btn--primary" onClick={addDay}><Plus size={15} /> Add training block</button>
     </div>
   );
@@ -4030,7 +4061,7 @@ function AdminApp({ content, updateContent, saveContent }) {
       </aside>
       <div className="admin-content">
         {section === "dashboard" && <AdminDashboard content={content} />}
-        {section === "calendar" && <AdminTrainingDays content={content} updateContent={updateContent} />}
+        {section === "calendar" && <AdminTrainingDays content={content} updateContent={updateContent} saveContent={saveContent} />}
         {section === "drills" && <AdminDrills content={content} updateContent={updateContent} />}
         {section === "categories" && <AdminCategories content={content} updateContent={updateContent} />}
         {section === "focus" && <AdminFocusPoints content={content} updateContent={updateContent} />}
@@ -4884,6 +4915,7 @@ button:focus {
 .admin-nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; font-size: 13px; color: var(--text-dim); text-align: left; }
 .admin-nav-item:hover { color: var(--text); background: var(--surface); }
 .admin-nav-item.active { color: var(--accent); background: var(--accent-dim); }
+.training-block-save { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 20px; }
 .admin-nav-item--bold { font-weight: 700; color: #F5B841; }
 .admin-nav-item--bold:hover { color: #FFD27A; }
 .admin-nav-item--bold.active { color: #F5B841; background: rgba(245,184,65,0.14); }
