@@ -345,3 +345,9 @@ export async function publishConfirmationEmail(fields) {
   if (data?.error) return { ok: false, error: data.error };
   return { ok: true };
 }
+
+export async function getUsage() {
+  const { data, error } = await supabase.rpc("admin_usage");
+  if (error || !data) return null;
+  return { dbBytes: Number(data.db_bytes), storageBytes: Number(data.storage_bytes), storageFiles: Number(data.storage_files) };
+}

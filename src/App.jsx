@@ -10,7 +10,7 @@ import {
 import { supabase } from "./lib/supabase.js";
 import {
   fetchCurrentProfile, getUsersMap, updateUserFields, recordLoginDay, getContent, updateContentFields,
-  uploadImage as uploadToStorage, deleteStorageObject, publishConfirmationEmail,
+  uploadImage as uploadToStorage, deleteStorageObject, publishConfirmationEmail, getUsage,
 } from "./lib/data.js";
 
 /* ============================================================================
@@ -2090,7 +2090,36 @@ function levelScheduleIsHealthy(content, level) {
   return trainingDayCount(content, level) >= SCHEDULE_HEALTH_WINDOW_DAYS;
 }
 
+// Supabase Free plan limits; update these if the project is upgraded.
+const DB_LIMIT_BYTES = 500 * 1024 * 1024;
+const STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;
+
+function formatBytes(n) {
+  if (n >= 1024 ** 3) return (n / 1024 ** 3).toFixed(2) + " GB";
+  if (n >= 1024 ** 2) return (n / 1024 ** 2).toFixed(1) + " MB";
+  return Math.max(1, Math.round(n / 1024)) + " KB";
+}
+
+function UsageBar({ label, used, limit, note }) {
+  const pct = Math.min(100, (used / limit) * 100);
+  const tone = pct >= 90 ? "danger" : pct >= 70 ? "warn" : "ok";
+  return (
+    <div className="usage-row">
+      <div className="usage-row-head">
+        <span className="usage-label">{label}</span>
+        <span className="usage-figures">{formatBytes(used)} of {formatBytes(limit)} used · <strong>{formatBytes(Math.max(0, limit - used))} left</strong></span>
+      </div>
+      <div className="usage-track" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
+        <div className={"usage-fill usage-fill--" + tone} style={{ width: Math.max(pct, 1) + "%" }} />
+      </div>
+      {note && <span className="usage-note">{note}</span>}
+    </div>
+  );
+}
+
 function AdminDashboard({ content }) {
+  const [usage, setUsage] = useState(undefined);
+  useEffect(() => { getUsage().then(setUsage); }, []);
   const [users, setUsers] = useState(null);
   useEffect(() => { getUsersMap().then((u) => setUsers(u || {})); }, []);
 
@@ -2105,6 +2134,21 @@ function AdminDashboard({ content }) {
         <div className="stat-card"><span className="stat-num">{content.drills.length}</span><span className="stat-label">Total drills</span></div>
         <div className="stat-card"><span className="stat-num">{content.focusPoints.length}</span><span className="stat-label">Practice Focus</span></div>
         <div className="stat-card"><span className="stat-num">{content.offIceWorkouts.length}</span><span className="stat-label">Off-ice workouts</span></div>
+      </div>
+
+      <div className="admin-panel">
+        <h3>Storage</h3>
+        {usage === undefined ? (
+          <p className="planner-hint">Checking usage…</p>
+        ) : usage === null ? (
+          <p className="planner-hint">Couldn't load usage right now.</p>
+        ) : (
+          <>
+            <UsageBar label="Database" used={usage.dbBytes} limit={DB_LIMIT_BYTES} />
+            <UsageBar label="Photos & files" used={usage.storageBytes} limit={STORAGE_LIMIT_BYTES} note={`${usage.storageFiles} file${usage.storageFiles === 1 ? "" : "s"} uploaded`} />
+            <p className="planner-hint">Limits shown are for the Supabase Free plan (500 MB database, 1 GB files). Videos are hosted on YouTube, so they don't use this space.</p>
+          </>
+        )}
       </div>
 
       <div className="admin-panel">
@@ -5228,6 +5272,17 @@ button:focus {
 .dashboard-level-block { margin-bottom: 18px; }
 .dashboard-level-block:last-child { margin-bottom: 0; }
 .dashboard-level-title { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); margin-bottom: 4px; }
+.usage-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.usage-row-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; font-size: 13px; }
+.usage-label { font-weight: 600; }
+.usage-figures { color: var(--text-dim); }
+.usage-figures strong { color: var(--text); }
+.usage-track { height: 10px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.usage-fill { height: 100%; border-radius: 999px; transition: width .4s ease; }
+.usage-fill--ok { background: #22C55E; }
+.usage-fill--warn { background: #F5B841; }
+.usage-fill--danger { background: #EF4444; }
+.usage-note { font-size: 12px; color: var(--text-dim); }
 .dashboard-health-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .dashboard-health-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
 .dashboard-health-head { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
