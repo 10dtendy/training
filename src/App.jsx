@@ -120,37 +120,57 @@ const MAX_DAYS_BACK = 2;
 // A goalie who doesn't open the app for this many days in a row has that whole absence
 // skipped over by the training list (it pauses, then picks up where they left off).
 const ABSENCE_PAUSE_DAYS = 3;
-// Each training day is shown for this many calendar days in a row.
-const TRAINING_DAY_SPAN = 2;
-// Three practices make up a week, so training days are named block 1, 2, 3 and then start
-// over. `index` is the day's 0-based position in its level's list.
-const TRAINING_BLOCKS_PER_WEEK = 3;
-function trainingBlockName(index) {
-  const n = (index % TRAINING_BLOCKS_PER_WEEK) + 1;
-  return n === 1 ? "Weekly training block 1" : "Training block " + n;
+
+// The training week is fixed to the calendar: Mon-Tue is block 1, Wed-Thu is block 2,
+// Fri-Sat is block 3, and Sunday is an automatic rest day.
+function dateFromKey(key) {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+// Which block slot a date belongs to, or null for Sunday. slotKey is unique per week+block.
+function blockSlotOf(date) {
+  const dow = date.getDay();
+  if (dow === 0) return null;
+  const block = Math.floor((dow - 1) / 2) + 1;
+  return { block, slotKey: dateKey(addDays(date, -(dow - 1))) + ":" + block };
+}
+function trainingBlockName(block) {
+  return block === 1 ? "Weekly training block 1" : "Training block " + block;
 }
 
 function uid(prefix) {
   return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-// A goalie's own calendar marking: "game", "rest", or nothing (a normal training day).
-// "none" is what the calendar writes when a day is cleared back to normal.
-function resolveDayType(u, dateKeyStr) {
+// A goalie's own calendar marking: "game", "rest", or nothing. "none" is what the calendar
+// writes when a day is cleared back to normal.
+function personalDayType(u, dateKeyStr) {
   const personal = (u.dayTypes || {})[dateKeyStr];
   return personal === "game" || personal === "rest" ? personal : null;
 }
+// Sunday is an automatic rest day unless the goalie has marked it themselves (say, as a
+// game day). Coaches have no personal schedule, so they can preview training any day.
+function isAutoRest(u, dateKeyStr) {
+  return u.role !== "coach" && !personalDayType(u, dateKeyStr) && dateFromKey(dateKeyStr).getDay() === 0;
+}
+function resolveDayType(u, dateKeyStr) {
+  return personalDayType(u, dateKeyStr) || (isAutoRest(u, dateKeyStr) ? "rest" : null);
+}
 
-// Each goalie walks their level's ordered training-day list at their own pace. Day 1 is
-// the first day they open the app, and each training day is shown for TRAINING_DAY_SPAN
-// calendar days in a row. A game or rest day ends the current training day early (it
-// lasts 1 day instead) and the next one starts after it. A stretch of ABSENCE_PAUSE_DAYS or
-// more days in a row without opening the app is skipped entirely (the list pauses, then
-// resumes where they left off); one or two missed days still count as days. Returns the
-// training-day object for dateKeyStr, or null if that date is itself a game/rest day or
-// the coach hasn't created that many training days yet.
+// Each goalie walks their level's ordered training-day list, but the weekly rhythm is fixed
+// to the calendar (see blockSlotOf). Every block slot shows the next training day the goalie
+// hasn't had yet. A slot uses that training day up as soon as the goalie has at least one
+// available day in it: a game or rest day takes that day's place (so the block lasts 1 day),
+// and a slot with no available day at all doesn't use one up, so it's shown at the next
+// block. A stretch of ABSENCE_PAUSE_DAYS or more days in a row without opening the app is
+// treated as unavailable too (the list pauses, then resumes where they left off); one or two
+// missed days still count as available. The first training day is shown on the first day
+// they open the app. Returns { ...trainingDay, index, block } for dateKeyStr, or null if
+// that date is a game/rest day or the coach hasn't created that many training days yet.
 function trainingDayForDate(content, user, dateKeyStr, level) {
   if (resolveDayType(user, dateKeyStr)) return null;
+  const targetSlot = blockSlotOf(dateFromKey(dateKeyStr));
+  if (!targetSlot) return null;
   // Being in the app right now counts as today's activity, even before the record is saved.
   const loginDays = { ...(user.loginDays || {}), [dateKey(TODAY_DATE)]: true };
   const firstLogin = Object.keys(loginDays).sort()[0];
@@ -159,32 +179,33 @@ function trainingDayForDate(content, user, dateKeyStr, level) {
   // Before activity tracking existed there's no login history, so those days aren't judged.
   const startKey = firstLogin && firstLogin > signupKey ? firstLogin : signupKey;
   if (dateKeyStr < startKey) return null;
-  const [sy, sm, sd] = startKey.split("-").map(Number);
+
   const days = [];
-  for (let d = new Date(sy, sm - 1, sd); dateKey(d) < dateKeyStr; d = addDays(d, 1)) {
+  for (let d = dateFromKey(startKey); dateKey(d) < dateKeyStr; d = addDays(d, 1)) {
     const key = dateKey(d);
-    days.push({ key, away: !!firstLogin && key !== startKey && !loginDays[key] });
+    days.push({ key, away: !!firstLogin && key !== startKey && !loginDays[key], paused: false });
   }
-  let index = 0;
-  let daysShown = 0; // how many days the current training day has been on screen so far
-  const elapse = (key) => {
-    if (resolveDayType(user, key)) {
-      if (daysShown > 0) { index++; daysShown = 0; }
-    } else {
-      if (daysShown === TRAINING_DAY_SPAN) { index++; daysShown = 0; }
-      daysShown++;
-    }
-  };
   for (let i = 0; i < days.length; ) {
+    if (!days[i].away) { i++; continue; }
     let j = i;
-    if (days[i].away) { while (j < days.length && days[j].away) j++; } else { j = i + 1; }
-    const paused = days[i].away && j - i >= ABSENCE_PAUSE_DAYS;
-    if (!paused) for (let k = i; k < j; k++) elapse(days[k].key);
+    while (j < days.length && days[j].away) j++;
+    if (j - i >= ABSENCE_PAUSE_DAYS) for (let k = i; k < j; k++) days[k].paused = true;
     i = j;
   }
-  if (daysShown === TRAINING_DAY_SPAN) index++;
+
+  let index = 0;
+  let slotKey = null;
+  let used = false;
+  const closeSlot = () => { if (slotKey && slotKey !== targetSlot.slotKey && used) index++; };
+  for (const day of days) {
+    const slot = blockSlotOf(dateFromKey(day.key));
+    if (!slot) continue;
+    if (slot.slotKey !== slotKey) { closeSlot(); slotKey = slot.slotKey; used = false; }
+    if (!day.paused && !resolveDayType(user, day.key)) used = true;
+  }
+  closeSlot();
   const entry = (content.trainingDays?.[level] || [])[index];
-  return entry ? { ...entry, index } : null;
+  return entry ? { ...entry, index, block: targetSlot.block } : null;
 }
 
 // The notification bell's content — always computed fresh from the goalie's own calendar
@@ -199,7 +220,7 @@ function getReminders(user) {
   for (let offset = 0; offset <= MAX_DAYS_BACK; offset++) {
     const day = addDays(TODAY_DATE, -offset);
     const key = dateKey(day);
-    const type = resolveDayType(user, key);
+    const type = personalDayType(user, key);
     const when = offset === 0 ? "today" : offset === 1 ? "yesterday" : "on " + WEEKDAY_NAMES[day.getDay()];
     if (type === "game" && !(user.gameLogs || {})[key]) {
       reminders.push({
@@ -214,7 +235,7 @@ function getReminders(user) {
       });
     }
   }
-  if (resolveDayType(user, dateKey(addDays(TODAY_DATE, -1))) === "rest" && !resolveDayType(user, dateKey(TODAY_DATE))) {
+  if (personalDayType(user, dateKey(addDays(TODAY_DATE, -1))) === "rest" && !resolveDayType(user, dateKey(TODAY_DATE))) {
     reminders.push({ id: "rest-back", text: "You rested yesterday — time to get back to training today." });
   }
   return reminders;
@@ -600,7 +621,7 @@ function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoFo
   const weekday = WEEKDAY_NAMES[viewDate.getDay()].toUpperCase();
   const dateStr = `${viewDate.getDate()} ${MONTH_NAMES[viewDate.getMonth()]} ${viewDate.getFullYear()}`;
   const isToday = dateKey(viewDate) === dateKey(TODAY_DATE);
-  const dayTitle = assignment?.title || (assignment ? trainingBlockName(assignment.index) : (isToday ? "Today's training." : "Past training."));
+  const dayTitle = assignment?.title || (assignment ? trainingBlockName(assignment.block) : (isToday ? "Today's training." : "Past training."));
   const daySubtitle = assignment?.subtitle || (isToday ? "Three things to focus on today." : "What was assigned this day.");
 
   const eyebrowRow = (
@@ -915,9 +936,12 @@ function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, o
       )}
 
       {clearError && <div className="auth-error"><AlertTriangle size={13} /> {clearError}</div>}
-      <button className="btn btn--ghost daytype-clear" onClick={handleClear} disabled={clearBusy}>
-        {clearBusy ? "Saving…" : `This isn't a ${isGame ? "game" : "rest"} day — show my training`}
-      </button>
+      {/* An automatic Sunday rest isn't something the goalie marked, so there's nothing to clear. */}
+      {((dayTypes || {})[dateKey(viewDate)] === "game" || (dayTypes || {})[dateKey(viewDate)] === "rest") && (
+        <button className="btn btn--ghost daytype-clear" onClick={handleClear} disabled={clearBusy}>
+          {clearBusy ? "Saving…" : `This isn't a ${isGame ? "game" : "rest"} day — show my training`}
+        </button>
+      )}
     </div>
   );
 }
@@ -1849,7 +1873,7 @@ function AdminDashboard({ content }) {
 
       <div className="admin-panel">
         <h3>Training schedule health</h3>
-        <p className="planner-hint">Each training day lasts about 2 days, so {SCHEDULE_HEALTH_WINDOW_DAYS} queued is roughly two weeks of practice. Green means at least that many are queued for the level; red means fewer are ready, so goalies could run out soon.</p>
+        <p className="planner-hint">Each training day lasts about 2 days (3 a week), so {SCHEDULE_HEALTH_WINDOW_DAYS} queued is roughly two weeks of practice. Green means at least that many are queued for the level; red means fewer are ready, so goalies could run out soon.</p>
         <div className="dashboard-health-grid">
           {EXPERIENCE_LEVELS.map((lv) => {
             const healthy = levelScheduleIsHealthy(content, lv);
@@ -3079,7 +3103,7 @@ function AdminTrainingDays({ content, updateContent }) {
   return (
     <div className="admin-page">
       <h1 className="admin-h1">Training days</h1>
-      <p className="admin-sub">Build the ordered list each level works through. Each training day is shown for 2 days in a row (about 3 different practices a week); a game or rest day cuts the current training day short and the next one starts after it. A new goalie starts at Day 1 the first day they open the app, and being away 3 or more days in a row pauses their list until they're back.</p>
+      <p className="admin-sub">Build the ordered list each level works through. The week is fixed: block 1 is Monday–Tuesday, block 2 is Wednesday–Thursday, block 3 is Friday–Saturday, and Sunday is an automatic rest day. Each block shows the next training day from this list. A game or rest day takes that day's place (the block lasts 1 day), and a block with no available day doesn't use one up. A new goalie starts at Day 1 the first day they open the app, and being away 3 or more days in a row pauses their list until they're back.</p>
 
       <div className="admin-panel">
         <div className="planner-header">
@@ -3757,7 +3781,7 @@ function PrintSheet({ content, date, assignment }) {
         <div className="print-logo"><img src={LOGO_PRINT_SRC} alt="10DTendy" className="brand-logo brand-logo--print" /></div>
         <div className="print-date">{WEEKDAY_NAMES[printDate.getDay()]}, {printDate.getDate()} {MONTH_NAMES[printDate.getMonth()]} {printDate.getFullYear()}</div>
       </div>
-      <h1 className="print-title">{assignment?.title || (assignment ? trainingBlockName(assignment.index) : (dateKey(printDate) === dateKey(TODAY_DATE) ? "Today's Training" : "Training Day"))}</h1>
+      <h1 className="print-title">{assignment?.title || (assignment ? trainingBlockName(assignment.block) : (dateKey(printDate) === dateKey(TODAY_DATE) ? "Today's Training" : "Training Day"))}</h1>
 
       <div className="print-card">
         {drill && <img src={drillImg.src} style={drillImg.style} alt="" className="print-card-img" />}
