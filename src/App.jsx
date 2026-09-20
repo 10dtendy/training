@@ -1805,7 +1805,7 @@ function ProfileCalendar({ dayTypes, onSetDayType, onClose, gameLogs, restNotes,
   return (
     <div className="calendar-admin profile-calendar">
       <h3 className="profile-calendar-title">Games & Rest</h3>
-      <p className="planner-hint">Mark your own game days and rest days — on those dates, your Today page will show that instead of your normal training.</p>
+      <p className="planner-hint">Mark your game and rest days for this month.</p>
       <div className="calendar-admin-nav">
         <button className="icon-btn" onClick={() => setMonthOffset((m) => m - 1)}><ChevronLeft size={16} /></button>
         <span>{MONTH_NAMES[month]} {year}</span>
