@@ -343,7 +343,7 @@ const CROSSED_STICKS_PATH = "M 35.2 25.2 C 34.5 25.9 34 26.8 34 27.2 C 34 27.6 4
 
 function CrossedSticks({ size = 24, className, ...rest }) {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="-1 -1.5 182 182" fill="currentColor" className={className} aria-hidden="true" {...rest}>
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="-5 -6.5 190 190" fill="currentColor" stroke="currentColor" strokeWidth="6" strokeLinejoin="round" className={className} aria-hidden="true" {...rest}>
       <path fillRule="evenodd" d={CROSSED_STICKS_PATH} />
     </svg>
   );
