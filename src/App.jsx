@@ -143,27 +143,34 @@ function personalDayType(u, dateKeyStr) {
   const personal = (u.dayTypes || {})[dateKeyStr];
   return personal === "game" || personal === "rest" ? personal : null;
 }
-// A Sunday the goalie explicitly set back to "normal" (the "show my training" button, or clearing
-// it in the calendar) also opens Sunday up for training, the same as a marked game/rest day.
-function weekHasMark(u, monday) {
-  for (let i = 0; i < 7; i++) if (personalDayType(u, dateKey(addDays(monday, i)))) return true;
-  return (u.dayTypes || {})[dateKey(addDays(monday, 6))] === "none";
+// Each month a goalie picks how Sundays work: "sunday" (automatic rest day, the default) or "own"
+// (no automatic rest; they mark their own rest days). The plan is stored per month, e.g. "2026-10".
+function monthPlanFor(u, dateKeyStr) {
+  return (u.monthPlans || {})[dateKeyStr.slice(0, 7)] || "sunday";
 }
-// Sunday is an automatic rest day, but only in a week where the goalie hasn't marked any game
-// or rest day of their own; once they have, Sunday is free to be a training day. A coach has no
-// marks, so previewing shows the automatic Sunday rest page.
+// True when the Sunday of this week is a normal training day rather than the automatic rest day:
+// the goalie chose their own rest days this month, marked a rest day of their own that week (game
+// days don't count), or set that Sunday back to normal ("show my training" / clearing it in the
+// calendar).
+function sundayIsTraining(u, monday) {
+  const sundayKey = dateKey(addDays(monday, 6));
+  if (monthPlanFor(u, sundayKey) === "own") return true;
+  for (let i = 0; i < 7; i++) if (personalDayType(u, dateKey(addDays(monday, i))) === "rest") return true;
+  return (u.dayTypes || {})[sundayKey] === "none";
+}
+// Sunday is an automatic rest day unless sundayIsTraining. A coach has no marks, so previewing
+// shows the automatic Sunday rest page.
 function isAutoRest(u, dateKeyStr) {
   if (personalDayType(u, dateKeyStr) || (u.dayTypes || {})[dateKeyStr] === "none") return false;
   const date = dateFromKey(dateKeyStr);
-  return date.getDay() === 0 && !weekHasMark(u, mondayOf(date));
+  return date.getDay() === 0 && !sundayIsTraining(u, mondayOf(date));
 }
 function resolveDayType(u, dateKeyStr) {
   return personalDayType(u, dateKeyStr) || (isAutoRest(u, dateKeyStr) ? "rest" : null);
 }
 
 // Each goalie walks their level's ordered training-day list, one week at a time. In a week,
-// the days that are available to train (not marked game/rest, not Sunday unless the week has
-// a mark, not part of a long absence) are taken in order and paired up: the first two are
+// the days that are available to train (not marked game/rest, not Sunday unless it is a training Sunday (see sundayIsTraining), not part of a long absence) are taken in order and paired up: the first two are
 // block 1, the next two block 2, the next two block 3 (so an unmarked week is Mon-Tue,
 // Wed-Thu, Fri-Sat with Sunday off, and a marked week shifts things along, e.g. Wed game +
 // Sat rest gives Mon-Tue, Thu-Fri, and Sunday alone as block 3). Every block shows the next
@@ -206,12 +213,12 @@ function trainingDayForDate(content, user, dateKeyStr, level) {
   const targetMonday = mondayOf(target);
   let entriesBefore = 0;
   for (let monday = mondayOf(dateFromKey(startKey)); dateKey(monday) < dateKey(targetMonday); monday = addDays(monday, 7)) {
-    const sundayOk = user.role !== "coach" && weekHasMark(user, monday);
+    const sundayOk = user.role !== "coach" && sundayIsTraining(user, monday);
     let available = 0;
     for (let i = 0; i < 7; i++) if (isAvailable(addDays(monday, i), sundayOk)) available++;
     entriesBefore += Math.ceil(available / 2);
   }
-  const sundayOk = user.role !== "coach" && weekHasMark(user, targetMonday);
+  const sundayOk = user.role !== "coach" && sundayIsTraining(user, targetMonday);
   let before = 0;
   for (let d = targetMonday; dateKey(d) < dateKeyStr; d = addDays(d, 1)) if (isAvailable(d, sundayOk)) before++;
   const blockIndex = Math.floor(before / 2);
@@ -232,6 +239,11 @@ function trainingDayForDate(content, user, dateKeyStr, level) {
 function getReminders(user) {
   if (!user || user.role === "coach") return [];
   const reminders = [];
+  // New month: ask them to plan their game days and rest days until they've answered for it.
+  const monthStart = new Date(TODAY_DATE.getFullYear(), TODAY_DATE.getMonth(), 1);
+  if (user.createdAt && new Date(user.createdAt) < monthStart && !(user.monthPlans || {})[dateKey(TODAY_DATE).slice(0, 7)]) {
+    reminders.push({ id: "plan-" + dateKey(TODAY_DATE).slice(0, 7), action: "plan-month", text: `New month — add your game days and rest days for ${MONTH_NAMES[TODAY_DATE.getMonth()]}.` });
+  }
   for (let offset = 0; offset <= MAX_DAYS_BACK; offset++) {
     const day = addDays(TODAY_DATE, -offset);
     const key = dateKey(day);
@@ -543,7 +555,7 @@ function AuthScreen({ onAuthed }) {
    NAV
    ============================================================================ */
 
-function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen, user, onLogout, previewLevel, setPreviewLevel, dayType, onGoToday, reminders, onOpenReminder, onOpenCalendar }) {
+function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen, user, onLogout, previewLevel, setPreviewLevel, dayType, onGoToday, reminders, onOpenReminder, onOpenCalendar, onOpenPlan }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const items = dayType
     ? [
@@ -609,7 +621,9 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
                   <ul className="nav-notif-list">
                     {reminders.map((r) => (
                       <li key={r.id}>
-                        {r.date ? (
+                        {r.action === "plan-month" ? (
+                          <button className="nav-notif-item" onClick={() => { setNotifOpen(false); onOpenPlan(); }}>{r.text}</button>
+                        ) : r.date ? (
                           <button className="nav-notif-item" onClick={() => { setNotifOpen(false); onOpenReminder(r.date); }}>{r.text}</button>
                         ) : r.text}
                       </li>
@@ -840,6 +854,35 @@ function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoFo
 
 function savePct(g) {
   return g && g.shots > 0 ? (((g.shots - g.goalsAgainst) / g.shots) * 100).toFixed(1) : null;
+}
+
+function MonthPlanPrompt({ monthName, current, onChoose, onOpenCalendar, onLater }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const choose = async (mode) => {
+    setBusy(true); setError("");
+    const ok = await onChoose(mode);
+    setBusy(false);
+    if (ok === false) setError("Couldn't save that — check your connection and try again.");
+  };
+  return (
+    <div className="page detail month-plan">
+      <h1 className="detail-title">Plan {monthName}</h1>
+      <p className="hero-sub">Add your game days and rest days for {monthName} so your training lines up with your schedule.</p>
+      <button className="btn btn--ghost" onClick={onOpenCalendar}><CalendarIcon size={15} /> Add game days &amp; rest days</button>
+      <h2 className="month-plan-q">How should your Sundays work?</h2>
+      <button className={"month-plan-option" + (current === "sunday" ? " month-plan-option--active" : "")} onClick={() => choose("sunday")} disabled={busy}>
+        <strong>Make Sunday an automatic rest day</strong>
+        <span>Every Sunday is a rest day, unless you mark another rest day that week.</span>
+      </button>
+      <button className={"month-plan-option" + (current === "own" ? " month-plan-option--active" : "")} onClick={() => choose("own")} disabled={busy}>
+        <strong>I'll add my own rest days</strong>
+        <span>No automatic rest day. You choose your rest days in the calendar.</span>
+      </button>
+      {error && <div className="auth-error"><AlertTriangle size={13} /> {error}</div>}
+      <button className="btn btn--ghost btn--small" onClick={onLater}>Decide later</button>
+    </div>
+  );
 }
 
 function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, onPrevDay, onNextDay, onClear, gameLog, onSaveGameLog, restNote, onSaveRestNote, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame, autoRest = false }) {
@@ -1545,6 +1588,8 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
 
 function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile }) {
   const isCoach = user.role === "coach";
+  const planKey = dateKey(TODAY_DATE).slice(0, 7);
+  const currentPlan = (user.monthPlans || {})[planKey] || "sunday";
   const [changingPassword, setChangingPassword] = useState(false);
   const [currentPw, setCurrentPw] = useState("");
   const [newPw, setNewPw] = useState("");
@@ -1651,6 +1696,16 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile }) {
           {!isCoach && <div><span className="stat-label">League</span><span className="profile-value">{user.league || "—"}</span></div>}
           {!isCoach && <div><span className="stat-label">Team</span><span className="profile-value">{user.team || "—"}</span></div>}
         </div>
+
+        {!isCoach && (
+          <div className="month-plan-row">
+            <span className="stat-label">Sundays in {MONTH_NAMES[TODAY_DATE.getMonth()]}</span>
+            <div className="month-plan-toggle">
+              <button className={currentPlan === "sunday" ? "active" : ""} onClick={() => onUpdateProfile({ monthPlans: { ...(user.monthPlans || {}), [planKey]: "sunday" } })}>Automatic rest day</button>
+              <button className={currentPlan === "own" ? "active" : ""} onClick={() => onUpdateProfile({ monthPlans: { ...(user.monthPlans || {}), [planKey]: "own" } })}>My own rest days</button>
+            </div>
+          </div>
+        )}
 
         {!isCoach && (
           !editingProfile ? (
@@ -4454,6 +4509,8 @@ function AppInner() {
   const [content, setContent] = useState(null);
   const [saveFailed, setSaveFailed] = useState(false);
   const [navCalendarOpen, setNavCalendarOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
+  const planPromptedRef = useRef(false);
   const [progress, setProgress] = useState({ drill: false, focus: false, office: false });
 
   // Goalies can browse today plus the MAX_DAYS_BACK days before it — nothing older, nothing in the future.
@@ -4527,6 +4584,19 @@ function AppInner() {
       setAnnouncementOpen(true);
     }
   }, [user, content]);
+
+  // Once per visit, right after any welcome/announcement popup, ask new-month planning questions.
+  useEffect(() => {
+    if (planPromptedRef.current || !user || !content || user.role === "coach" || welcomeOpen || announcementOpen) return;
+    planPromptedRef.current = true;
+    if (getReminders(user).some((r) => r.action === "plan-month")) setPlanOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, content, welcomeOpen, announcementOpen]);
+
+  const setMonthPlan = async (mode) => {
+    const key = dateKey(TODAY_DATE).slice(0, 7);
+    return updateProfile({ monthPlans: { ...(user.monthPlans || {}), [key]: mode } });
+  };
 
   const markWelcomeSeen = async () => {
     setWelcomeOpen(false);
@@ -4678,7 +4748,7 @@ function AppInner() {
         <NavBar
           view={view} setView={goTo} isAdmin={isAdmin} setIsAdmin={setIsAdmin} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen}
           user={user} onLogout={onLogout} previewLevel={previewLevel} setPreviewLevel={setPreviewLevel} dayType={dayType} onGoToday={goToToday}
-          reminders={reminders} onOpenReminder={openReminderDate} onOpenCalendar={() => setNavCalendarOpen(true)}
+          reminders={reminders} onOpenReminder={openReminderDate} onOpenCalendar={() => setNavCalendarOpen(true)} onOpenPlan={() => setPlanOpen(true)}
         />
       )}
       {isAdmin && (
@@ -4740,6 +4810,21 @@ function AppInner() {
           view={view} onToday={goToToday} onGoTo={goTo} trainingDay={!dayType} onProgress={() => goTo("progress")}
           onOpenCalendar={() => setNavCalendarOpen(true)} showCalendar={!isCoach}
         />
+      )}
+      {planOpen && user.role !== "coach" && (
+        <PreviewModal label={`Plan ${MONTH_NAMES[TODAY_DATE.getMonth()]}`} onClose={() => setPlanOpen(false)}>
+          <MonthPlanPrompt
+            monthName={MONTH_NAMES[TODAY_DATE.getMonth()]}
+            current={(user.monthPlans || {})[dateKey(TODAY_DATE).slice(0, 7)]}
+            onChoose={async (mode) => {
+              const ok = await setMonthPlan(mode);
+              if (ok) { setPlanOpen(false); if (mode === "own") setNavCalendarOpen(true); }
+              return ok;
+            }}
+            onOpenCalendar={() => { setPlanOpen(false); setNavCalendarOpen(true); }}
+            onLater={() => setPlanOpen(false)}
+          />
+        </PreviewModal>
       )}
       {navCalendarOpen && (
         <PreviewModal label="Games & Rest" onClose={() => setNavCalendarOpen(false)} resizeIn>
@@ -5193,6 +5278,15 @@ button:focus {
 .training-block-search input { flex: 1; min-width: 0; background: transparent; border: none; outline: none; padding: 13px 0; color: var(--text); font-size: 14px; }
 .training-block-search-count { font-size: 12px; white-space: nowrap; }
 .drill-diagram { display: block; width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); }
+.month-plan { display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
+.month-plan-q { font-size: 16px; margin: 8px 0 0; }
+.month-plan-option { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); }
+.month-plan-option span { font-size: 13px; color: var(--text-dim); }
+.month-plan-option--active { border-color: var(--accent); }
+.month-plan-row { display: flex; flex-direction: column; gap: 8px; margin: 16px 0; }
+.month-plan-toggle { display: inline-flex; padding: 4px; gap: 4px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); align-self: flex-start; }
+.month-plan-toggle button { padding: 8px 14px; border-radius: 999px; font-size: 13px; color: var(--text-dim); }
+.month-plan-toggle button.active { background: var(--accent); color: #fff; }
 .training-block-head { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .training-block-title { color: var(--text-dim); font-weight: 500; }
 .training-block-date { font-size: 12px; color: var(--text-dim); }

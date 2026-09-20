@@ -23,7 +23,7 @@ function shapeUser(p, dayTypes, gameLogs, restNotes, loginDays) {
     lastActive: p.last_active ? new Date(p.last_active).getTime() : null,
     removed: p.removed, createdAt: p.created_at ? new Date(p.created_at).getTime() : null,
     dayTypes: dayTypes || {}, gameLogs: gameLogs || {}, restNotes: restNotes || {},
-    loginDays: loginDays || {},
+    loginDays: loginDays || {}, monthPlans: p.month_plans || {},
   };
 }
 
@@ -101,7 +101,7 @@ export async function updateUserFields(userId, patch) {
       country: "country", league: "league", team: "team",
       photoUrl: "photo_url", hasSeenWelcome: "has_seen_welcome",
       lastSeenAnnouncementId: "last_seen_announcement_id",
-      role: "role", removed: "removed",
+      role: "role", removed: "removed", monthPlans: "month_plans",
     };
     for (const [jsKey, col] of Object.entries(fieldMap)) {
       if (jsKey in patch) profileFields[col] = patch[jsKey];
