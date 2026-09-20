@@ -3573,9 +3573,14 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
     [next[i], next[j]] = [next[j], next[i]];
     setList(next);
   };
+  // Deleting removes the same-numbered block from Youth, Junior and Pro together, so the levels stay lined up.
   const removeDay = (i) => {
-    if (!window.confirm(`Delete Block ${i + 1}${list[i].title ? ` (${list[i].title})` : ""}? Every later block moves up one, so goalies partway through this list will see different training next.`)) return;
-    setList(list.filter((_, idx) => idx !== i));
+    if (!window.confirm(`Delete Block ${i + 1}${list[i].title ? ` (${list[i].title})` : ""} from Youth, Junior and Pro? Every later block moves up one, so goalies partway through the list will see different training next.`)) return;
+    if (editingId === list[i].id) setEditingId(null);
+    updateContent((c) => ({
+      ...c,
+      trainingDays: Object.fromEntries(LEVELS.map((lv) => [lv, (c.trainingDays[lv] || []).filter((_, idx) => idx !== i)])),
+    }));
   };
 
   const openCopy = (day) => { setCopyingId(day.id); setCopyAfter(list.length); };
