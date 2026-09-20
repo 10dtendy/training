@@ -5,7 +5,7 @@ import {
   Calendar as CalendarIcon, LayoutGrid, Users as UsersIcon,
   Image as ImageIcon, Settings as SettingsIcon, Download, Gauge, LogOut,
   Mail, Lock, UploadCloud, FileText, Video as VideoIcon, AlertTriangle,
-  Home, BarChart3, Tag, Search, CircleDot, VenetianMask, Armchair, Copy, LayoutTemplate, Megaphone, Camera
+  Home, BarChart3, Tag, Search, CircleDot, Armchair, Copy, LayoutTemplate, Megaphone, Camera
 } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
 import {
@@ -336,6 +336,17 @@ function GoalieMark({ size = 22 }) {
 function initials(name) {
   if (!name) return "?";
   return name.trim().split(/\s+/).slice(0, 2).map((p) => p[0].toUpperCase()).join("");
+}
+
+// Traced directly from the reference crossed-sticks artwork.
+const CROSSED_STICKS_PATH = "M 35.2 25.2 C 34.5 25.9 34 26.8 34 27.2 C 34 27.6 45.5 42.4 59.5 60 C 73.5 77.7 85 92.5 85 93 C 85 94.5 50.1 136.9 47.4 138.6 C 43.5 141.2 31.8 140 17.7 135.5 C 6.4 131.9 5.9 131.8 4 133.5 C -0.5 137.6 2.1 144.9 9.4 148.4 C 14.4 150.8 30.2 154.1 37.6 154.3 C 45.6 154.6 46.1 154.1 66.3 128 C 74.6 117.3 83.3 106.1 85.6 103.3 L 89.8 98 103.2 114.8 C 110.5 124 119.3 135.3 122.7 140 C 132.3 153.3 133.9 154.5 141.4 154.3 C 149 154.1 165.8 150.7 169.9 148.6 C 177.8 144.5 180.6 135 174.5 132.6 C 173.7 132.3 167 133.8 159.8 136 C 146.3 140.1 136.1 141.2 132.1 139 C 130.5 138.2 94.9 95 94.3 93.2 C 94.1 92.8 100.9 83.9 109.3 73.5 C 145.1 28.6 146.1 27.4 144.1 25.6 C 143.1 24.7 142.1 24 141.8 24 C 141.5 24 129.6 38.4 115.4 56.1 C 90.6 86.9 89.6 88.1 88.1 86.1 C 77 71.6 38.2 24.1 37.5 24.1 C 36.9 24 35.9 24.5 35.2 25.2 M 80.6 144.1 C 77 146.9 77.1 151.3 80.7 153.7 C 83.9 155.8 96.2 156.1 99.8 154.2 C 102.9 152.4 102.9 145.8 99.8 143.6 C 96.3 141.1 84 141.4 80.6 144.1";
+
+function CrossedSticks({ size = 24, className, ...rest }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="-1 -1.5 182 182" fill="currentColor" className={className} aria-hidden="true" {...rest}>
+      <path fillRule="evenodd" d={CROSSED_STICKS_PATH} />
+    </svg>
+  );
 }
 
 // Traced directly from the reference goalie-mask artwork.
@@ -4172,7 +4183,7 @@ function AdminApp({ content, updateContent, saveContent }) {
     { key: "drills", label: "Drills", icon: GoalieMask, bold: true },
     { key: "focus", label: "Practice Focus", icon: HockeyNet, bold: true },
     { key: "office", label: "Off-Ice", icon: CircleDot, bold: true },
-    { key: "gameday", label: "Game Day", icon: VenetianMask, bold: true },
+    { key: "gameday", label: "Game Day", icon: CrossedSticks, bold: true },
     { key: "restday", label: "Rest Day", icon: Armchair, bold: true },
     { key: "frontpage", label: "Front Page", icon: LayoutTemplate },
     { key: "welcome", label: "Welcome", icon: Megaphone },
