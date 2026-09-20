@@ -1048,33 +1048,108 @@ function youtubeVideoId(url) {
   const m = String(url).match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
   return m ? m[1] : null;
 }
-// Shows the video's thumbnail with a play button until clicked, instead of loading the
-// real iframe up front — the thumbnail is a static image so it appears instantly, and the
-// iframe (which takes a moment to load and buffer) only mounts once the goalie asks for it.
-function YouTubeEmbed({ url, title, size }) {
-  const [playing, setPlaying] = useState(false);
-  const id = youtubeVideoId(url);
-  if (!id) return null;
-  // No ?autoplay=1 here — the artifact platform's own sandboxing iframe doesn't
-  // delegate the "autoplay" permission down to embedded content, so a YouTube
-  // player that tries to autoplay under that restriction can fail to initialize
-  // at all instead of just staying paused. Loading it plain and letting the
-  // goalie hit YouTube's own play button once is what reliably works here.
-  if (playing) {
-    return (
-      <iframe
-        src={`https://www.youtube.com/embed/${id}`} title={title || "YouTube video"}
-        allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-        allowFullScreen
-        onContextMenu={(e) => e.preventDefault()}
-      />
-    );
+// YouTube's iframe API is loaded once and shared by every video on the page.
+let youtubeApiPromise = null;
+function loadYouTubeApi() {
+  if (typeof window === "undefined") return Promise.reject(new Error("no window"));
+  if (window.YT && window.YT.Player) return Promise.resolve(window.YT);
+  if (!youtubeApiPromise) {
+    youtubeApiPromise = new Promise((resolve, reject) => {
+      const previous = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => { if (previous) previous(); resolve(window.YT); };
+      const tag = document.createElement("script");
+      tag.src = "https://www.youtube.com/iframe_api";
+      tag.onerror = () => { youtubeApiPromise = null; reject(new Error("YouTube API failed to load")); };
+      document.head.appendChild(tag);
+    });
   }
+  return youtubeApiPromise;
+}
+
+// A YouTube video that looks and behaves like part of this app rather than YouTube:
+//  - it shows only the video's thumbnail with our own play button until it's clicked;
+//  - the real player is driven through the iframe API with all of YouTube's controls, title
+//    and logo switched off, and it's never clickable (a transparent layer sits over it and
+//    the iframe ignores the mouse), so there's no way to open YouTube or its menus;
+//  - clicking the thumbnail starts the video; clicking the playing video pauses it and goes
+//    back to the thumbnail, so YouTube's paused/ended screens are never shown.
+function YouTubeEmbed({ url, title, size }) {
+  const id = youtubeVideoId(url);
+  const hostRef = useRef(null);
+  const playerRef = useRef(null);
+  const [status, setStatus] = useState("idle"); // idle | loading | playing
+  const [thumbTier, setThumbTier] = useState(0);
+  const thumbs = ["maxresdefault", "hqdefault"];
+
+  const destroyPlayer = () => {
+    if (playerRef.current && playerRef.current.destroy) { try { playerRef.current.destroy(); } catch { /* already gone */ } }
+    playerRef.current = null;
+  };
+  useEffect(() => { loadYouTubeApi().catch(() => {}); }, []);
+  useEffect(() => { setStatus("idle"); setThumbTier(0); return destroyPlayer; }, [id]);
+
+  if (!id) return null;
+
+  const start = async () => {
+    if (playerRef.current) {
+      setStatus("loading");
+      playerRef.current.playVideo();
+      return;
+    }
+    setStatus("loading");
+    let YT;
+    try { YT = await loadYouTubeApi(); } catch { setStatus("idle"); return; }
+    if (!hostRef.current) return;
+    const mount = document.createElement("div");
+    hostRef.current.appendChild(mount);
+    playerRef.current = new YT.Player(mount, {
+      videoId: id,
+      host: "https://www.youtube-nocookie.com",
+      width: "100%", height: "100%",
+      playerVars: {
+        autoplay: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, modestbranding: 1,
+        iv_load_policy: 3, cc_load_policy: 0, playsinline: 1, origin: window.location.origin,
+      },
+      events: {
+        onReady: (e) => {
+          const frame = e.target.getIframe && e.target.getIframe();
+          if (frame) { frame.title = title || "Video"; frame.setAttribute("tabindex", "-1"); }
+          e.target.playVideo();
+        },
+        onStateChange: (e) => {
+          const State = YT.PlayerState;
+          if (e.data === State.PLAYING) setStatus("playing");
+          else if (e.data === State.ENDED) { e.target.stopVideo(); setStatus("idle"); }
+          else if (e.data === State.PAUSED || e.data === State.CUED) setStatus("idle");
+        },
+        onError: () => setStatus("idle"),
+      },
+    });
+  };
+  const pause = () => {
+    if (playerRef.current && playerRef.current.pauseVideo) playerRef.current.pauseVideo();
+    setStatus("idle");
+  };
+
+  const playing = status === "playing";
   return (
-    <button type="button" className="youtube-thumb" onClick={() => setPlaying(true)} onContextMenu={(e) => e.preventDefault()} aria-label="Play video">
-      <img src={`https://img.youtube.com/vi/${id}/hqdefault.jpg`} alt="" className="youtube-thumb-img" />
-      <span className={"youtube-play-btn" + (size === "sm" ? " youtube-play-btn--sm" : "")}><Play size={size === "sm" ? 16 : 26} fill="var(--bg)" /></span>
-    </button>
+    <div className="youtube-stage" onContextMenu={(e) => e.preventDefault()}>
+      <div ref={hostRef} className={"youtube-frame" + (playing ? "" : " youtube-frame--hidden")} />
+      {playing ? (
+        <button type="button" className="youtube-shield" onClick={pause} aria-label="Pause video" />
+      ) : (
+        <button type="button" className="youtube-thumb" onClick={start} aria-label="Play video" disabled={status === "loading"}>
+          <img
+            src={`https://img.youtube.com/vi/${id}/${thumbs[thumbTier]}.jpg`} alt="" className="youtube-thumb-img"
+            onLoad={(e) => { if (e.target.naturalWidth < 200 && thumbTier < thumbs.length - 1) setThumbTier(thumbTier + 1); }}
+            onError={() => { if (thumbTier < thumbs.length - 1) setThumbTier(thumbTier + 1); }}
+          />
+          <span className={"youtube-play-btn" + (size === "sm" ? " youtube-play-btn--sm" : "") + (status === "loading" ? " youtube-play-btn--loading" : "")}>
+            <Play size={size === "sm" ? 16 : 26} fill="var(--bg)" />
+          </span>
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -4672,12 +4747,18 @@ button:focus {
 .upload-dropzone--small { padding: 16px; margin-bottom: 0; flex-direction: row; justify-content: center; }
 .upload-dropzone--small:disabled { opacity: 0.6; }
 .youtube-embed-sm { position: relative; width: 160px; aspect-ratio: 16/9; flex: none; border-radius: 8px; overflow: hidden; background: var(--surface-2); }
-.youtube-embed-sm iframe, .video--youtube iframe, .exercise-media-youtube iframe { position: absolute; inset: 0; border: none; }
+.youtube-stage { position: absolute; inset: 0; background: #000; overflow: hidden; }
+.youtube-frame { position: absolute; inset: 0; }
+.youtube-frame--hidden { visibility: hidden; }
+.youtube-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; pointer-events: none; }
+.youtube-shield { position: absolute; inset: 0; z-index: 2; padding: 0; border: none; background: transparent; cursor: pointer; }
 .youtube-thumb { position: absolute; inset: 0; padding: 0; border: none; background: var(--surface-2); cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .youtube-thumb-img { position: absolute; inset: 0; object-fit: cover; }
 .youtube-play-btn { position: relative; z-index: 1; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; transition: transform .18s ease; }
 .youtube-thumb:hover .youtube-play-btn { transform: scale(1.06); }
 .youtube-play-btn--sm { width: 32px; height: 32px; }
+.youtube-play-btn--loading { opacity: 0.6; }
+.youtube-thumb:disabled { cursor: default; }
 .youtube-input-row { display: flex; gap: 8px; }
 .youtube-input-row input { flex: 1; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; color: var(--text); font-size: 13px; }
 .media-section-label { font-size: 12px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.03em; margin-top: 4px; }
