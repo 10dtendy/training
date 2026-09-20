@@ -1937,7 +1937,7 @@ function ProgressPage({ user, content }) {
           </div>
         </div>
         <div className="stats-grid progress-stats-col">
-          <div className="stat-card"><span className="stat-num">{trainingDaysCount}</span><span className="stat-label">Training days</span></div>
+          <div className="stat-card"><span className="stat-num">{trainingDaysCount}</span><span className="stat-label">Training blocks</span></div>
           <div className="stat-card"><span className="stat-num">{restDaysCount}</span><span className="stat-label">Rest days</span></div>
           <div className="stat-card"><span className="stat-num">{gamesLoggedCount}</span><span className="stat-label">Games logged</span></div>
           <div className="stat-card"><span className="stat-num">{partialDaysCount}</span><span className="stat-label">Partially complete days</span></div>
@@ -2031,7 +2031,7 @@ function AdminDashboard({ content }) {
 
       <div className="admin-panel">
         <h3>Training schedule health</h3>
-        <p className="planner-hint">Each training day lasts about 2 days (3 a week), so {SCHEDULE_HEALTH_WINDOW_DAYS} queued is roughly two weeks of practice. Green means at least that many are queued for the level; red means fewer are ready, so goalies could run out soon.</p>
+        <p className="planner-hint">Each training block lasts about 2 days (3 a week), so {SCHEDULE_HEALTH_WINDOW_DAYS} queued is roughly two weeks of practice. Green means at least that many are queued for the level; red means fewer are ready, so goalies could run out soon.</p>
         <div className="dashboard-health-grid">
           {EXPERIENCE_LEVELS.map((lv) => {
             const healthy = levelScheduleIsHealthy(content, lv);
@@ -2042,7 +2042,7 @@ function AdminDashboard({ content }) {
                   <span className={"dashboard-health-dot" + (healthy ? " dashboard-health-dot--ok" : " dashboard-health-dot--warn")} />
                   <span>{lv}</span>
                 </div>
-                <span className="dashboard-health-days">{ahead} training day{ahead === 1 ? "" : "s"} queued</span>
+                <span className="dashboard-health-days">{ahead} training block{ahead === 1 ? "" : "s"} queued</span>
               </div>
             );
           })}
@@ -2347,7 +2347,7 @@ function AdminDrills({ content, updateContent }) {
     const dayUses = countDailyAssignmentUses(content, "drillId", id);
     const focusUses = content.focusPoints.reduce((n, f) => n + (f.blocks || []).filter((b) => b.type === "drill" && b.drillId === id).length, 0);
     const where = [
-      dayUses > 0 && `${dayUses} training day${dayUses === 1 ? "" : "s"}`,
+      dayUses > 0 && `${dayUses} training block${dayUses === 1 ? "" : "s"}`,
       focusUses > 0 && `${focusUses} practice focus${focusUses === 1 ? "" : "es"}`,
     ].filter(Boolean).join(" and ");
     const msg = where
@@ -2827,7 +2827,7 @@ function AdminFocusPoints({ content, updateContent }) {
   const remove = (id) => {
     const uses = countDailyAssignmentUses(content, "focusId", id);
     const msg = uses > 0
-      ? `This practice focus is assigned in ${uses} place${uses === 1 ? "" : "s"} (a training day) — deleting it will leave those without a focus. Delete anyway?`
+      ? `This practice focus is assigned in ${uses} place${uses === 1 ? "" : "s"} (a training block) — deleting it will leave those without a focus. Delete anyway?`
       : "Delete this practice focus? This can't be undone.";
     if (!window.confirm(msg)) return;
     updateContent((c) => ({ ...c, focusPoints: c.focusPoints.filter((f) => f.id !== id) }));
@@ -3108,7 +3108,7 @@ function AdminOffIce({ content, updateContent }) {
   const remove = (id) => {
     const uses = countDailyAssignmentUses(content, "workoutId", id);
     const msg = uses > 0
-      ? `This workout is used in ${uses} training day${uses === 1 ? "" : "s"} — deleting it will leave those days without an off-ice workout. Delete anyway?`
+      ? `This workout is used in ${uses} training block${uses === 1 ? "" : "s"} — deleting it will leave those blocks without an off-ice workout. Delete anyway?`
       : "Delete this workout? This can't be undone.";
     if (!window.confirm(msg)) return;
     updateContent((c) => ({ ...c, offIceWorkouts: c.offIceWorkouts.filter((o) => o.id !== id) }));
@@ -3283,12 +3283,12 @@ function AdminTrainingDays({ content, updateContent }) {
 
   return (
     <div className="admin-page">
-      <h1 className="admin-h1">Training days</h1>
-      <p className="admin-sub">Build the ordered list each level works through. Each week has 3 blocks of 2 days. With nothing marked it runs block 1 Monday–Tuesday, block 2 Wednesday–Thursday, block 3 Friday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day that week, Sunday opens up as a training day and the blocks shift along the days they have left (a game day Wednesday and a rest day Saturday gives Monday–Tuesday, Thursday–Friday, and Sunday alone as block 3). Each block shows the next training day from this list. A new goalie starts at Day 1 the first day they open the app, and being away 3 or more days in a row pauses their list until they're back.</p>
+      <h1 className="admin-h1">Training blocks</h1>
+      <p className="admin-sub">Build the ordered list of training blocks each level works through. Each week has 3 blocks of about 2 days. With nothing marked it runs block 1 Monday–Tuesday, block 2 Wednesday–Thursday, block 3 Friday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day that week, Sunday opens up as a training day and the blocks shift along the days they have left (a game day Wednesday and a rest day Saturday gives Monday–Tuesday, Thursday–Friday, and Sunday alone as block 3). A new goalie starts at Block 1 the first day they open the app, and being away 3 or more days in a row pauses their list until they're back.</p>
 
       <div className="admin-panel">
         <div className="planner-header">
-          <h3>{level} — {list.length} training day{list.length === 1 ? "" : "s"}</h3>
+          <h3>{level} — {list.length} training block{list.length === 1 ? "" : "s"}</h3>
           <div className="level-tabs">
             {EXPERIENCE_LEVELS.map((lv) => (
               <button key={lv} type="button" className={"level-tab" + (level === lv ? " active" : "")} onClick={() => setLevel(lv)}>
@@ -3297,29 +3297,29 @@ function AdminTrainingDays({ content, updateContent }) {
             ))}
           </div>
         </div>
-        <p className="planner-hint">Goalies are already partway through this list once they've signed up, so inserting, deleting, or reordering days changes what each of them sees next. Adding new days at the end is always safe.</p>
+        <p className="planner-hint">Goalies are already partway through this list once they've signed up, so inserting, deleting, or reordering blocks changes what each of them sees next. Adding new blocks at the end is always safe.</p>
       </div>
 
       {list.map((day, i) => (
         <div className="admin-panel training-day-card" key={day.id}>
           <div className="planner-header">
-            <h3>Day {i + 1}{dayIsEmpty(day) && <span className="chip" style={{ marginLeft: 8 }}>Empty</span>}</h3>
+            <h3>Block {i + 1}{dayIsEmpty(day) && <span className="chip" style={{ marginLeft: 8 }}>Empty</span>}</h3>
             <div className="admin-row-actions">
-              <button className="icon-btn" onClick={() => moveDay(i, -1)} disabled={i === 0} aria-label={`Move Day ${i + 1} up`}><ChevronUp size={15} /></button>
-              <button className="icon-btn" onClick={() => moveDay(i, 1)} disabled={i === list.length - 1} aria-label={`Move Day ${i + 1} down`}><ChevronDown size={15} /></button>
-              <button className="icon-btn" onClick={() => (copyingId === day.id ? setCopyingId(null) : openCopy(day))} aria-label={`Copy Day ${i + 1}`}><Copy size={15} /></button>
-              <button className="icon-btn" onClick={() => removeDay(i)} aria-label={`Delete Day ${i + 1}`}><Trash2 size={15} /></button>
+              <button className="icon-btn" onClick={() => moveDay(i, -1)} disabled={i === 0} aria-label={`Move Block ${i + 1} up`}><ChevronUp size={15} /></button>
+              <button className="icon-btn" onClick={() => moveDay(i, 1)} disabled={i === list.length - 1} aria-label={`Move Block ${i + 1} down`}><ChevronDown size={15} /></button>
+              <button className="icon-btn" onClick={() => (copyingId === day.id ? setCopyingId(null) : openCopy(day))} aria-label={`Copy Block ${i + 1}`}><Copy size={15} /></button>
+              <button className="icon-btn" onClick={() => removeDay(i)} aria-label={`Delete Block ${i + 1}`}><Trash2 size={15} /></button>
             </div>
           </div>
 
           {copyingId === day.id && (
             <div className="training-day-copy">
-              <label>Insert a copy of Day {i + 1} after
+              <label>Insert a copy of Block {i + 1} after
                 <select value={copyAfter} onChange={(e) => setCopyAfter(Number(e.target.value))}>
-                  {list.map((_, k) => <option key={k} value={k + 1}>Day {k + 1}{k + 1 === list.length ? " (end of list)" : ""}</option>)}
+                  {list.map((_, k) => <option key={k} value={k + 1}>Block {k + 1}{k + 1 === list.length ? " (end of list)" : ""}</option>)}
                 </select>
               </label>
-              <p className="planner-hint">The copy becomes Day {copyAfter + 1}{copyAfter < list.length ? `, and every day after it moves down one` : ""}.</p>
+              <p className="planner-hint">The copy becomes Block {copyAfter + 1}{copyAfter < list.length ? `, and every day after it moves down one` : ""}.</p>
               <div className="admin-form-actions" style={{ marginTop: 0 }}>
                 <button className="btn btn--ghost btn--small" onClick={() => setCopyingId(null)}>Cancel</button>
                 <button className="btn btn--primary btn--small" onClick={() => copyDay(i)}><Copy size={13} /> Insert copy</button>
@@ -3338,7 +3338,7 @@ function AdminTrainingDays({ content, updateContent }) {
 
           <div className="planner-grid">
             <AssignmentPicker
-              label="Drill of the day" icon={Goal} items={content.drills} categories={categoriesOfType(content, "drill")}
+              label="Drill of the block" icon={Goal} items={content.drills} categories={categoriesOfType(content, "drill")}
               value={day.drillId} onChange={(v) => updateDay(i, { drillId: v })} categoryFilter={drillCat} onCategoryFilterChange={setDrillCat}
             />
             <AssignmentPicker
@@ -3353,7 +3353,7 @@ function AdminTrainingDays({ content, updateContent }) {
         </div>
       ))}
 
-      <button className="btn btn--primary" onClick={addDay}><Plus size={15} /> Add training day</button>
+      <button className="btn btn--primary" onClick={addDay}><Plus size={15} /> Add training block</button>
     </div>
   );
 }
@@ -3985,7 +3985,7 @@ function AdminApp({ content, updateContent, saveContent }) {
   const [section, setSection] = useState("dashboard");
   const nav = [
     { key: "dashboard", label: "Dashboard", icon: LayoutGrid },
-    { key: "calendar", label: "Training Days", icon: CalendarIcon },
+    { key: "calendar", label: "Training Blocks", icon: CalendarIcon },
     { key: "categories", label: "Categories", icon: Tag },
     { key: "drills", label: "Drills", icon: Goal, bold: true },
     { key: "focus", label: "Practice Focus", icon: Target, bold: true },
