@@ -339,13 +339,16 @@ function initials(name) {
 }
 
 function HockeyNet({ size = 24, strokeWidth = 2, className, ...rest }) {
+  const clipId = "hockey-net-" + React.useId().replace(/:/g, "");
+  const inner = "M5.5 18V12A3 3 0 0 1 8.5 9h7a3 3 0 0 1 3 3v6";
   return (
     <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
       strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true" {...rest}>
-      <path d="M3 20V6h18v14" />
-      <path d="M3 6l4 4M21 6l-4 4M3 20l4-4M21 20l-4-4" />
-      <path d="M7 16V10h10v6" />
-      <path d="M12 10v6" strokeWidth={strokeWidth * 0.6} opacity="0.75" />
+      <defs><clipPath id={clipId}><path d={inner + "Q12 16 5.5 18Z"} /></clipPath></defs>
+      <path d="M2.5 19V11A5 5 0 0 1 7.5 6h9A5 5 0 0 1 21.5 11v8" />
+      <path d={inner} />
+      <g clipPath={`url(#${clipId})`} strokeWidth={strokeWidth * 0.6}><path d="M-4 6l14 14M10 6l-14 14M2 6l14 14M16 6l-14 14M8 6l14 14M22 6l-14 14M14 6l14 14M28 6l-14 14M20 6l14 14M34 6l-14 14M26 6l14 14M40 6l-14 14" /></g>
+      <path d="M5.5 18Q12 16 18.5 18" />
     </svg>
   );
 }
