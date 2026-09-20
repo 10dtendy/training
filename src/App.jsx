@@ -3683,12 +3683,34 @@ function AdminFrontPage({ content, updateContent }) {
   );
 }
 
-function AdminWelcome({ content, updateContent }) {
-  const welcome = content.welcome || DEFAULT_WELCOME;
+function AdminWelcome({ content, updateContent, saveContent }) {
+  const savedWelcome = content.welcome || DEFAULT_WELCOME;
   const announcement = content.announcement || DEFAULT_ANNOUNCEMENT;
   const [previewWhich, setPreviewWhich] = useState(null);
 
-  const setWelcomeField = (patch) => updateContent((c) => ({ ...c, welcome: { ...(c.welcome || DEFAULT_WELCOME), ...patch } }));
+  // The welcome screen is edited as a draft and only goes live when it's saved, so there's
+  // an explicit, confirmed "published" moment (the announcement below works the same way).
+  const [draft, setDraft] = useState(savedWelcome);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [savedAt, setSavedAt] = useState(null);
+  const welcome = draft;
+  const dirty = draft.title !== savedWelcome.title || draft.body !== savedWelcome.body || (draft.videoUrl || "") !== (savedWelcome.videoUrl || "");
+  const setWelcomeField = (patch) => { setSaveError(""); setDraft((d) => ({ ...d, ...patch })); };
+  const saveWelcome = async () => {
+    setSaving(true);
+    setSaveError("");
+    const ok = await saveContent({ welcome: { ...draft, videoAssetId: null } });
+    setSaving(false);
+    if (ok) setSavedAt(new Date());
+    else setSaveError("Couldn't save — nothing was published. Check your connection and try again.");
+  };
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
   const setAnnouncementField = (patch) => updateContent((c) => ({ ...c, announcement: { ...(c.announcement || DEFAULT_ANNOUNCEMENT), ...patch } }));
 
   const publishAnnouncement = () => setAnnouncementField({ enabled: true, id: uid("ann") });
@@ -3707,8 +3729,18 @@ function AdminWelcome({ content, updateContent }) {
           <label className="admin-form-span2">Message (one paragraph per line)<textarea rows={6} value={welcome.body} onChange={(e) => setWelcomeField({ body: e.target.value })} /></label>
           <YouTubeField value={welcome.videoUrl} onChange={(url) => setWelcomeField({ videoAssetId: null, videoUrl: url })} label="Video (optional)" />
         </div>
-        <div className="admin-form-actions">
-          <button className="btn btn--ghost btn--small" onClick={() => setPreviewWhich("welcome")}><Play size={13} /> Preview</button>
+        {saveError && <div className="email-status email-status--error"><AlertTriangle size={14} /> {saveError}</div>}
+        <div className="daytype-notes-actions">
+          <span className={"status-pill" + (dirty ? "" : " status-pill--live")}>
+            {dirty ? <EyeOff size={12} /> : <Check size={12} />}
+            {" "}{dirty ? "Unsaved changes — new goalies still see the last saved version" : savedAt ? "Saved & live — " + savedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Saved & live"}
+          </span>
+          <div className="admin-row-actions">
+            <button className="btn btn--ghost btn--small" onClick={() => setPreviewWhich("welcome")}><Play size={13} /> Preview</button>
+            <button className="btn btn--primary btn--small" disabled={!dirty || saving} onClick={saveWelcome}>
+              <Check size={13} /> {saving ? "Saving…" : "Save & publish"}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -3819,7 +3851,7 @@ function AdminConfirmationEmail({ content, updateContent }) {
    ADMIN SHELL
    ============================================================================ */
 
-function AdminApp({ content, updateContent }) {
+function AdminApp({ content, updateContent, saveContent }) {
   const [section, setSection] = useState("dashboard");
   const nav = [
     { key: "dashboard", label: "Dashboard", icon: LayoutGrid },
@@ -3856,7 +3888,7 @@ function AdminApp({ content, updateContent }) {
         {section === "gameday" && <AdminGameDay content={content} updateContent={updateContent} />}
         {section === "restday" && <AdminRestDay content={content} updateContent={updateContent} />}
         {section === "frontpage" && <AdminFrontPage content={content} updateContent={updateContent} />}
-        {section === "welcome" && <AdminWelcome content={content} updateContent={updateContent} />}
+        {section === "welcome" && <AdminWelcome content={content} updateContent={updateContent} saveContent={saveContent} />}
         {section === "email" && <AdminConfirmationEmail content={content} updateContent={updateContent} />}
         {section === "users" && <AdminUsers />}
         {section === "media" && <AdminMedia content={content} updateContent={updateContent} />}
@@ -4087,6 +4119,15 @@ function AppInner() {
     if (ok) setUser((prev) => ({ ...prev, lastSeenAnnouncementId: id }));
   };
 
+  // Unlike updateContent (fire-and-forget), this waits for the database and returns whether the
+  // write succeeded, so a screen can show a real "saved" confirmation. The local copy is only
+  // updated once the save has gone through.
+  const saveContent = async (patch) => {
+    const ok = await updateContentFields(patch);
+    if (ok) setContent((prev) => ({ ...prev, ...patch }));
+    return ok;
+  };
+
   const updateContent = (fn) => {
     setContent((prev) => {
       const next = fn(prev);
@@ -4220,7 +4261,7 @@ function AppInner() {
 
       <main className="main no-print">
         {isAdmin ? (
-          <AdminApp content={content} updateContent={updateContent} />
+          <AdminApp content={content} updateContent={updateContent} saveContent={saveContent} />
         ) : (
           <>
             {(() => {
