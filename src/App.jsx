@@ -1365,6 +1365,7 @@ function DrillBody({ drill }) {
   return (
     <>
         <section className="detail-block"><h2>Objective</h2><p>{drill.objective}</p></section>
+        {drill.diagramUrl && <section className="detail-block"><img src={drill.diagramUrl} alt="Drill diagram" className="drill-diagram" /></section>}
         <section className="detail-block">
           <h2>How to perform</h2>
           <ol className="steps">{drill.steps.map((s, i) => <li key={i}><span className="step-num">{i + 1}</span><span>{s}</span></li>)}</ol>
@@ -2154,7 +2155,7 @@ function AdminDashboard({ content }) {
 const BLANK_DRILL = {
   title: "", category: "", duration: "", equipment: "",
   description: "", objective: "", stepsText: "", coachingPointsText: "", mistakesText: "", published: false,
-  imageAssetId: null, imageUrl: "", videoAssetId: null, videoUrl: "",
+  imageAssetId: null, imageUrl: "", videoAssetId: null, videoUrl: "", diagramUrl: "",
 };
 
 function parseLines(text) { return text.split("\n").map((s) => s.trim()).filter(Boolean); }
@@ -2175,6 +2176,28 @@ function countDailyAssignmentUses(content, field, id) {
 // Shared photo upload wiring for any admin draft with imageAssetId/imageUrl fields. Video
 // isn't uploaded — see YouTubeField — but setVideoUrl still lives here so every draft's
 // video field is touched through one place.
+function useDiagramUpload(setDraft) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const inputRef = useRef(null);
+  const onPick = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setError("");
+    setUploading(true);
+    try {
+      const res = await uploadToStorage(file);
+      setDraft((d) => ({ ...d, diagramUrl: res.url }));
+    } catch (err) {
+      setError(err?.message || "Upload failed. Please try again.");
+    } finally {
+      setUploading(false);
+    }
+  };
+  return { uploading, error, inputRef, onPick, remove: () => setDraft((d) => ({ ...d, diagramUrl: "" })), clearError: () => setError("") };
+}
+
 function useMediaFields(setDraft) {
   const [uploading, setUploading] = useState(false);
   const [mediaError, setMediaError] = useState("");
@@ -2260,11 +2283,11 @@ function YouTubeField({ value, onChange, label = "Video", className = "admin-for
   );
 }
 
-function MediaFields({ draft, media }) {
+function MediaFields({ draft, media, imageLabel = "Photo" }) {
   return (
     <>
       <div className="admin-form-span2 media-field">
-        <span className="media-field-label">Photo</span>
+        <span className="media-field-label">{imageLabel}</span>
         {draft.imageUrl ? (
           <div className="media-field-preview">
             <img src={draft.imageUrl} alt="" className="media-thumb media-thumb--lg" />
@@ -2273,7 +2296,7 @@ function MediaFields({ draft, media }) {
         ) : (
           <button type="button" className="upload-dropzone upload-dropzone--small" onClick={() => media.imageInputRef.current?.click()} disabled={media.uploading}>
             <UploadCloud size={18} />
-            <span>{media.uploading ? "Uploading…" : "Click to upload a photo"}</span>
+            <span>{media.uploading ? "Uploading…" : `Click to upload a ${imageLabel === "Photo" ? "photo" : imageLabel.toLowerCase()}`}</span>
           </button>
         )}
         <input ref={media.imageInputRef} type="file" accept="image/*" onChange={media.onPickImage} style={{ display: "none" }} />
@@ -2362,6 +2385,7 @@ function AdminDrills({ content, updateContent }) {
   const [draft, setDraft] = useState(BLANK_DRILL);
   const [previewDrill, setPreviewDrill] = useState(null);
   const media = useMediaFields(setDraft);
+  const diagram = useDiagramUpload(setDraft);
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
 
@@ -2393,6 +2417,7 @@ function AdminDrills({ content, updateContent }) {
     imageUrl: d.imageUrl || "",
     videoAssetId: d.videoAssetId || null,
     videoUrl: d.videoUrl || "",
+    diagramUrl: d.diagramUrl || "",
   });
 
   const startEdit = (d) => { setEditingId(d.id); setDraft(toDraft(d)); setCreating(false); media.clearError(); };
@@ -2472,11 +2497,27 @@ function AdminDrills({ content, updateContent }) {
             <label>Equipment<input value={draft.equipment} onChange={(e) => setDraft({ ...draft, equipment: e.target.value })} placeholder="e.g. Full gear" /></label>
             <label className="admin-form-span2">Short description (Main Page)<input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="One line for the card" /></label>
             <label className="admin-form-span2">Objective<textarea rows={2} value={draft.objective} onChange={(e) => setDraft({ ...draft, objective: e.target.value })} placeholder="What this drill improves" /></label>
+            <div className="admin-form-span2 media-field">
+              <span className="media-field-label">Drill diagram (shown under the objective)</span>
+              {draft.diagramUrl ? (
+                <div className="media-field-preview">
+                  <img src={draft.diagramUrl} alt="" className="media-thumb media-thumb--lg" />
+                  <button type="button" className="btn btn--ghost btn--small" onClick={diagram.remove}>Remove</button>
+                </div>
+              ) : (
+                <button type="button" className="upload-dropzone upload-dropzone--small" onClick={() => diagram.inputRef.current?.click()} disabled={diagram.uploading}>
+                  <UploadCloud size={18} />
+                  <span>{diagram.uploading ? "Uploading…" : "Click to upload a diagram"}</span>
+                </button>
+              )}
+              <input ref={diagram.inputRef} type="file" accept="image/*" onChange={diagram.onPick} style={{ display: "none" }} />
+              {diagram.error && <div className="auth-error" style={{ marginTop: 8 }}><AlertTriangle size={13} /> {diagram.error}</div>}
+            </div>
             <label className="admin-form-span2">Steps (one per line)<textarea rows={4} value={draft.stepsText} onChange={(e) => setDraft({ ...draft, stepsText: e.target.value })} placeholder={"Start in your stance.\nMove to the post.\n..."} /></label>
             <label className="admin-form-span2">Coaching points (one per line)<textarea rows={3} value={draft.coachingPointsText} onChange={(e) => setDraft({ ...draft, coachingPointsText: e.target.value })} /></label>
             <label className="admin-form-span2">Common mistakes — "mistake | correction" per line<textarea rows={3} value={draft.mistakesText} onChange={(e) => setDraft({ ...draft, mistakesText: e.target.value })} placeholder={"Collapsing early | Hold your seal longer"} /></label>
 
-            <MediaFields draft={draft} media={media} />
+            <MediaFields draft={draft} media={media} imageLabel="Cover image" />
 
             <label className="auth-field admin-form-span2" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <input type="checkbox" checked={draft.published} onChange={(e) => setDraft({ ...draft, published: e.target.checked })} style={{ width: "auto" }} />
@@ -5091,6 +5132,7 @@ button:focus {
 .training-block-search { display: flex; align-items: center; gap: 10px; padding: 0 14px; margin-bottom: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--text-dim); }
 .training-block-search input { flex: 1; min-width: 0; background: transparent; border: none; outline: none; padding: 13px 0; color: var(--text); font-size: 14px; }
 .training-block-search-count { font-size: 12px; white-space: nowrap; }
+.drill-diagram { display: block; width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); }
 .training-block-head { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .training-block-title { color: var(--text-dim); font-weight: 500; }
 .training-block-date { font-size: 12px; color: var(--text-dim); }

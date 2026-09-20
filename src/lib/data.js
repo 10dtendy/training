@@ -159,6 +159,7 @@ export async function getContent() {
     description: d.description, objective: d.objective,
     steps: d.steps || [], coachingPoints: d.coaching_points || [], mistakes: d.mistakes || [],
     published: d.published, imageAssetId: null, imageUrl: d.image_url || "", videoAssetId: null, videoUrl: d.video_url || "",
+    diagramUrl: d.diagram_url || "",
   });
   const toFocusShape = (f) => ({
     id: f.id, title: f.title, category: f.category, explanation: f.explanation, cue: f.cue,
@@ -266,6 +267,7 @@ export async function updateContentFields(patch, prev = {}) {
         description: d.description, objective: d.objective,
         steps: d.steps || [], coaching_points: d.coachingPoints || [], mistakes: d.mistakes || [],
         published: !!d.published, image_url: d.imageUrl || null, video_url: d.videoUrl || null,
+        diagram_url: d.diagramUrl || null,
       }), prev.drills));
     }
     if (patch.focusPoints) {
