@@ -5,7 +5,7 @@ import {
   Calendar as CalendarIcon, LayoutGrid, Users as UsersIcon,
   Image as ImageIcon, Settings as SettingsIcon, Download, Gauge, LogOut,
   Mail, Lock, UploadCloud, FileText, Video as VideoIcon, AlertTriangle,
-  Home, BarChart3, Tag, Search, CircleDot, Armchair, Copy, LayoutTemplate, Megaphone, Camera
+  Home, BarChart3, Tag, Search, CircleDot, Armchair, Copy, LayoutTemplate, Megaphone
 } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
 import {
@@ -404,12 +404,19 @@ function AuthScreen({ onAuthed }) {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteCode, setInviteCode] = useState("");
   const [checkEmail, setCheckEmail] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   // A shared link can look like ...#invite=<code> — when present,
   // switch to sign-up and pre-fill the code so the recipient doesn't need to
   // know it's even a thing unless you've told them.
   useEffect(() => {
     const hash = window.location.hash || "";
+    if (/error_code=otp_expired|error=access_denied/.test(hash)) {
+      setMode("forgot");
+      setError("That reset link has expired or was already used. Enter your email to get a new one.");
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      return;
+    }
     const match = hash.match(/invite=([^&]+)/);
     if (match) {
       setInviteCode(decodeURIComponent(match[1]));
@@ -419,6 +426,31 @@ function AuthScreen({ onAuthed }) {
   }, []);
 
   const field = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const sendReset = async (e) => {
+    e.preventDefault();
+    setError("");
+    const email = form.email.trim().toLowerCase();
+    if (!email) { setError("Enter the email you signed up with."); return; }
+    setBusy(true);
+    try {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin + import.meta.env.BASE_URL,
+      });
+      if (resetError) {
+        setError(/rate|seconds|too many/i.test(resetError.message)
+          ? "Too many requests — wait a minute and try again."
+          : "We couldn't send the email right now. Please try again in a few minutes.");
+        return;
+      }
+      // Same message whether or not an account exists, so this can't be used to find out who has one.
+      setResetSent(true);
+    } catch {
+      setError("Something went wrong. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -489,7 +521,28 @@ function AuthScreen({ onAuthed }) {
 
       <div className="auth-form-wrap">
         <div className="auth-form-card">
-          {checkEmail ? (
+          {mode === "forgot" ? (
+            resetSent ? (
+              <div className="auth-check-email">
+                <Mail size={28} />
+                <h2>Check your email</h2>
+                <p>If there's an account for <strong>{form.email.trim().toLowerCase()}</strong>, we've sent a link to reset your password. It can take a few minutes, and it's worth checking your spam folder.</p>
+                <button className="btn btn--ghost btn--small" onClick={() => { setResetSent(false); setMode("login"); }}>Back to log in</button>
+              </div>
+            ) : (
+              <form onSubmit={sendReset} className="auth-form">
+                <h2 className="auth-reset-title">Reset your password</h2>
+                <p className="auth-reset-sub">Enter your email and we'll send you a link to choose a new password.</p>
+                <label className="auth-field">
+                  <span>Email</span>
+                  <div className="auth-input-icon"><Mail size={14} /><input type="email" value={form.email} onChange={(e) => field("email", e.target.value)} placeholder="you@example.com" autoFocus /></div>
+                </label>
+                {error && <div className="auth-error"><AlertTriangle size={13} /> {error}</div>}
+                <button className="btn btn--primary auth-submit" disabled={busy} type="submit">{busy ? "Please wait…" : "Send reset link"}</button>
+                <button type="button" className="auth-invite-link" onClick={() => { setError(""); setMode("login"); }}>Back to log in</button>
+              </form>
+            )
+          ) : checkEmail ? (
             <div className="auth-check-email">
               <Mail size={28} />
               <h2>Check your email</h2>
@@ -538,6 +591,10 @@ function AuthScreen({ onAuthed }) {
                   </label>
                 )}
 
+                {mode === "login" && (
+                  <button type="button" className="auth-invite-link" onClick={() => { setError(""); setMode("forgot"); }}>Forgot password?</button>
+                )}
+
                 {error && <div className="auth-error"><AlertTriangle size={13} /> {error}</div>}
 
                 <button className="btn btn--primary auth-submit" disabled={busy} type="submit">
@@ -546,6 +603,53 @@ function AuthScreen({ onAuthed }) {
               </form>
             </>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Shown after someone opens the reset link from their email: they're signed in with a short-lived
+// recovery session, and just need to choose a new password.
+function ResetPasswordScreen({ onDone }) {
+  const [pw, setPw] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (pw.length < 8) { setError("Use at least 8 characters."); return; }
+    if (pw !== confirm) { setError("The two passwords don't match."); return; }
+    setBusy(true);
+    const { error: updateError } = await supabase.auth.updateUser({ password: pw });
+    setBusy(false);
+    if (updateError) {
+      setError(/same|different/i.test(updateError.message) ? "Choose a password you haven't used before." : /weak|pwned|character/i.test(updateError.message) ? updateError.message : "Couldn't update your password. The link may have expired — request a new one.");
+      return;
+    }
+    onDone();
+  };
+
+  return (
+    <div className="auth-screen">
+      <div className="auth-form-wrap" style={{ width: "100%" }}>
+        <div className="auth-form-card">
+          <form onSubmit={submit} className="auth-form">
+            <h2 className="auth-reset-title">Choose a new password</h2>
+            <p className="auth-reset-sub">Pick a password you'll remember. You'll be logged in right after.</p>
+            <label className="auth-field">
+              <span>New password</span>
+              <div className="auth-input-icon"><Lock size={14} /><input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="At least 8 characters" autoFocus autoComplete="new-password" /></div>
+            </label>
+            <label className="auth-field">
+              <span>Confirm new password</span>
+              <div className="auth-input-icon"><Lock size={14} /><input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repeat the password" autoComplete="new-password" /></div>
+            </label>
+            {error && <div className="auth-error"><AlertTriangle size={13} /> {error}</div>}
+            <button className="btn btn--primary auth-submit" disabled={busy} type="submit">{busy ? "Please wait…" : "Update password"}</button>
+          </form>
         </div>
       </div>
     </div>
@@ -1606,28 +1710,8 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile }) {
   const [team, setTeam] = useState(user.team || "");
   const [profileError, setProfileError] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
-  const [photoUploading, setPhotoUploading] = useState(false);
   const [photoError, setPhotoError] = useState("");
-  const photoInputRef = useRef(null);
 
-  const onPickPhoto = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setPhotoError("");
-    setPhotoUploading(true);
-    try {
-      const oldPath = storagePathFromUrl(user.photoUrl);
-      const res = await uploadToStorage(file, `profile/${user.id}`);
-      const ok = await onUpdateProfile({ photoAssetId: res.id, photoUrl: res.url });
-      if (!ok) setPhotoError("Something went wrong. Please try again.");
-      else if (oldPath?.startsWith(`profile/${user.id}/`)) deleteStorageObject(oldPath);
-    } catch (err) {
-      setPhotoError(err?.message || "Upload failed. Please try again.");
-    } finally {
-      setPhotoUploading(false);
-    }
-  };
   const removePhoto = async () => {
     setPhotoError("");
     const oldPath = storagePathFromUrl(user.photoUrl);
@@ -1678,18 +1762,9 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile }) {
           <div className="profile-avatar">
             {user.photoUrl ? <img src={user.photoUrl} alt="" /> : initials(user.name)}
           </div>
-          {!isCoach && (
-            <>
-              <input ref={photoInputRef} type="file" accept="image/*" onChange={onPickPhoto} style={{ display: "none" }} />
-              <button type="button" className="profile-avatar-edit" onClick={() => photoInputRef.current?.click()} disabled={photoUploading} aria-label="Change profile picture">
-                <Camera size={13} />
-              </button>
-            </>
-          )}
         </div>
-        {photoUploading && <p className="profile-avatar-hint">Uploading…</p>}
         {photoError && <div className="auth-error"><AlertTriangle size={13} /> {photoError}</div>}
-        {!isCoach && user.photoUrl && !photoUploading && (
+        {!isCoach && user.photoUrl && (
           <button type="button" className="btn btn--ghost btn--small profile-avatar-remove" onClick={removePhoto}>Remove photo</button>
         )}
         <h1 className="detail-title">{user.name}</h1>
@@ -4607,6 +4682,8 @@ function AppInner() {
 
   const [content, setContent] = useState(null);
   const [saveFailed, setSaveFailed] = useState(false);
+  // Opening the reset link from an email lands here with type=recovery in the URL.
+  const [recovering, setRecovering] = useState(() => /type=recovery/.test(window.location.hash || ""));
   const [navCalendarOpen, setNavCalendarOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const planPromptedRef = useRef(false);
@@ -4625,6 +4702,20 @@ function AppInner() {
   // Resolve session + content on load. Session persistence itself is handled by
   // supabase-js (its own token, refreshed automatically) — this just checks
   // whether one exists and loads the matching profile.
+  useEffect(() => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") setRecovering(true);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  const finishRecovery = async () => {
+    setRecovering(false);
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    const profile = await fetchCurrentProfile();
+    if (profile && !profile.removed) { setContent(await getContent()); setUser(profile); }
+  };
+
   useEffect(() => {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -4816,6 +4907,14 @@ function AppInner() {
   };
   const goToToday = () => { setView("today"); setViewDate(TODAY_DATE); window.scrollTo?.({ top: 0, behavior: "smooth" }); };
   const handlePDF = () => window.print();
+
+  if (recovering) {
+    return (
+      <div className="app"><style>{CSS}</style>
+        <ResetPasswordScreen onDone={finishRecovery} />
+      </div>
+    );
+  }
 
   if (!authChecked || !content) {
     return (
@@ -5021,6 +5120,8 @@ button:focus {
 .auth-invite-link:hover { color: var(--text-dim); }
 .auth-error { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #ff8a80; background: rgba(255,90,70,0.1); border: 1px solid rgba(255,90,70,0.3); border-radius: 8px; padding: 8px 10px; }
 .auth-submit { width: 100%; justify-content: center; margin-top: 4px; }
+.auth-reset-title { font-size: 20px; margin: 0; }
+.auth-reset-sub { font-size: 14px; color: var(--text-dim); margin: 0 0 4px; }
 .auth-check-email { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 20px 0; color: var(--text-dim); }
 .auth-check-email h2 { color: var(--text); font-size: 18px; margin: 0; }
 .auth-check-email p { font-size: 13px; line-height: 1.5; margin: 0 0 8px; }
