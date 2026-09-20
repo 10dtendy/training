@@ -244,15 +244,15 @@ async function writeTrainingDays(byLevel) {
   for (const level of LEVELS) {
     const list = byLevel[level];
     if (!list) continue;
-    const { error: delErr } = await supabase.from("training_days").delete().eq("level", level);
-    const rows = list.map((d, position) => ({
-      id: d.id, level, position,
-      drill_id: d.drillId || null, focus_id: d.focusId || null, workout_id: d.workoutId || null,
+    // One database call that replaces the level's list all-or-nothing, so a dropped connection
+    // can never leave a level half-written or empty.
+    const rows = list.map((d) => ({
+      id: d.id, drill_id: d.drillId || null, focus_id: d.focusId || null, workout_id: d.workoutId || null,
       title: d.title || null, subtitle: d.subtitle || null,
       created_at: d.createdAt || new Date().toISOString(),
     }));
-    const { error: insErr } = rows.length ? await supabase.from("training_days").insert(rows) : { error: null };
-    if (delErr || insErr) allOk = false;
+    const { error } = await supabase.rpc("replace_training_days", { p_level: level, p_rows: rows });
+    if (error) allOk = false;
   }
   return allOk;
 }
@@ -285,12 +285,9 @@ export async function updateContentFields(patch, prev = {}) {
       }), prev.offIceWorkouts));
     }
     if (patch.categories) {
-      const { error } = await supabase.from("categories").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-      if (!error) {
-        const rows = patch.categories.map((c) => ({ name: c.name, type: c.type }));
-        const { error: insErr } = rows.length ? await supabase.from("categories").insert(rows) : { error: null };
-        ok.push(!insErr);
-      } else ok.push(false);
+      const rows = patch.categories.map((c) => ({ name: c.name, type: c.type }));
+      const { error } = await supabase.rpc("replace_categories", { p_rows: rows });
+      ok.push(!error);
     }
     if (patch.trainingDays) {
       const run = trainingDaysWriteChain.then(() => writeTrainingDays(patch.trainingDays));
