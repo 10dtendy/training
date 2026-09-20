@@ -599,6 +599,11 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
               {it.label}
             </button>
           ))}
+          <button className={"nav-mobile-link nav-mobile-profile" + (view === "profile" && !isAdmin ? " nav-mobile-link--active" : "")}
+            onClick={() => { setIsAdmin(false); setView("profile"); setMobileOpen(false); }}>
+            <span className="nav-mobile-avatar">{user.photoUrl ? <img src={user.photoUrl} alt="" /> : initials(user.name)}</span>
+            Profile
+          </button>
           {user.role === "coach" && (
             <div className="nav-mobile-level">
               <span>Preview level</span>
@@ -4631,6 +4636,10 @@ button:focus {
 .nav-notif-item:hover { background: var(--accent-dim); }
 .nav-mobile-toggle { display: none; }
 .nav-mobile-panel { display: none; flex-direction: column; padding: 8px 20px 16px; gap: 2px; border-top: 1px solid var(--border); }
+.nav-mobile-profile { display: flex; align-items: center; gap: 10px; }
+.nav-mobile-avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--surface-2); color: var(--text); font-size: 11px; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; }
+.nav-mobile-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.nav-mobile-link.nav-mobile-link--active { color: var(--accent); }
 .nav-mobile-link { text-align: left; padding: 12px 8px; font-size: 15px; color: var(--text-dim); border-bottom: 1px solid var(--border); }
 
 /* Transitions.dev — Icon swap */
@@ -5197,7 +5206,7 @@ button:focus {
 
 /* ---------------- RESPONSIVE ---------------- */
 @media (max-width: 900px) {
-  .nav-links, .nav-admin-toggle, .nav-level-select { display: none; }
+  .nav-links, .nav-admin-toggle, .nav-level-select, .nav-right > .nav-avatar { display: none; }
   .nav-mobile-toggle { display: flex; }
   .nav-mobile-panel { display: flex; }
   .admin-topbar .nav-admin-toggle { display: flex; }
