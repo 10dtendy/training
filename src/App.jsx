@@ -3483,9 +3483,21 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
   };
 
   const openCopy = (day) => { setCopyingId(day.id); setCopyAfter(list.length); };
+  // The copy goes into every level, each taken from that level's own version of the block, at the
+  // same position (or the end of a shorter list).
   const copyDay = (i) => {
-    const copy = { ...list[i], id: crypto.randomUUID(), createdAt: new Date().toISOString() };
-    setList([...list.slice(0, copyAfter), copy, ...list.slice(copyAfter)]);
+    const source = { ...list[i], ...drafts[list[i].id] };
+    const now = new Date().toISOString();
+    updateContent((c) => ({
+      ...c,
+      trainingDays: Object.fromEntries(LEVELS.map((lv) => {
+        const arr = c.trainingDays[lv] || [];
+        const base = lv === level ? source : arr[i] || source;
+        const copy = { ...base, id: crypto.randomUUID(), createdAt: now };
+        const at = Math.min(copyAfter, arr.length);
+        return [lv, [...arr.slice(0, at), copy, ...arr.slice(at)]];
+      })),
+    }));
     setCopyingId(null);
   };
 
@@ -3564,7 +3576,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
                   {list.map((_, k) => <option key={k} value={k + 1}>Block {k + 1}{k + 1 === list.length ? " (end of list)" : ""}</option>)}
                 </select>
               </label>
-              <p className="planner-hint">The copy becomes Block {copyAfter + 1}{copyAfter < list.length ? `, and every block after it moves down one` : ""}.</p>
+              <p className="planner-hint">The copy is added to Youth, Junior and Pro at once. It becomes Block {copyAfter + 1}{copyAfter < list.length ? `, and every block after it moves down one` : ""}.</p>
               <div className="admin-form-actions" style={{ marginTop: 0 }}>
                 <button className="btn btn--ghost btn--small" onClick={() => setCopyingId(null)}>Cancel</button>
                 <button className="btn btn--primary btn--small" onClick={() => copyDay(i)}><Copy size={13} /> Insert copy</button>
