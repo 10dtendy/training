@@ -5,7 +5,7 @@ import {
   Calendar as CalendarIcon, LayoutGrid, Target, Users as UsersIcon,
   Image as ImageIcon, Settings as SettingsIcon, Download, Gauge, LogOut,
   Mail, Lock, UploadCloud, FileText, Video as VideoIcon, AlertTriangle,
-  Tag, Search, Goal, CircleDot, VenetianMask, Armchair, Copy, LayoutTemplate, Megaphone, Camera
+  Home, BarChart3, Tag, Search, Goal, CircleDot, VenetianMask, Armchair, Copy, LayoutTemplate, Megaphone, Camera
 } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
 import {
@@ -547,7 +547,7 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
             </button>
           )}
           {user.role !== "coach" && (
-            <button className="nav-icon-btn" aria-label="Game days & rest days calendar" onClick={onOpenCalendar}>
+            <button className="nav-icon-btn nav-calendar-btn" aria-label="Game days & rest days calendar" onClick={onOpenCalendar}>
               <CalendarIcon size={17} />
             </button>
           )}
@@ -621,6 +621,23 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
         </div>
       )}
     </header>
+  );
+}
+
+function BottomNav({ view, onToday, onProgress, onOpenCalendar, showCalendar }) {
+  const items = [
+    { key: "today", label: "Today", icon: Home, active: view === "today", onClick: onToday },
+    { key: "progress", label: "Progress", icon: BarChart3, active: view === "progress", onClick: onProgress },
+    ...(showCalendar ? [{ key: "calendar", label: "Game days & rest days calendar", icon: CalendarIcon, active: false, onClick: onOpenCalendar }] : []),
+  ];
+  return (
+    <nav className="bottom-nav no-print" aria-label="Quick navigation">
+      {items.map(({ key, label, icon: Icon, active, onClick }) => (
+        <button key={key} className={"bottom-nav-btn" + (active ? " bottom-nav-btn--active" : "")} onClick={onClick} aria-label={label} aria-current={active ? "page" : undefined}>
+          <Icon size={22} strokeWidth={active ? 2.4 : 1.8} />
+        </button>
+      ))}
+    </nav>
   );
 }
 
@@ -4511,6 +4528,12 @@ function AppInner() {
 
       <PrintSheet content={content} date={viewDate} assignment={assignment} />
 
+      {!isAdmin && (
+        <BottomNav
+          view={view} onToday={goToToday} onProgress={() => goTo("progress")}
+          onOpenCalendar={() => setNavCalendarOpen(true)} showCalendar={!isCoach}
+        />
+      )}
       {navCalendarOpen && (
         <PreviewModal label="Games & Rest" onClose={() => setNavCalendarOpen(false)} resizeIn>
           <ProfileCalendar dayTypes={user.dayTypes || {}} onSetDayType={setDayType} onClose={() => setNavCalendarOpen(false)} gameLogs={user.gameLogs || {}} restNotes={user.restNotes || {}} onLogGame={setGameLog} />
@@ -4636,6 +4659,9 @@ button:focus {
 .nav-notif-item:hover { background: var(--accent-dim); }
 .nav-mobile-toggle { display: none; }
 .nav-mobile-panel { display: none; flex-direction: column; padding: 8px 20px 16px; gap: 2px; border-top: 1px solid var(--border); }
+.bottom-nav { display: none; position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(14px + env(safe-area-inset-bottom)); z-index: 30; gap: 6px; padding: 7px; border-radius: 999px; background: rgba(24,24,28,0.82); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+.bottom-nav-btn { width: 52px; height: 44px; border-radius: 999px; display: flex; align-items: center; justify-content: center; color: var(--text-dim); transition: background .15s ease, color .15s ease; }
+.bottom-nav-btn--active { color: var(--text); background: rgba(255,255,255,0.12); }
 .nav-mobile-profile { display: flex; align-items: center; gap: 10px; }
 .nav-mobile-avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--surface-2); color: var(--text); font-size: 11px; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; }
 .nav-mobile-avatar img { width: 100%; height: 100%; object-fit: cover; }
@@ -5206,7 +5232,9 @@ button:focus {
 
 /* ---------------- RESPONSIVE ---------------- */
 @media (max-width: 900px) {
-  .nav-links, .nav-admin-toggle, .nav-level-select, .nav-right > .nav-avatar { display: none; }
+  .nav-links, .nav-admin-toggle, .nav-level-select, .nav-right > .nav-avatar, .nav-calendar-btn { display: none; }
+  .main { padding-bottom: calc(120px + env(safe-area-inset-bottom)); }
+  .bottom-nav { display: flex; }
   .nav-mobile-toggle { display: flex; }
   .nav-mobile-panel { display: flex; }
   .admin-topbar .nav-admin-toggle { display: flex; }
