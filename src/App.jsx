@@ -2470,7 +2470,7 @@ function AdminDrills({ content, updateContent }) {
             </label>
             <label>Duration<input value={draft.duration} onChange={(e) => setDraft({ ...draft, duration: e.target.value })} placeholder="e.g. 12 min" /></label>
             <label>Equipment<input value={draft.equipment} onChange={(e) => setDraft({ ...draft, equipment: e.target.value })} placeholder="e.g. Full gear" /></label>
-            <label className="admin-form-span2">Short description<input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="One line for the card" /></label>
+            <label className="admin-form-span2">Short description (Main Page)<input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="One line for the card" /></label>
             <label className="admin-form-span2">Objective<textarea rows={2} value={draft.objective} onChange={(e) => setDraft({ ...draft, objective: e.target.value })} placeholder="What this drill improves" /></label>
             <label className="admin-form-span2">Steps (one per line)<textarea rows={4} value={draft.stepsText} onChange={(e) => setDraft({ ...draft, stepsText: e.target.value })} placeholder={"Start in your stance.\nMove to the post.\n..."} /></label>
             <label className="admin-form-span2">Coaching points (one per line)<textarea rows={3} value={draft.coachingPointsText} onChange={(e) => setDraft({ ...draft, coachingPointsText: e.target.value })} /></label>
