@@ -4218,7 +4218,7 @@ function AdminApp({ content, updateContent, saveContent }) {
   const [section, setSection] = useState("dashboard");
   const nav = [
     { key: "dashboard", label: "Dashboard", icon: LayoutGrid },
-    { key: "calendar", label: "Training Blocks", icon: CalendarIcon },
+    { key: "calendar", label: "Training Blocks", icon: CalendarIcon, red: true },
     { key: "categories", label: "Categories", icon: Tag },
     { key: "drills", label: "Drills", icon: GoalieMask, bold: true },
     { key: "focus", label: "Practice Focus", icon: HockeyNet, bold: true },
@@ -4236,7 +4236,7 @@ function AdminApp({ content, updateContent, saveContent }) {
     <div className="admin-shell">
       <aside className="admin-sidebar">
         {nav.map((n) => (
-          <button key={n.key} className={"admin-nav-item" + (section === n.key ? " active" : "") + (n.bold ? " admin-nav-item--bold" : "")} onClick={() => setSection(n.key)}>
+          <button key={n.key} className={"admin-nav-item" + (section === n.key ? " active" : "") + (n.bold ? " admin-nav-item--bold" : "") + (n.red ? " admin-nav-item--red" : "")} onClick={() => setSection(n.key)}>
             <n.icon size={15} /> {n.label}
           </button>
         ))}
@@ -5138,6 +5138,9 @@ button:focus {
 .training-block-date { font-size: 12px; color: var(--text-dim); }
 .training-day-card .planner-header { align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .training-block-save { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 20px; }
+.admin-nav-item--red { font-weight: 700; color: #F0454B; }
+.admin-nav-item--red:hover { color: #FF6B70; }
+.admin-nav-item--red.active { color: #F0454B; background: rgba(240,69,75,0.14); }
 .admin-nav-item--bold { font-weight: 700; color: #F5B841; }
 .admin-nav-item--bold:hover { color: #FFD27A; }
 .admin-nav-item--bold.active { color: #F5B841; background: rgba(245,184,65,0.14); }
