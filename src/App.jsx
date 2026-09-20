@@ -690,7 +690,7 @@ function BottomNav({ view, onToday, onGoTo, onProgress, onOpenCalendar, showCale
    TODAY PAGE
    ============================================================================ */
 
-function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoForward, onPrevDay, onNextDay, openDrill, openFocus, openOffice, onDownloadPDF, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame }) {
+function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoForward, onPrevDay, onNextDay, openDrill, openFocus, openOffice, onDownloadPDF, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame, coachSunday }) {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const drill = assignment && content.drills.find((d) => d.id === assignment.drillId && d.published);
   const focus = assignment && content.focusPoints.find((f) => f.id === assignment.focusId && f.published);
@@ -741,7 +741,9 @@ function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoFo
           </div>
         </section>
         <div className="empty-state empty-state--hero">
-          <p>{isToday ? "Your coach hasn't assigned today's training yet." : "Your coach hadn't assigned training for this day."}</p>
+          <p>{coachSunday
+            ? "Coach preview: Sunday is an automatic rest day for goalies who haven't marked a game or rest day that week, so there is no training block here. A goalie who has marked something that week gets a training block on Sunday."
+            : isToday ? "Your coach hasn't assigned today's training yet." : "Your coach hadn't assigned training for this day."}</p>
         </div>
         {calendarModal}
       </div>
@@ -4714,7 +4716,7 @@ function AppInner() {
                 />
               ) : (
                 <TodayPage
-                  content={content} progress={progress} viewDate={viewDate} assignment={assignment}
+                  content={content} progress={progress} viewDate={viewDate} assignment={assignment} coachSunday={isCoach && viewDate.getDay() === 0}
                   canGoBack={canGoBack} canGoForward={canGoForward} onPrevDay={goPrevDay} onNextDay={goNextDay}
                   openDrill={() => goTo("drill")} openFocus={() => goTo("focus")} openOffice={() => goTo("office")} onDownloadPDF={handlePDF}
                   dayTypes={user.dayTypes || {}} onSetDayType={setDayType}
