@@ -143,9 +143,11 @@ function personalDayType(u, dateKeyStr) {
   const personal = (u.dayTypes || {})[dateKeyStr];
   return personal === "game" || personal === "rest" ? personal : null;
 }
+// A Sunday the goalie explicitly set back to "normal" (the "show my training" button, or clearing
+// it in the calendar) also opens Sunday up for training, the same as a marked game/rest day.
 function weekHasMark(u, monday) {
   for (let i = 0; i < 7; i++) if (personalDayType(u, dateKey(addDays(monday, i)))) return true;
-  return false;
+  return (u.dayTypes || {})[dateKey(addDays(monday, 6))] === "none";
 }
 // Sunday is an automatic rest day, but only in a week where the goalie hasn't marked any game
 // or rest day of their own; once they have, Sunday is free to be a training day. Coaches have
@@ -843,7 +845,7 @@ function savePct(g) {
   return g && g.shots > 0 ? (((g.shots - g.goalsAgainst) / g.shots) * 100).toFixed(1) : null;
 }
 
-function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, onPrevDay, onNextDay, onClear, gameLog, onSaveGameLog, restNote, onSaveRestNote, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame }) {
+function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, onPrevDay, onNextDay, onClear, gameLog, onSaveGameLog, restNote, onSaveRestNote, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame, autoRest = false }) {
   const isGame = type === "game";
   const [logging, setLogging] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -999,10 +1001,9 @@ function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, o
       )}
 
       {clearError && <div className="auth-error"><AlertTriangle size={13} /> {clearError}</div>}
-      {/* An automatic Sunday rest isn't something the goalie marked, so there's nothing to clear. */}
-      {((dayTypes || {})[dateKey(viewDate)] === "game" || (dayTypes || {})[dateKey(viewDate)] === "rest") && (
+      {(autoRest || (dayTypes || {})[dateKey(viewDate)] === "game" || (dayTypes || {})[dateKey(viewDate)] === "rest") && (
         <button className="btn btn--ghost daytype-clear" onClick={handleClear} disabled={clearBusy}>
-          {clearBusy ? "Saving…" : `This isn't a ${isGame ? "game" : "rest"} day — show my training`}
+          {clearBusy ? "Saving…" : `${autoRest && dateKey(viewDate) === dateKey(TODAY_DATE) ? "Today" : "This"} isn't a ${isGame ? "game" : "rest"} day — show my training`}
         </button>
       )}
     </div>
@@ -4707,7 +4708,7 @@ function AppInner() {
                 <DayTypePage
                   type={dayType} data={(dayType === "game" ? content.gameDay : content.restDay) || {}} content={content}
                   viewDate={viewDate} canGoBack={canGoBack} canGoForward={canGoForward} onPrevDay={goPrevDay} onNextDay={goNextDay}
-                  onClear={() => setDayType(dateStr, null)}
+                  onClear={() => setDayType(dateStr, null)} autoRest={dayType === "rest" && !personalDayType(user, dateStr)}
                   gameLog={(user.gameLogs || {})[dateStr]} onSaveGameLog={(log) => setGameLog(dateStr, log)}
                   restNote={(user.restNotes || {})[dateStr]} onSaveRestNote={(note) => setRestNote(dateStr, note)}
                   dayTypes={user.dayTypes || {}} onSetDayType={setDayType}
