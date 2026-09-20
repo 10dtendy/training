@@ -808,8 +808,6 @@ function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, o
     if (ok === false) { setRestNoteError("Couldn't save that — check your connection and try again."); return; }
     setNotingRest(false);
   };
-  const focus = data.focusId ? content.focusPoints.find((f) => f.id === data.focusId && f.published) : null;
-  const focusImg = focus ? brandImage(focus.imageUrl, content.branding?.focus, FOCUS_IMG) : null;
   const weekday = WEEKDAY_NAMES[viewDate.getDay()].toUpperCase();
   const dateStr = `${viewDate.getDate()} ${MONTH_NAMES[viewDate.getMonth()]} ${viewDate.getFullYear()}`;
 
@@ -843,32 +841,11 @@ function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, o
         </PreviewModal>
       )}
 
-      {/* On game day, a card with nothing in it (no focus, no note) is skipped
-          entirely rather than showing an empty "not set" message — the quote
-          above already carries the page when that's all the coach has set. */}
-      {(focus || data.note || !isGame) && (
+      {/* The coach's live notes — shown on every game/rest day until they publish new ones. */}
+      {data.note && (
         <div className="card daytype-card">
-          {focus ? (
-            <div className="daytype-focus-block">
-              {focus.videoUrl ? (
-                <div className="daytype-video-wrap">
-                  <VideoPlayer title={focus.title} poster={focusImg.src} src={focus.videoUrl} />
-                </div>
-              ) : (
-                <div className="daytype-orb-wrap">
-                  <div className={"daytype-orb" + (isGame ? " daytype-orb--game" : " daytype-orb--rest")}>
-                    <img src={focusImg.src} style={focusImg.style} alt="" />
-                  </div>
-                </div>
-              )}
-              <span className="label">PRACTICE FOCUS</span>
-              <p className="focus-quote">"{focus.title}"</p>
-              {focus.cue && <p className="daytype-cue">{focus.cue}</p>}
-            </div>
-          ) : (
-            !isGame && <p className="daytype-empty">Your coach hasn't set a practice focus for rest days yet.</p>
-          )}
-          {data.note && <div className="cue-highlight daytype-note">{data.note}</div>}
+          <span className="label">NOTES FROM YOUR COACH</span>
+          <div className="cue-highlight daytype-note">{data.note}</div>
         </div>
       )}
 
@@ -2321,8 +2298,6 @@ const CATEGORY_TYPES = [
   { key: "drill", label: "Drills", collection: "drills" },
   { key: "focus", label: "Practice Focus", collection: "focusPoints" },
   { key: "office", label: "Off-Ice", collection: "offIceWorkouts" },
-  { key: "game", label: "Game Day", collection: "gameDay" },
-  { key: "rest", label: "Rest Day", collection: "restDay" },
 ];
 
 function categoriesOfType(content, type) {
@@ -2653,11 +2628,9 @@ function AdminFocusPoints({ content, updateContent }) {
     commit({ ...draft, title: draft.title.trim() || "Untitled draft", published: false });
   };
   const remove = (id) => {
-    const uses = countDailyAssignmentUses(content, "focusId", id)
-      + (content.gameDay?.focusId === id ? 1 : 0)
-      + (content.restDay?.focusId === id ? 1 : 0);
+    const uses = countDailyAssignmentUses(content, "focusId", id);
     const msg = uses > 0
-      ? `This practice focus is assigned in ${uses} place${uses === 1 ? "" : "s"} (a training day and/or Game Day/Rest Day) — deleting it will leave those without a focus. Delete anyway?`
+      ? `This practice focus is assigned in ${uses} place${uses === 1 ? "" : "s"} (a training day) — deleting it will leave those without a focus. Delete anyway?`
       : "Delete this practice focus? This can't be undone.";
     if (!window.confirm(msg)) return;
     updateContent((c) => ({ ...c, focusPoints: c.focusPoints.filter((f) => f.id !== id) }));
@@ -3188,12 +3161,38 @@ function AdminTrainingDays({ content, updateContent }) {
   );
 }
 
-const BLANK_GAME_DAY = { focusId: "", note: "", category: "", quote: "" };
+const BLANK_GAME_DAY = { note: "", noteDraft: undefined, quote: "" };
+const BLANK_REST_DAY = { note: "", noteDraft: undefined };
+
+// The coach's notes for a game/rest day. What they type is a draft; goalies only see the
+// version last made live (data.note), which stays on every such day until replaced.
+function DayNotesEditor({ data, setFields, placeholder }) {
+  const live = data.note || "";
+  const saved = data.noteDraft ?? live;
+  const [text, setText] = useState(saved);
+  const dirty = text !== live;
+  const saveDraft = () => { if (text !== saved) setFields({ noteDraft: text }); };
+  const makeLive = () => setFields({ note: text, noteDraft: text });
+  return (
+    <div className="planner-section" style={{ marginTop: 16 }}>
+      <div className="planner-section-head"><FileText size={14} /> Coach notes</div>
+      <textarea rows={6} value={text} onChange={(e) => setText(e.target.value)} onBlur={saveDraft} placeholder={placeholder} />
+      <div className="daytype-notes-actions">
+        <span className={"status-pill" + (dirty ? "" : live ? " status-pill--live" : "")}>
+          {dirty ? <EyeOff size={12} /> : <Eye size={12} />} {dirty ? "Draft — goalies still see the last live version" : live ? "Live" : "Nothing live"}
+        </span>
+        <button className="btn btn--primary btn--small" disabled={!dirty} onClick={makeLive}>Make live</button>
+      </div>
+      <p className="planner-hint">Goalies see the live version on every day they mark, until you make a new one live. Leave it empty and make it live to remove the notes.</p>
+    </div>
+  );
+}
+
 function AdminGameDay({ content, updateContent }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const gameDay = content.gameDay || BLANK_GAME_DAY;
-  const setField = (field, value) =>
-    updateContent((c) => ({ ...c, gameDay: { ...(c.gameDay || BLANK_GAME_DAY), [field]: value } }));
+  const setFields = (patch) =>
+    updateContent((c) => ({ ...c, gameDay: { ...(c.gameDay || BLANK_GAME_DAY), ...patch } }));
 
   return (
     <div className="admin-page">
@@ -3204,32 +3203,15 @@ function AdminGameDay({ content, updateContent }) {
       <p className="planner-hint">Not tied to a specific date — goalies mark their own game days on their profile calendar, and this is what shows up instead of their normal training that day.</p>
       <div className="admin-panel">
         <div className="planner-section">
-          <div className="planner-section-head"><Tag size={14} /> Category</div>
-          <select value={gameDay.category || ""} onChange={(e) => setField("category", e.target.value)}>
-            <option value="">No category</option>
-            {categoriesOfType(content, "game").map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-          </select>
-        </div>
-        <div className="planner-section" style={{ marginTop: 16 }}>
           <div className="planner-section-head"><Megaphone size={14} /> Quote</div>
-          <input value={gameDay.quote || ""} onChange={(e) => setField("quote", e.target.value)} placeholder="e.g. Pressure is a privilege." />
+          <input value={gameDay.quote || ""} onChange={(e) => setFields({ quote: e.target.value })} placeholder="e.g. Pressure is a privilege." />
         </div>
-        <div className="planner-section" style={{ marginTop: 16 }}>
-          <div className="planner-section-head"><Target size={14} /> Practice focus</div>
-          <select value={gameDay.focusId} onChange={(e) => setField("focusId", e.target.value)}>
-            <option value="">No practice focus</option>
-            {content.focusPoints.filter((f) => f.id === gameDay.focusId || f.published).map((f) => <option key={f.id} value={f.id}>{f.title}{!f.published ? " (Draft — hidden from goalies)" : ""}</option>)}
-          </select>
-        </div>
-        <div className="planner-section" style={{ marginTop: 16 }}>
-          <div className="planner-section-head"><FileText size={14} /> Note</div>
-          <textarea rows={4} value={gameDay.note} onChange={(e) => setField("note", e.target.value)} placeholder="e.g. Arrive 90 min early, light stretch, visualize your first ten saves." />
-        </div>
+        <DayNotesEditor data={gameDay} setFields={setFields} placeholder="e.g. Arrive 90 min early, light stretch, visualize your first ten saves." />
       </div>
 
       {previewOpen && (
-        <PreviewModal label="Preview — how goalies will see Game Day" onClose={() => setPreviewOpen(false)}>
-          <DayTypePage type="game" data={gameDay} content={content} viewDate={TODAY_DATE} canGoBack={false} canGoForward={false} onPrevDay={() => {}} onNextDay={() => {}} onClear={() => true} gameLog={null} onSaveGameLog={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
+        <PreviewModal label="Preview — how goalies will see Game Day (with your draft notes)" onClose={() => setPreviewOpen(false)}>
+          <DayTypePage type="game" data={{ ...gameDay, note: gameDay.noteDraft ?? gameDay.note }} content={content} viewDate={TODAY_DATE} canGoBack={false} canGoForward={false} onPrevDay={() => {}} onNextDay={() => {}} onClear={() => true} gameLog={null} onSaveGameLog={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
         </PreviewModal>
       )}
     </div>
@@ -3238,9 +3220,9 @@ function AdminGameDay({ content, updateContent }) {
 
 function AdminRestDay({ content, updateContent }) {
   const [previewOpen, setPreviewOpen] = useState(false);
-  const restDay = content.restDay || { focusId: "", note: "", category: "" };
-  const setField = (field, value) =>
-    updateContent((c) => ({ ...c, restDay: { ...(c.restDay || { focusId: "", note: "", category: "" }), [field]: value } }));
+  const restDay = content.restDay || BLANK_REST_DAY;
+  const setFields = (patch) =>
+    updateContent((c) => ({ ...c, restDay: { ...(c.restDay || BLANK_REST_DAY), ...patch } }));
 
   return (
     <div className="admin-page">
@@ -3248,31 +3230,14 @@ function AdminRestDay({ content, updateContent }) {
         <h1 className="admin-h1">Rest Day</h1>
         <button className="btn btn--ghost btn--small" onClick={() => setPreviewOpen(true)}><Play size={13} /> Preview</button>
       </div>
-      <p className="planner-hint">Not tied to a specific date — goalies mark their own rest days on their profile calendar, and this is what shows up instead of their normal training that day.</p>
+      <p className="planner-hint">Not tied to a specific date — goalies mark their own rest days on their profile calendar (and Sunday is a rest day automatically in a week they haven't marked anything), and this is what shows up instead of their normal training that day.</p>
       <div className="admin-panel">
-        <div className="planner-section">
-          <div className="planner-section-head"><Tag size={14} /> Category</div>
-          <select value={restDay.category || ""} onChange={(e) => setField("category", e.target.value)}>
-            <option value="">No category</option>
-            {categoriesOfType(content, "rest").map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-          </select>
-        </div>
-        <div className="planner-section" style={{ marginTop: 16 }}>
-          <div className="planner-section-head"><Target size={14} /> Practice focus</div>
-          <select value={restDay.focusId} onChange={(e) => setField("focusId", e.target.value)}>
-            <option value="">No practice focus</option>
-            {content.focusPoints.filter((f) => f.id === restDay.focusId || f.published).map((f) => <option key={f.id} value={f.id}>{f.title}{!f.published ? " (Draft — hidden from goalies)" : ""}</option>)}
-          </select>
-        </div>
-        <div className="planner-section" style={{ marginTop: 16 }}>
-          <div className="planner-section-head"><FileText size={14} /> Note</div>
-          <textarea rows={4} value={restDay.note} onChange={(e) => setField("note", e.target.value)} placeholder="e.g. Full rest, light stretching only, hydrate and sleep 9+ hours." />
-        </div>
+        <DayNotesEditor data={restDay} setFields={setFields} placeholder="e.g. Full rest, light stretching only, hydrate and sleep 9+ hours." />
       </div>
 
       {previewOpen && (
-        <PreviewModal label="Preview — how goalies will see Rest Day" onClose={() => setPreviewOpen(false)}>
-          <DayTypePage type="rest" data={restDay} content={content} viewDate={TODAY_DATE} canGoBack={false} canGoForward={false} onPrevDay={() => {}} onNextDay={() => {}} onClear={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
+        <PreviewModal label="Preview — how goalies will see Rest Day (with your draft notes)" onClose={() => setPreviewOpen(false)}>
+          <DayTypePage type="rest" data={{ ...restDay, note: restDay.noteDraft ?? restDay.note }} content={content} viewDate={TODAY_DATE} canGoBack={false} canGoForward={false} onPrevDay={() => {}} onNextDay={() => {}} onClear={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
         </PreviewModal>
       )}
     </div>
@@ -4393,7 +4358,8 @@ button:focus {
 .daytype-video-wrap .video { margin-bottom: 0; }
 .daytype-cue { color: var(--text-dim); font-size: 15px; margin-top: 10px; }
 .daytype-empty { color: var(--text-dim); font-size: 14px; margin: 0 0 14px; }
-.daytype-note { margin-top: 18px; font-size: 15px; font-weight: 500; }
+.daytype-note { margin-top: 18px; font-size: 15px; font-weight: 500; white-space: pre-line; overflow-wrap: anywhere; }
+.daytype-notes-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
 .daytype-clear { width: 100%; justify-content: center; }
 .restnote-textarea { width: 100%; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; color: var(--text); font-size: 14px; font-family: inherit; resize: vertical; margin-top: 6px; }
 .restnote-text { font-size: 15px; line-height: 1.5; margin: 0; white-space: pre-wrap; }
