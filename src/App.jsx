@@ -396,9 +396,30 @@ function HockeyNet({ size = 24, strokeWidth = 2, className, ...rest }) {
    AUTH SCREEN
    ============================================================================ */
 
+// New passwords: at least 8 characters, including two numbers and two special characters.
+const PASSWORD_RULES = [
+  { label: "At least 8 characters", ok: (pw) => pw.length >= 8 },
+  { label: "At least 2 numbers", ok: (pw) => (pw.match(/[0-9]/g) || []).length >= 2 },
+  { label: "At least 2 special characters (like ! ? # $ %)", ok: (pw) => (pw.match(/[^A-Za-z0-9\s]/g) || []).length >= 2 },
+];
+function passwordProblem(pw) {
+  const failed = PASSWORD_RULES.find((r) => !r.ok(pw));
+  return failed ? `Your password needs: ${failed.label.toLowerCase()}.` : "";
+}
+function PasswordChecklist({ password }) {
+  if (!password) return null;
+  return (
+    <ul className="password-rules" aria-live="polite">
+      {PASSWORD_RULES.map((r) => (
+        <li key={r.label} className={r.ok(password) ? "ok" : ""}>{r.ok(password) ? <Check size={12} /> : <X size={12} />} {r.label}</li>
+      ))}
+    </ul>
+  );
+}
+
 function AuthScreen({ onAuthed }) {
   const [mode, setMode] = useState("login");
-  const [form, setForm] = useState({ name: "", email: "", password: "", position: "Goalie", experience: "Junior" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "", position: "Goalie", experience: "Junior" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -459,6 +480,11 @@ function AuthScreen({ onAuthed }) {
     if (!email || !form.password || (mode === "signup" && !form.name)) {
       setError("Fill in all required fields.");
       return;
+    }
+    if (mode === "signup") {
+      const problem = passwordProblem(form.password);
+      if (problem) { setError(problem); return; }
+      if (form.password !== form.confirmPassword) { setError("The two passwords don't match."); return; }
     }
     const trimmedInvite = inviteCode.trim();
     setBusy(true);
@@ -572,6 +598,17 @@ function AuthScreen({ onAuthed }) {
                   <div className="auth-input-icon"><Lock size={14} /><input type="password" value={form.password} onChange={(e) => field("password", e.target.value)} placeholder="••••••••" /></div>
                 </label>
 
+                {mode === "signup" && (
+                  <>
+                    <PasswordChecklist password={form.password} />
+                    <label className="auth-field">
+                      <span>Re-type password</span>
+                      <div className="auth-input-icon"><Lock size={14} /><input type="password" value={form.confirmPassword} onChange={(e) => field("confirmPassword", e.target.value)} placeholder="Type it again" autoComplete="new-password" /></div>
+                      {form.confirmPassword && form.password !== form.confirmPassword && <span className="password-mismatch">Passwords don't match yet.</span>}
+                    </label>
+                  </>
+                )}
+
                 {mode === "signup" && !inviteOpen && (
                   <label className="auth-field">
                     <span>Experience</span>
@@ -620,7 +657,8 @@ function ResetPasswordScreen({ onDone }) {
   const submit = async (e) => {
     e.preventDefault();
     setError("");
-    if (pw.length < 8) { setError("Use at least 8 characters."); return; }
+    const problem = passwordProblem(pw);
+    if (problem) { setError(problem); return; }
     if (pw !== confirm) { setError("The two passwords don't match."); return; }
     setBusy(true);
     const { error: updateError } = await supabase.auth.updateUser({ password: pw });
@@ -641,8 +679,9 @@ function ResetPasswordScreen({ onDone }) {
             <p className="auth-reset-sub">Pick a password you'll remember. You'll be logged in right after.</p>
             <label className="auth-field">
               <span>New password</span>
-              <div className="auth-input-icon"><Lock size={14} /><input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="At least 8 characters" autoFocus autoComplete="new-password" /></div>
+              <div className="auth-input-icon"><Lock size={14} /><input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="New password" autoFocus autoComplete="new-password" /></div>
             </label>
+            <PasswordChecklist password={pw} />
             <label className="auth-field">
               <span>Confirm new password</span>
               <div className="auth-input-icon"><Lock size={14} /><input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repeat the password" autoComplete="new-password" /></div>
@@ -1739,7 +1778,8 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile }) {
   const submitPasswordChange = async (e) => {
     e.preventDefault();
     setPwError(""); setPwSuccess(false);
-    if (newPw.length < 4) { setPwError("New password must be at least 4 characters."); return; }
+    const pwProblem = passwordProblem(newPw);
+    if (pwProblem) { setPwError(pwProblem); return; }
     if (newPw !== confirmPw) { setPwError("New passwords don't match."); return; }
     setSaving(true);
     const { error: reauthError } = await supabase.auth.signInWithPassword({ email: user.email, password: currentPw });
@@ -1824,6 +1864,7 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile }) {
               <span>New password</span>
               <div className="auth-input-icon"><Lock size={14} /><input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} /></div>
             </label>
+              <PasswordChecklist password={newPw} />
             <label className="auth-field">
               <span>Confirm new password</span>
               <div className="auth-input-icon"><Lock size={14} /><input type="password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} /></div>
@@ -5120,6 +5161,10 @@ button:focus {
 .auth-invite-link:hover { color: var(--text-dim); }
 .auth-error { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #ff8a80; background: rgba(255,90,70,0.1); border: 1px solid rgba(255,90,70,0.3); border-radius: 8px; padding: 8px 10px; }
 .auth-submit { width: 100%; justify-content: center; margin-top: 4px; }
+.password-rules { list-style: none; margin: -4px 0 4px; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-dim); }
+.password-rules li { display: flex; align-items: center; gap: 6px; }
+.password-rules li.ok { color: #22C55E; }
+.password-mismatch { font-size: 12px; color: #ef4444; }
 .auth-reset-title { font-size: 20px; margin: 0; }
 .auth-reset-sub { font-size: 14px; color: var(--text-dim); margin: 0 0 4px; }
 .auth-check-email { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 20px 0; color: var(--text-dim); }
