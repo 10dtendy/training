@@ -150,10 +150,10 @@ function weekHasMark(u, monday) {
   return (u.dayTypes || {})[dateKey(addDays(monday, 6))] === "none";
 }
 // Sunday is an automatic rest day, but only in a week where the goalie hasn't marked any game
-// or rest day of their own; once they have, Sunday is free to be a training day. Coaches have
-// no personal schedule, so there's nothing automatic for them.
+// or rest day of their own; once they have, Sunday is free to be a training day. A coach has no
+// marks, so previewing shows the automatic Sunday rest page.
 function isAutoRest(u, dateKeyStr) {
-  if (u.role === "coach" || personalDayType(u, dateKeyStr)) return false;
+  if (personalDayType(u, dateKeyStr) || (u.dayTypes || {})[dateKeyStr] === "none") return false;
   const date = dateFromKey(dateKeyStr);
   return date.getDay() === 0 && !weekHasMark(u, mondayOf(date));
 }
@@ -176,7 +176,6 @@ function resolveDayType(u, dateKeyStr) {
 function trainingDayForDate(content, user, dateKeyStr, level) {
   if (resolveDayType(user, dateKeyStr)) return null;
   const target = dateFromKey(dateKeyStr);
-  if (user.role === "coach" && target.getDay() === 0) return null;
   // Being in the app right now counts as today's activity, even before the record is saved.
   const loginDays = { ...(user.loginDays || {}), [dateKey(TODAY_DATE)]: true };
   const firstLogin = Object.keys(loginDays).sort()[0];
@@ -692,7 +691,7 @@ function BottomNav({ view, onToday, onGoTo, onProgress, onOpenCalendar, showCale
    TODAY PAGE
    ============================================================================ */
 
-function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoForward, onPrevDay, onNextDay, openDrill, openFocus, openOffice, onDownloadPDF, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame, coachSunday }) {
+function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoForward, onPrevDay, onNextDay, openDrill, openFocus, openOffice, onDownloadPDF, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame }) {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const drill = assignment && content.drills.find((d) => d.id === assignment.drillId && d.published);
   const focus = assignment && content.focusPoints.find((f) => f.id === assignment.focusId && f.published);
@@ -743,9 +742,7 @@ function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoFo
           </div>
         </section>
         <div className="empty-state empty-state--hero">
-          <p>{coachSunday
-            ? "Coach preview: Sunday is an automatic rest day for goalies who haven't marked a game or rest day that week, so there is no training block here. A goalie who has marked something that week gets a training block on Sunday."
-            : isToday ? "Your coach hasn't assigned today's training yet." : "Your coach hadn't assigned training for this day."}</p>
+          <p>{isToday ? "Your coach hasn't assigned today's training yet." : "Your coach hadn't assigned training for this day."}</p>
         </div>
         {calendarModal}
       </div>
@@ -4708,7 +4705,7 @@ function AppInner() {
                 <DayTypePage
                   type={dayType} data={(dayType === "game" ? content.gameDay : content.restDay) || {}} content={content}
                   viewDate={viewDate} canGoBack={canGoBack} canGoForward={canGoForward} onPrevDay={goPrevDay} onNextDay={goNextDay}
-                  onClear={() => setDayType(dateStr, null)} autoRest={dayType === "rest" && !personalDayType(user, dateStr)}
+                  onClear={() => setDayType(dateStr, null)} autoRest={!isCoach && dayType === "rest" && !personalDayType(user, dateStr)}
                   gameLog={(user.gameLogs || {})[dateStr]} onSaveGameLog={(log) => setGameLog(dateStr, log)}
                   restNote={(user.restNotes || {})[dateStr]} onSaveRestNote={(note) => setRestNote(dateStr, note)}
                   dayTypes={user.dayTypes || {}} onSetDayType={setDayType}
@@ -4717,7 +4714,7 @@ function AppInner() {
                 />
               ) : (
                 <TodayPage
-                  content={content} progress={progress} viewDate={viewDate} assignment={assignment} coachSunday={isCoach && viewDate.getDay() === 0}
+                  content={content} progress={progress} viewDate={viewDate} assignment={assignment}
                   canGoBack={canGoBack} canGoForward={canGoForward} onPrevDay={goPrevDay} onNextDay={goNextDay}
                   openDrill={() => goTo("drill")} openFocus={() => goTo("focus")} openOffice={() => goTo("office")} onDownloadPDF={handlePDF}
                   dayTypes={user.dayTypes || {}} onSetDayType={setDayType}
