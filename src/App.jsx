@@ -121,18 +121,13 @@ const MAX_DAYS_BACK = 2;
 // skipped over by the training list (it pauses, then picks up where they left off).
 const ABSENCE_PAUSE_DAYS = 3;
 
-// The training week is fixed to the calendar: Mon-Tue is block 1, Wed-Thu is block 2,
-// Fri-Sat is block 3, and Sunday is an automatic rest day.
+// The training week runs Monday to Sunday.
 function dateFromKey(key) {
   const [y, m, d] = key.split("-").map(Number);
   return new Date(y, m - 1, d);
 }
-// Which block slot a date belongs to, or null for Sunday. slotKey is unique per week+block.
-function blockSlotOf(date) {
-  const dow = date.getDay();
-  if (dow === 0) return null;
-  const block = Math.floor((dow - 1) / 2) + 1;
-  return { block, slotKey: dateKey(addDays(date, -(dow - 1))) + ":" + block };
+function mondayOf(date) {
+  return addDays(date, -((date.getDay() + 6) % 7));
 }
 function trainingBlockName(block) {
   return block === 1 ? "Weekly training block 1" : "Training block " + block;
@@ -148,29 +143,38 @@ function personalDayType(u, dateKeyStr) {
   const personal = (u.dayTypes || {})[dateKeyStr];
   return personal === "game" || personal === "rest" ? personal : null;
 }
-// Sunday is an automatic rest day unless the goalie has marked it themselves (say, as a
-// game day). Coaches have no personal schedule, so they can preview training any day.
+function weekHasMark(u, monday) {
+  for (let i = 0; i < 7; i++) if (personalDayType(u, dateKey(addDays(monday, i)))) return true;
+  return false;
+}
+// Sunday is an automatic rest day, but only in a week where the goalie hasn't marked any game
+// or rest day of their own; once they have, Sunday is free to be a training day. Coaches have
+// no personal schedule, so there's nothing automatic for them.
 function isAutoRest(u, dateKeyStr) {
-  return u.role !== "coach" && !personalDayType(u, dateKeyStr) && dateFromKey(dateKeyStr).getDay() === 0;
+  if (u.role === "coach" || personalDayType(u, dateKeyStr)) return false;
+  const date = dateFromKey(dateKeyStr);
+  return date.getDay() === 0 && !weekHasMark(u, mondayOf(date));
 }
 function resolveDayType(u, dateKeyStr) {
   return personalDayType(u, dateKeyStr) || (isAutoRest(u, dateKeyStr) ? "rest" : null);
 }
 
-// Each goalie walks their level's ordered training-day list, but the weekly rhythm is fixed
-// to the calendar (see blockSlotOf). Every block slot shows the next training day the goalie
-// hasn't had yet. A slot uses that training day up as soon as the goalie has at least one
-// available day in it: a game or rest day takes that day's place (so the block lasts 1 day),
-// and a slot with no available day at all doesn't use one up, so it's shown at the next
-// block. A stretch of ABSENCE_PAUSE_DAYS or more days in a row without opening the app is
-// treated as unavailable too (the list pauses, then resumes where they left off); one or two
-// missed days still count as available. The first training day is shown on the first day
-// they open the app. Returns { ...trainingDay, index, block } for dateKeyStr, or null if
-// that date is a game/rest day or the coach hasn't created that many training days yet.
+// Each goalie walks their level's ordered training-day list, one week at a time. In a week,
+// the days that are available to train (not marked game/rest, not Sunday unless the week has
+// a mark, not part of a long absence) are taken in order and paired up: the first two are
+// block 1, the next two block 2, the next two block 3 (so an unmarked week is Mon-Tue,
+// Wed-Thu, Fri-Sat with Sunday off, and a marked week shifts things along, e.g. Wed game +
+// Sat rest gives Mon-Tue, Thu-Fri, and Sunday alone as block 3). Every block shows the next
+// training day from the list. Blocks start over each Monday. A stretch of ABSENCE_PAUSE_DAYS
+// or more days in a row without opening the app doesn't count as available (the list pauses,
+// then resumes where they left off); one or two missed days still count. The first training
+// day is shown on the first day they open the app. Returns { ...trainingDay, index, block }
+// for dateKeyStr, or null if that date is a game/rest day or the coach hasn't created that
+// many training days yet.
 function trainingDayForDate(content, user, dateKeyStr, level) {
   if (resolveDayType(user, dateKeyStr)) return null;
-  const targetSlot = blockSlotOf(dateFromKey(dateKeyStr));
-  if (!targetSlot) return null;
+  const target = dateFromKey(dateKeyStr);
+  if (user.role === "coach" && target.getDay() === 0) return null;
   // Being in the app right now counts as today's activity, even before the record is saved.
   const loginDays = { ...(user.loginDays || {}), [dateKey(TODAY_DATE)]: true };
   const firstLogin = Object.keys(loginDays).sort()[0];
@@ -192,20 +196,27 @@ function trainingDayForDate(content, user, dateKeyStr, level) {
     if (j - i >= ABSENCE_PAUSE_DAYS) for (let k = i; k < j; k++) days[k].paused = true;
     i = j;
   }
+  const pausedKeys = new Set(days.filter((d) => d.paused).map((d) => d.key));
+  const isAvailable = (date, sundayOk) => {
+    const key = dateKey(date);
+    return key >= startKey && !personalDayType(user, key) && !pausedKeys.has(key) && (date.getDay() !== 0 || sundayOk);
+  };
 
-  let index = 0;
-  let slotKey = null;
-  let used = false;
-  const closeSlot = () => { if (slotKey && slotKey !== targetSlot.slotKey && used) index++; };
-  for (const day of days) {
-    const slot = blockSlotOf(dateFromKey(day.key));
-    if (!slot) continue;
-    if (slot.slotKey !== slotKey) { closeSlot(); slotKey = slot.slotKey; used = false; }
-    if (!day.paused && !resolveDayType(user, day.key)) used = true;
+  const targetMonday = mondayOf(target);
+  let entriesBefore = 0;
+  for (let monday = mondayOf(dateFromKey(startKey)); dateKey(monday) < dateKey(targetMonday); monday = addDays(monday, 7)) {
+    const sundayOk = user.role !== "coach" && weekHasMark(user, monday);
+    let available = 0;
+    for (let i = 0; i < 7; i++) if (isAvailable(addDays(monday, i), sundayOk)) available++;
+    entriesBefore += Math.ceil(available / 2);
   }
-  closeSlot();
+  const sundayOk = user.role !== "coach" && weekHasMark(user, targetMonday);
+  let before = 0;
+  for (let d = targetMonday; dateKey(d) < dateKeyStr; d = addDays(d, 1)) if (isAvailable(d, sundayOk)) before++;
+  const blockIndex = Math.floor(before / 2);
+  const index = entriesBefore + blockIndex;
   const entry = (content.trainingDays?.[level] || [])[index];
-  return entry ? { ...entry, index, block: targetSlot.block } : null;
+  return entry ? { ...entry, index, block: blockIndex + 1 } : null;
 }
 
 // The notification bell's content — always computed fresh from the goalie's own calendar
@@ -3103,7 +3114,7 @@ function AdminTrainingDays({ content, updateContent }) {
   return (
     <div className="admin-page">
       <h1 className="admin-h1">Training days</h1>
-      <p className="admin-sub">Build the ordered list each level works through. The week is fixed: block 1 is Monday–Tuesday, block 2 is Wednesday–Thursday, block 3 is Friday–Saturday, and Sunday is an automatic rest day. Each block shows the next training day from this list. A game or rest day takes that day's place (the block lasts 1 day), and a block with no available day doesn't use one up. A new goalie starts at Day 1 the first day they open the app, and being away 3 or more days in a row pauses their list until they're back.</p>
+      <p className="admin-sub">Build the ordered list each level works through. Each week has 3 blocks of 2 days. With nothing marked it runs block 1 Monday–Tuesday, block 2 Wednesday–Thursday, block 3 Friday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day that week, Sunday opens up as a training day and the blocks shift along the days they have left (a game day Wednesday and a rest day Saturday gives Monday–Tuesday, Thursday–Friday, and Sunday alone as block 3). Each block shows the next training day from this list. A new goalie starts at Day 1 the first day they open the app, and being away 3 or more days in a row pauses their list until they're back.</p>
 
       <div className="admin-panel">
         <div className="planner-header">
