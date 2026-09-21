@@ -5818,7 +5818,7 @@ button:focus {
 /* ---------------- RESPONSIVE ---------------- */
 @media (max-width: 900px) {
   .nav-links, .nav-admin-toggle, .nav-level-select, .nav-right > .nav-avatar, .nav-calendar-btn { display: none; }
-  .main { padding-bottom: calc(120px + env(safe-area-inset-bottom)); }
+  .main { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
   .bottom-nav { display: flex; }
   .nav-mobile-toggle { display: flex; }
   .nav-mobile-panel { display: flex; }
@@ -5876,7 +5876,7 @@ button:focus {
   .eyebrow-calendar-btn { width: 36px; height: 36px; }
   .eyebrow-calendar-btn svg { width: 20px; height: 20px; }
   .mistake-row { grid-template-columns: 1fr; }
-  .main { padding: 0 16px calc(120px + env(safe-area-inset-bottom)); }
+  .main { padding: 0 16px calc(96px + env(safe-area-inset-bottom)); }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .profile-grid { flex-wrap: wrap; gap: 20px; }
   .auth-side { padding: 36px 20px 28px; }
