@@ -22,6 +22,9 @@ function json(body: unknown, status = 200) {
   });
 }
 
+// Hosted with the app (public/email-logo.png); email clients need a public https address, not embedded data.
+const LOGO_URL = "https://10dtendy.github.io/training/email-logo.png";
+
 function escapeHtml(s: string) {
   return String(s ?? "")
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -44,8 +47,8 @@ function buildHtml({ heading, body, buttonText, footer, accentColor }: {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5;padding:32px 16px;">
     <tr><td align="center">
       <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;">
-        <tr><td style="background-color:${escapeHtml(accentColor)};padding:22px 32px;">
-          <span style="color:#ffffff;font-size:18px;font-weight:700;letter-spacing:0.06em;">10DTENDY</span>
+        <tr><td bgcolor="#0A0A0C" style="background-color:#0A0A0C;padding:22px 32px;">
+          <img src="${LOGO_URL}" alt="10DTendy" width="180" style="display:block;width:180px;max-width:100%;height:auto;border:0;outline:none;" />
         </td></tr>
         <tr><td style="padding:32px;">
           <h1 style="margin:0 0 16px;font-size:21px;color:#18181b;">${escapeHtml(heading)}</h1>

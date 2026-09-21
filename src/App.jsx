@@ -74,6 +74,8 @@ const DEFAULT_WELCOME = {
   videoUrl: "", videoAssetId: null,
 };
 const DEFAULT_ANNOUNCEMENT = { enabled: false, id: null, title: "", body: "", videoUrl: "", videoAssetId: null };
+// The real email links to the logo hosted with the app; the admin preview uses the built-in copy so it shows immediately.
+const EMAIL_LOGO_URL = "https://10dtendy.github.io/training/email-logo.png";
 const DEFAULT_CONFIRMATION_EMAIL = {
   subject: "Confirm your 10DTendy account",
   heading: "Welcome to 10DTendy",
@@ -85,7 +87,7 @@ const DEFAULT_CONFIRMATION_EMAIL = {
 // Mirrors the HTML the update-confirmation-email Edge Function builds, so the
 // admin preview matches the real email. Keep the two in sync by hand if either
 // changes — see supabase/functions/update-confirmation-email/index.ts.
-function buildConfirmationEmailHtml({ heading, body, buttonText, footer, accentColor, confirmUrl }) {
+function buildConfirmationEmailHtml({ heading, body, buttonText, footer, accentColor, confirmUrl, logoUrl = EMAIL_LOGO_URL }) {
   const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const paragraphs = String(body || "").split("\n").map((p) => p.trim()).filter(Boolean)
     .map((p) => `<p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#3f3f46;">${esc(p)}</p>`).join("");
@@ -93,7 +95,7 @@ function buildConfirmationEmailHtml({ heading, body, buttonText, footer, accentC
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5;padding:32px 16px;">
     <tr><td align="center">
       <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;">
-        <tr><td style="background-color:${esc(accentColor)};padding:22px 32px;"><span style="color:#ffffff;font-size:18px;font-weight:700;letter-spacing:0.06em;">10DTENDY</span></td></tr>
+        <tr><td bgcolor="#0A0A0C" style="background-color:#0A0A0C;padding:22px 32px;"><img src="${logoUrl}" alt="10DTendy" width="180" style="display:block;width:180px;max-width:100%;height:auto;border:0;outline:none;" /></td></tr>
         <tr><td style="padding:32px;">
           <h1 style="margin:0 0 16px;font-size:21px;color:#18181b;">${esc(heading)}</h1>
           ${paragraphs}
@@ -4490,7 +4492,7 @@ function AdminConfirmationEmail({ content, updateContent }) {
       : { ok: false, message: res.error || "Failed to publish." });
   };
 
-  const previewHtml = buildConfirmationEmailHtml({ ...email, accentColor, confirmUrl: "#" });
+  const previewHtml = buildConfirmationEmailHtml({ ...email, accentColor, confirmUrl: "#", logoUrl: LOGO_SRC });
 
   return (
     <div className="admin-page">
