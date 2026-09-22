@@ -5,7 +5,7 @@ import {
   Calendar as CalendarIcon, LayoutGrid, Users as UsersIcon,
   Image as ImageIcon, Settings as SettingsIcon, Download, Gauge, LogOut,
   Mail, Lock, UploadCloud, FileText, Video as VideoIcon, AlertTriangle,
-  Home, BarChart3, Tag, Search, CircleDot, Armchair, Copy, LayoutTemplate, Megaphone
+  Home, BarChart3, Tag, Search, CircleDot, Armchair, Copy, LayoutTemplate, Megaphone, List
 } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
 import {
@@ -355,6 +355,182 @@ function GoalieMark({ size = 22 }) {
 function initials(name) {
   if (!name) return "?";
   return name.trim().split(/\s+/).slice(0, 2).map((p) => p[0].toUpperCase()).join("");
+}
+
+/* ============================================================================
+   RICH TEXT (objective/instructions-style fields): a small bold/italic/bullet
+   editor. Paste from Word, Google Docs, Notes, etc. usually marks bold/italic
+   with inline styles on a <span> rather than a <b>/<i> tag — that's read here
+   too, not just the semantic tags. Everything else pasted (colors, fonts,
+   links, images, scripts...) is stripped down to this fixed, safe tag set.
+   ============================================================================ */
+const RICH_TEXT_ALLOWED_STRUCT = { UL: "ul", OL: "ol", LI: "li", BR: "br", P: "p" };
+
+function richTextIsBold(el) {
+  const w = el.style?.fontWeight;
+  if (w) {
+    const n = parseInt(w, 10);
+    return isNaN(n) ? /bold/i.test(w) : n >= 600;
+  }
+  return el.tagName === "B" || el.tagName === "STRONG";
+}
+function richTextIsItalic(el) {
+  if (el.style?.fontStyle) return /italic|oblique/i.test(el.style.fontStyle);
+  return el.tagName === "I" || el.tagName === "EM";
+}
+
+// Keeps only bold, italic, bulleted/numbered lists, line breaks and paragraphs — everything
+// else (spans, fonts, colors, links, images, tables, scripts...) is unwrapped to plain text.
+function sanitizeRichHtml(html) {
+  const doc = new DOMParser().parseFromString(String(html ?? ""), "text/html");
+  const walk = (node) => {
+    const out = [];
+    node.childNodes.forEach((child) => {
+      if (child.nodeType === Node.TEXT_NODE) {
+        if (child.textContent) out.push(document.createTextNode(child.textContent));
+        return;
+      }
+      if (child.nodeType !== Node.ELEMENT_NODE) return;
+      const tag = child.tagName;
+      if (tag === "SCRIPT" || tag === "STYLE") return;
+      let children = walk(child);
+      if (richTextIsBold(child)) { const b = document.createElement("strong"); b.append(...children); children = [b]; }
+      if (richTextIsItalic(child)) { const i = document.createElement("em"); i.append(...children); children = [i]; }
+      if (RICH_TEXT_ALLOWED_STRUCT[tag]) {
+        const el = document.createElement(RICH_TEXT_ALLOWED_STRUCT[tag]);
+        el.append(...children);
+        out.push(el);
+      } else if (tag === "DIV") {
+        // Word/Docs mark paragraph breaks with <div>, not <p>.
+        const el = document.createElement("p");
+        el.append(...children);
+        out.push(el);
+      } else {
+        out.push(...children);
+      }
+    });
+    return out;
+  };
+  const container = document.createElement("div");
+  container.append(...walk(doc.body));
+  return container.innerHTML;
+}
+
+// Old plain-text values (typed before this editor existed) never contain a real tag, so they're
+// escaped and line-broken instead of parsed as HTML — a stray "<5 sec>" shouldn't be swallowed.
+function looksLikeRichHtml(value) {
+  return typeof value === "string" && /<\/?[a-zA-Z][^>]*>/.test(value);
+}
+function renderRichText(value) {
+  const v = value || "";
+  if (!v) return "";
+  if (looksLikeRichHtml(v)) return sanitizeRichHtml(v);
+  return v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\r\n|\r|\n/g, "<br>");
+}
+function RichText({ value, className }) {
+  return <div className={className} dangerouslySetInnerHTML={{ __html: renderRichText(value) }} />;
+}
+
+// A small bold/italic/bullet-list editor for one field. Stores sanitized HTML back into the
+// same string field the plain textarea used to hold — old plain-text values still load fine
+// (rendered by RichText above) and get upgraded to real HTML the next time they're edited.
+function RichTextEditor({ value, onChange, placeholder, rows = 3 }) {
+  const ref = useRef(null);
+  const focused = useRef(false);
+  const minHeight = rows * 20 + 16;
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || focused.current) return;
+    const html = looksLikeRichHtml(value) ? sanitizeRichHtml(value) : renderRichText(value);
+    if (el.innerHTML !== html) el.innerHTML = html;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  const commit = () => { if (ref.current) onChange(sanitizeRichHtml(ref.current.innerHTML)); };
+  const cmd = (name) => (e) => { e.preventDefault(); document.execCommand(name); ref.current?.focus(); commit(); };
+  const handlePaste = (e) => {
+    e.preventDefault();
+    const html = e.clipboardData.getData("text/html");
+    const insert = html ? sanitizeRichHtml(html) : renderRichText(e.clipboardData.getData("text/plain"));
+    document.execCommand("insertHTML", false, insert);
+    commit();
+  };
+
+  return (
+    <div className="rich-text-field">
+      <div className="rich-text-toolbar">
+        <button type="button" className="rich-text-btn" onMouseDown={cmd("bold")} aria-label="Bold"><strong>B</strong></button>
+        <button type="button" className="rich-text-btn rich-text-btn--i" onMouseDown={cmd("italic")} aria-label="Italic"><em>i</em></button>
+        <button type="button" className="rich-text-btn" onMouseDown={cmd("insertUnorderedList")} aria-label="Bulleted list"><List size={14} /></button>
+      </div>
+      <div
+        ref={ref}
+        className="rich-text-input"
+        style={{ minHeight }}
+        contentEditable
+        suppressContentEditableWarning
+        data-placeholder={placeholder}
+        onFocus={() => { focused.current = true; }}
+        onBlur={() => { focused.current = false; commit(); }}
+        onInput={commit}
+        onPaste={handlePaste}
+      />
+    </div>
+  );
+}
+
+// Shrinks an uploaded image for storage without changing its aspect ratio: it's scaled down
+// only if it's bigger than IMAGE_MAX_DIMENSION on its longest side (never enlarged, never
+// cropped) and re-encoded to a smaller file. PNGs with no transparent pixels are re-encoded as
+// JPEG, since flat photos/screenshots compress far smaller that way; a PNG that actually uses
+// transparency stays PNG so nothing gets a black or white background. If compressing somehow
+// doesn't come out smaller (rare, e.g. a tiny or already-optimized file), the original is kept.
+const IMAGE_MAX_DIMENSION = 1600;
+const IMAGE_JPEG_QUALITY = 0.82;
+
+function loadImageBitmapFrom(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+async function compressImageFile(file) {
+  if (!file.type?.startsWith("image/") || file.type === "image/svg+xml" || file.type === "image/gif") return file;
+  try {
+    const img = await loadImageBitmapFrom(file);
+    const scale = Math.min(1, IMAGE_MAX_DIMENSION / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.round(img.naturalWidth * scale);
+    const h = Math.round(img.naturalHeight * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, w, h);
+    URL.revokeObjectURL(img.src);
+
+    let usePng = file.type === "image/png";
+    if (usePng) {
+      // Only keep PNG if some pixel is actually transparent — otherwise a flat PNG re-encodes
+      // far smaller as JPEG. Sampled, not scanned pixel-by-pixel, so this stays fast at 1600px.
+      const { data } = ctx.getImageData(0, 0, w, h);
+      usePng = false;
+      for (let i = 3; i < data.length; i += 4 * 37) { if (data[i] < 255) { usePng = true; break; } }
+    }
+
+    const mime = usePng ? "image/png" : "image/jpeg";
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, mime, IMAGE_JPEG_QUALITY));
+    if (!blob || blob.size >= file.size) return file;
+    const ext = usePng ? "png" : "jpg";
+    const name = file.name.replace(/\.[^.]+$/, "") + "." + ext;
+    return new File([blob], name, { type: mime });
+  } catch {
+    // Any failure (corrupt image, browser quirk) — upload exactly what was picked.
+    return file;
+  }
 }
 
 // Traced directly from the reference crossed-sticks artwork.
@@ -1558,7 +1734,7 @@ function VideoPlayer({ title, poster, src }) {
 function DrillBody({ drill }) {
   return (
     <>
-        <section className="detail-block"><h2>Objective</h2><p>{drill.objective}</p></section>
+        <section className="detail-block"><h2>Objective</h2><RichText value={drill.objective} /></section>
         {drill.diagramUrl && <section className="detail-block"><img src={drill.diagramUrl} alt="Drill diagram" className="drill-diagram" /></section>}
         <section className="detail-block">
           <h2>How to perform</h2>
@@ -1650,13 +1826,13 @@ function FocusDetailPage({ focus, branding, drills = [], onBack, complete, onCom
         <h1 className="focus-hero-title">{focus.title}</h1>
         <div className="focus-hero-glow" />
       </section>
-      <section className="detail-block"><h2>Why it matters</h2><p>{focus.explanation}</p></section>
+      <section className="detail-block"><h2>Why it matters</h2><RichText value={focus.explanation} /></section>
       <section className="detail-block"><h2>Today's cue</h2><div className="cue-highlight">{focus.cue}</div></section>
       {(focus.blocks || []).map((b) => (
         b.type === "image" ? (b.imageUrl && <img key={b.id} src={b.imageUrl} alt="" className="focus-block-image" />)
         : b.type === "video" ? (b.videoUrl && <VideoPlayer key={b.id} title={focus.title} src={b.videoUrl} />)
         : b.type === "drill" ? (() => { const d = drills.find((x) => x.id === b.drillId && x.published); return d ? <FocusDrillCard key={b.id} drill={d} branding={branding} /> : null; })()
-        : (b.body && <section key={b.id} className="detail-block">{b.heading && <h2>{b.heading}</h2>}<p>{b.body}</p></section>)
+        : (b.body && <section key={b.id} className="detail-block">{b.heading && <h2>{b.heading}</h2>}<RichText value={b.body} /></section>)
       ))}
       <button className={"btn btn--complete" + (complete ? " btn--complete-done" : "")} onClick={onComplete}>
         {complete ? <><Check size={16} /> Practice focus complete</> : "Mark practice focus complete"}
@@ -1684,7 +1860,7 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
         <h1 className="detail-title">{office.title}</h1>
         <div className="meta-row meta-row--lg"><span>{office.duration}</span><span className="dot">•</span><span>{office.equipment}</span></div>
       </div>
-      {office.objective && <section className="detail-block"><h2>Objective</h2><p>{office.objective}</p></section>}
+      {office.objective && <section className="detail-block"><h2>Objective</h2><RichText value={office.objective} /></section>}
       <section className="detail-block">
         <h2>Exercises</h2>
         <div className="exercise-list">
@@ -1715,7 +1891,7 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
                       <img src={ex.imageUrl} alt="" className="exercise-media-img" />
                     </div>
                   )}
-                  {ex.instructions && <p className="exercise-instructions">{ex.instructions}</p>}
+                  {ex.instructions && <RichText value={ex.instructions} className="exercise-instructions" />}
                 </div>
               )}
             </div>
@@ -2462,7 +2638,7 @@ function useDiagramUpload(setDraft) {
     setError("");
     setUploading(true);
     try {
-      const res = await uploadToStorage(file);
+      const res = await uploadToStorage(await compressImageFile(file));
       setDraft((d) => ({ ...d, diagramUrl: res.url }));
     } catch (err) {
       setError(err?.message || "Upload failed. Please try again.");
@@ -2482,7 +2658,7 @@ function useMediaFields(setDraft) {
     setMediaError("");
     setUploading(true);
     try {
-      const res = await uploadToStorage(file);
+      const res = await uploadToStorage(await compressImageFile(file));
       setDraft((d) => ({ ...d, imageAssetId: res.id, imageUrl: res.url }));
     } catch (err) {
       setMediaError(err?.message || "Upload failed. Please try again.");
@@ -2771,7 +2947,7 @@ function AdminDrills({ content, updateContent }) {
             <label>Duration<input value={draft.duration} onChange={(e) => setDraft({ ...draft, duration: e.target.value })} placeholder="e.g. 12 min" /></label>
             <label>Equipment<input value={draft.equipment} onChange={(e) => setDraft({ ...draft, equipment: e.target.value })} placeholder="e.g. Full gear" /></label>
             <label className="admin-form-span2">Short description (Main Page)<input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="One line for the card" /></label>
-            <label className="admin-form-span2">Objective<textarea rows={2} value={draft.objective} onChange={(e) => setDraft({ ...draft, objective: e.target.value })} placeholder="What this drill improves" /></label>
+            <label className="admin-form-span2">Objective<RichTextEditor rows={2} value={draft.objective} onChange={(v) => setDraft({ ...draft, objective: v })} placeholder="What this drill improves" /></label>
             <div className="admin-form-span2 media-field">
               <span className="media-field-label">Drill diagram (shown under the objective)</span>
               {draft.diagramUrl ? (
@@ -3058,7 +3234,7 @@ function useBlockMedia(setDraft) {
     setErrors((e) => ({ ...e, [blockId]: "" }));
     setUploading((u) => ({ ...u, [blockId]: true }));
     try {
-      const res = await uploadToStorage(file);
+      const res = await uploadToStorage(await compressImageFile(file));
       patchBlock(blockId, { imageAssetId: res.id, imageUrl: res.url });
     } catch (err) {
       setErrors((e) => ({ ...e, [blockId]: err?.message || "Upload failed. Please try again." }));
@@ -3167,7 +3343,7 @@ function FocusBlocksEditor({ blocks, setDraft, blockMedia, drills = [], drillCat
                 <label className="exercise-editor-instructions">Heading (optional)
                   <input className="exercise-editor-title" value={b.heading} onChange={(e) => updateField(b.id, "heading", e.target.value)} placeholder="e.g. Coaching point" />
                 </label>
-                <label className="exercise-editor-instructions">Text<textarea rows={3} value={b.body} onChange={(e) => updateField(b.id, "body", e.target.value)} /></label>
+                <label className="exercise-editor-instructions">Text<RichTextEditor rows={3} value={b.body} onChange={(v) => updateField(b.id, "body", v)} /></label>
               </>
             )}
           </div>
@@ -3256,7 +3432,7 @@ function AdminFocusPoints({ content, updateContent }) {
                 {categoriesOfType(content, "focus").map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
               </select>
             </label>
-            <label className="admin-form-span2">Why it matters<textarea rows={3} value={draft.explanation} onChange={(e) => setDraft({ ...draft, explanation: e.target.value })} /></label>
+            <label className="admin-form-span2">Why it matters<RichTextEditor rows={3} value={draft.explanation} onChange={(v) => setDraft({ ...draft, explanation: v })} /></label>
             <label className="admin-form-span2">Today's cue<input value={draft.cue} onChange={(e) => setDraft({ ...draft, cue: e.target.value })} /></label>
 
             <MediaFields draft={draft} media={media} />
@@ -3360,7 +3536,7 @@ function useExerciseMedia(setDraft) {
     setErrors((e) => ({ ...e, [exId]: "" }));
     setUploading((u) => ({ ...u, [exId]: true }));
     try {
-      const res = await uploadToStorage(file);
+      const res = await uploadToStorage(await compressImageFile(file));
       patchExercise(exId, { imageAssetId: res.id, imageUrl: res.url });
     } catch (err) {
       setErrors((e) => ({ ...e, [exId]: err?.message || "Upload failed. Please try again." }));
@@ -3415,7 +3591,7 @@ function ExerciseEditor({ exercises, setDraft, exMedia }) {
               <label>Reps / Sets<input value={ex.sets} onChange={(e) => updateField(ex.id, "sets", e.target.value)} placeholder="3 × 8 each side" /></label>
               <label>Rest / Duration<input value={ex.rest} onChange={(e) => updateField(ex.id, "rest", e.target.value)} placeholder="45 sec" /></label>
             </div>
-            <label className="exercise-editor-instructions">Instructions<textarea rows={2} value={ex.instructions} onChange={(e) => updateField(ex.id, "instructions", e.target.value)} placeholder="How to perform this exercise" /></label>
+            <label className="exercise-editor-instructions">Instructions<RichTextEditor rows={2} value={ex.instructions} onChange={(v) => updateField(ex.id, "instructions", v)} placeholder="How to perform this exercise" /></label>
 
             <div className="exercise-editor-media">
               <div className="media-field">
@@ -3540,7 +3716,7 @@ function AdminOffIce({ content, updateContent }) {
               </select>
             </label>
             <label className="admin-form-span2">Short description<input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="One line for the card" /></label>
-            <label className="admin-form-span2">Description / objective<textarea rows={4} value={draft.objective} onChange={(e) => setDraft({ ...draft, objective: e.target.value })} placeholder="What this workout is for and what it builds" /></label>
+            <label className="admin-form-span2">Description / objective<RichTextEditor rows={4} value={draft.objective} onChange={(v) => setDraft({ ...draft, objective: v })} placeholder="What this workout is for and what it builds" /></label>
 
             <ExerciseEditor exercises={draft.exercises} setDraft={setDraft} exMedia={exMedia} />
 
@@ -4167,7 +4343,7 @@ function AdminMedia({ content, updateContent }) {
     try {
       const uploaded = [];
       for (const f of picked) {
-        const res = await uploadToStorage(f);
+        const res = await uploadToStorage(f.type.startsWith("image/") ? await compressImageFile(f) : f);
         uploaded.push({ id: crypto.randomUUID(), url: res.url, contentType: res.contentType, sizeBytes: res.sizeBytes, name: f.name, uploadedAt: Date.now(), storagePath: res.path });
       }
       updateContent((c) => ({ ...c, media: [...uploaded, ...(c.media || [])] }));
@@ -4322,7 +4498,7 @@ function AdminFrontPage({ content, updateContent }) {
     setError("");
     setUploading((u) => ({ ...u, [key]: true }));
     try {
-      const res = await uploadToStorage(file);
+      const res = await uploadToStorage(await compressImageFile(file));
       setEntry(key, { assetId: res.id, url: res.url });
     } catch (err) {
       setError(err?.message || "Upload failed. Please try again.");
@@ -5429,6 +5605,11 @@ button:focus {
 .detail-block { margin-bottom: 32px; }
 .detail-block h2 { font-size: 16px; margin-bottom: 12px; }
 .detail-block p { color: var(--text-dim); line-height: 1.65; font-size: 15px; white-space: pre-wrap; }
+.detail-block ul, .detail-block ol { color: var(--text-dim); line-height: 1.65; font-size: 15px; margin: 0 0 12px; padding-left: 22px; }
+.detail-block ul:last-child, .detail-block ol:last-child { margin-bottom: 0; }
+.detail-block strong { color: var(--text); }
+.exercise-instructions ul, .exercise-instructions ol { margin: 0; padding-left: 20px; }
+.exercise-instructions strong { color: var(--text); }
 .steps { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 14px; }
 .steps li { display: flex; gap: 14px; align-items: flex-start; font-size: 15px; color: var(--text-dim); line-height: 1.5; }
 .step-num { flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--text); }
@@ -5457,7 +5638,7 @@ button:focus {
 .exercise-chevron.open { transform: rotate(90deg); }
 .exercise-expanded { padding: 0 16px 16px; display: flex; flex-direction: column; gap: 12px; }
 .exercise-media { border-radius: 10px; overflow: hidden; background: var(--surface-2); }
-.exercise-media-img { width: 100%; max-height: 220px; object-fit: cover; display: block; }
+.exercise-media-img { width: 100%; height: auto; max-height: 340px; object-fit: contain; display: block; border-radius: 8px; }
 .exercise-media-video { width: 100%; max-height: 260px; display: block; }
 .exercise-media-youtube { position: relative; width: 100%; aspect-ratio: 16/9; }
 .exercise-instructions { font-size: 14px; color: var(--text-dim); line-height: 1.5; margin: 0; white-space: pre-wrap; }
@@ -5578,6 +5759,17 @@ button:focus {
 .admin-form-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-dim); }
 .admin-form-grid input, .admin-form-grid select, .admin-form-grid textarea { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; color: var(--text); font-size: 13px; font-family: inherit; resize: vertical; }
 .admin-form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.rich-text-field { width: 100%; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface-2); }
+.exercise-editor-instructions .rich-text-field { background: var(--surface); }
+.rich-text-toolbar { display: flex; gap: 2px; padding: 4px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02); }
+.rich-text-btn { width: 26px; height: 24px; border-radius: 5px; color: var(--text-dim); font-size: 13px; display: flex; align-items: center; justify-content: center; }
+.rich-text-btn:hover { background: var(--surface); color: var(--text); }
+.rich-text-btn--i em { font-style: italic; }
+.rich-text-input { padding: 9px 10px; color: var(--text); font-size: 13px; font-family: inherit; line-height: 1.5; min-height: 64px; max-height: 260px; overflow-y: auto; outline: none; }
+.rich-text-input:empty::before { content: attr(data-placeholder); color: var(--text-dim); opacity: 0.7; }
+.rich-text-input ul { margin: 0; padding-left: 20px; }
+.rich-text-input p { margin: 0 0 6px; }
+.rich-text-input p:last-child { margin-bottom: 0; }
 .training-day-copy { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 18px; display: flex; flex-direction: column; gap: 10px; }
 .training-day-copy label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-dim); }
 .training-day-copy select { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; color: var(--text); font-size: 13px; }
