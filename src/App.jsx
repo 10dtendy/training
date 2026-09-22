@@ -1865,16 +1865,18 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
         <h2>Exercises</h2>
         <div className="exercise-list">
           {office.exercises.map((ex, i) => (
-            <div className="exercise-row" key={ex.id || ex.name + i}>
-              <button className="exercise-head" onClick={() => setOpen(open === i ? null : i)}>
+            <div className="exercise-row t-acc" data-open={open === i ? "true" : "false"} key={ex.id || ex.name + i}>
+              <button className="exercise-head t-acc-head" aria-expanded={open === i} onClick={() => setOpen(open === i ? null : i)}>
                 <div className="exercise-thumb">
                   <CircleDot size={16} />
                 </div>
                 <div className="exercise-info"><span className="exercise-name">{ex.name}</span><span className="exercise-sets">{ex.sets} · Rest {ex.rest}</span></div>
-                <ChevronRight size={16} className={"exercise-chevron" + (open === i ? " open" : "")} />
+                <span className="t-acc-chevron exercise-chevron">
+                  <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6.5L8 10.5L12 6.5" /></svg>
+                </span>
               </button>
-              {open === i && (
-                <div className="exercise-expanded">
+              <div className="t-acc-panel">
+                <div className="t-acc-panel-inner exercise-expanded">
                   {ex.videoUrl && (
                     <div className="exercise-media">
                       {youtubeVideoId(ex.videoUrl) ? (
@@ -1893,7 +1895,7 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
                   )}
                   {ex.instructions && <RichText value={ex.instructions} className="exercise-instructions" />}
                 </div>
-              )}
+              </div>
             </div>
           ))}
         </div>
@@ -5634,9 +5636,49 @@ button:focus {
 .exercise-info { display: flex; flex-direction: column; gap: 3px; flex: 1; }
 .exercise-name { font-size: 15px; font-weight: 600; }
 .exercise-sets { font-size: 13px; color: var(--text-dim); }
-.exercise-chevron { color: var(--text-faint); transition: transform .18s ease; }
-.exercise-chevron.open { transform: rotate(90deg); }
+.exercise-chevron { color: var(--text-faint); flex-shrink: 0; }
 .exercise-expanded { padding: 0 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+
+/* Transitions.dev — Accordion expand. Toggle data-open on .t-acc; the panel animates via
+   grid-template-rows 0fr <-> 1fr (no JS height measuring) and the chevron flips vertically
+   (scaleY) from a "v" to a "^". */
+:root {
+  --acc-expand: 250ms;
+  --acc-collapse: 250ms;
+  --acc-chevron: 250ms;
+  --acc-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+.t-acc-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--acc-collapse) var(--acc-ease);
+}
+.t-acc[data-open="true"] .t-acc-panel {
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--acc-expand) var(--acc-ease);
+}
+.t-acc-panel-inner {
+  overflow: hidden;
+  opacity: 0;
+  filter: blur(2px);
+  transition: opacity var(--acc-collapse) var(--acc-ease), filter var(--acc-collapse) var(--acc-ease);
+}
+.t-acc[data-open="true"] .t-acc-panel-inner {
+  opacity: 1;
+  filter: blur(0);
+  transition: opacity var(--acc-expand) var(--acc-ease), filter var(--acc-expand) var(--acc-ease);
+}
+.t-acc-chevron {
+  display: inline-flex;
+  transform: scaleY(1);
+  transform-origin: center;
+  transition: transform var(--acc-chevron) var(--acc-ease);
+}
+.t-acc-chevron path { vector-effect: non-scaling-stroke; }
+.t-acc[data-open="true"] .t-acc-chevron { transform: scaleY(-1); }
+@media (prefers-reduced-motion: reduce) {
+  .t-acc-panel, .t-acc-panel-inner, .t-acc-chevron { transition: none !important; }
+}
 .exercise-media { border-radius: 10px; overflow: hidden; background: var(--surface-2); }
 .exercise-media-img { width: 100%; height: auto; max-height: 340px; object-fit: contain; display: block; border-radius: 8px; }
 .exercise-media-video { width: 100%; max-height: 260px; display: block; }
