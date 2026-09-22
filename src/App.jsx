@@ -1692,7 +1692,7 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
             <div className="exercise-row" key={ex.id || ex.name + i}>
               <button className="exercise-head" onClick={() => setOpen(open === i ? null : i)}>
                 <div className="exercise-thumb">
-                  {ex.imageUrl ? <img src={ex.imageUrl} alt="" className="exercise-thumb-img" /> : <CircleDot size={16} />}
+                  <CircleDot size={16} />
                 </div>
                 <div className="exercise-info"><span className="exercise-name">{ex.name}</span><span className="exercise-sets">{ex.sets} · Rest {ex.rest}</span></div>
                 <ChevronRight size={16} className={"exercise-chevron" + (open === i ? " open" : "")} />
@@ -1710,7 +1710,7 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
                       )}
                     </div>
                   )}
-                  {!ex.videoUrl && ex.imageUrl && (
+                  {ex.imageUrl && (
                     <div className="exercise-media">
                       <img src={ex.imageUrl} alt="" className="exercise-media-img" />
                     </div>
