@@ -1876,24 +1876,26 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
                 </span>
               </button>
               <div className="t-acc-panel">
-                <div className="t-acc-panel-inner exercise-expanded">
-                  {ex.videoUrl && (
-                    <div className="exercise-media">
-                      {youtubeVideoId(ex.videoUrl) ? (
-                        <div className="exercise-media-youtube">
-                          <YouTubeEmbed url={ex.videoUrl} title={ex.name} size="sm" />
-                        </div>
-                      ) : (
-                        <video src={ex.videoUrl} className="exercise-media-video" controls playsInline />
-                      )}
-                    </div>
-                  )}
-                  {ex.imageUrl && (
-                    <div className="exercise-media">
-                      <img src={ex.imageUrl} alt="" className="exercise-media-img" />
-                    </div>
-                  )}
-                  {ex.instructions && <RichText value={ex.instructions} className="exercise-instructions" />}
+                <div className="t-acc-panel-inner">
+                  <div className="exercise-expanded">
+                    {ex.videoUrl && (
+                      <div className="exercise-media">
+                        {youtubeVideoId(ex.videoUrl) ? (
+                          <div className="exercise-media-youtube">
+                            <YouTubeEmbed url={ex.videoUrl} title={ex.name} size="sm" />
+                          </div>
+                        ) : (
+                          <video src={ex.videoUrl} className="exercise-media-video" controls playsInline />
+                        )}
+                      </div>
+                    )}
+                    {ex.imageUrl && (
+                      <div className="exercise-media">
+                        <img src={ex.imageUrl} alt="" className="exercise-media-img" />
+                      </div>
+                    )}
+                    {ex.instructions && <RichText value={ex.instructions} className="exercise-instructions" />}
+                  </div>
                 </div>
               </div>
             </div>
@@ -5631,6 +5633,12 @@ button:focus {
 .exercise-list { display: flex; flex-direction: column; gap: 10px; }
 .exercise-row { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 .exercise-head { width: 100%; display: flex; align-items: center; gap: 14px; padding: 16px; text-align: left; }
+/* .exercise-row clips (overflow:hidden, rounded corners) so the accordion panel below can
+   collapse to nothing — the site-wide button:focus glow (button:focus, ~line 5314) spills
+   outward past the button's own edges, so on this button specifically it gets clipped into a
+   flat red line right where the header meets the panel. Drawing it inset keeps a real focus
+   ring without anything escaping the button to get clipped. */
+.exercise-head:focus { box-shadow: inset 0 0 0 2px rgba(190,32,46,0.35); }
 .exercise-thumb { width: 38px; height: 38px; border-radius: 8px; background: var(--surface-2); display: flex; align-items: center; justify-content: center; color: var(--accent); flex-shrink: 0; overflow: hidden; }
 .exercise-thumb-img { width: 100%; height: 100%; object-fit: cover; }
 .exercise-info { display: flex; flex-direction: column; gap: 3px; flex: 1; }
