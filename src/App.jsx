@@ -5428,7 +5428,7 @@ button:focus {
 .detail-title { font-size: 32px; font-weight: 900; margin-top: 8px; }
 .detail-block { margin-bottom: 32px; }
 .detail-block h2 { font-size: 16px; margin-bottom: 12px; }
-.detail-block p { color: var(--text-dim); line-height: 1.65; font-size: 15px; }
+.detail-block p { color: var(--text-dim); line-height: 1.65; font-size: 15px; white-space: pre-wrap; }
 .steps { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 14px; }
 .steps li { display: flex; gap: 14px; align-items: flex-start; font-size: 15px; color: var(--text-dim); line-height: 1.5; }
 .step-num { flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--text); }
@@ -5460,7 +5460,7 @@ button:focus {
 .exercise-media-img { width: 100%; max-height: 220px; object-fit: cover; display: block; }
 .exercise-media-video { width: 100%; max-height: 260px; display: block; }
 .exercise-media-youtube { position: relative; width: 100%; aspect-ratio: 16/9; }
-.exercise-instructions { font-size: 14px; color: var(--text-dim); line-height: 1.5; margin: 0; }
+.exercise-instructions { font-size: 14px; color: var(--text-dim); line-height: 1.5; margin: 0; white-space: pre-wrap; }
 
 /* ---------------- PROFILE ---------------- */
 .profile-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 36px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; }
