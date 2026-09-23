@@ -7,12 +7,6 @@ import { supabase } from "./supabase.js";
    plan for the schema this reads from.
    ============================================================================ */
 
-function rowsToMapByDate(rows) {
-  const out = {};
-  for (const r of rows) out[r.date] = r;
-  return out;
-}
-
 function shapeUser(p, dayTypes, gameLogs, restNotes, loginDays) {
   return {
     id: p.id, email: p.email, name: p.name, role: p.role,
@@ -155,20 +149,20 @@ export async function getContent() {
   ]);
 
   const toDrillShape = (d) => ({
-    id: d.id, title: d.title, category: d.category, duration: d.duration, equipment: d.equipment,
-    description: d.description, objective: d.objective,
+    id: d.id, title: d.title || "", category: d.category || "", duration: d.duration || "", equipment: d.equipment || "",
+    description: d.description || "", objective: d.objective || "",
     steps: d.steps || [], coachingPoints: d.coaching_points || [], mistakes: d.mistakes || [],
     published: d.published, imageAssetId: null, imageUrl: d.image_url || "", videoAssetId: null, videoUrl: d.video_url || "",
     diagramUrl: d.diagram_url || "",
   });
   const toFocusShape = (f) => ({
-    id: f.id, title: f.title, category: f.category, explanation: f.explanation, cue: f.cue,
+    id: f.id, title: f.title || "", category: f.category || "", explanation: f.explanation || "", cue: f.cue || "",
     blocks: f.blocks || [], published: f.published,
     imageAssetId: null, imageUrl: f.image_url || "", videoAssetId: null, videoUrl: f.video_url || "",
   });
   const toWorkoutShape = (o) => ({
-    id: o.id, title: o.title, category: o.category, duration: o.duration, equipment: o.equipment,
-    description: o.description, objective: o.objective, exercises: o.exercises || [], planRows: o.plan_rows || [],
+    id: o.id, title: o.title || "", category: o.category || "", duration: o.duration || "", equipment: o.equipment || "",
+    description: o.description || "", objective: o.objective || "", exercises: o.exercises || [], planRows: o.plan_rows || [],
     published: o.published, imageAssetId: null, imageUrl: o.image_url || "", videoAssetId: null, videoUrl: o.video_url || "",
   });
 
@@ -365,12 +359,6 @@ export async function getUnusedFiles() {
   const { data, error } = await supabase.rpc("unused_media_files");
   if (error) return null;
   return (data || []).map((f) => ({ name: f.name, size: Number(f.size), createdAt: f.created_at }));
-}
-
-export async function deleteFiles(paths) {
-  if (!paths?.length) return true;
-  const { error } = await supabase.storage.from("media").remove(paths);
-  return !error;
 }
 
 // Pushes the confirmation-email template live via the update-confirmation-email

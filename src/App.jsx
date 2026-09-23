@@ -5,13 +5,13 @@ import {
   Calendar as CalendarIcon, LayoutGrid, Users as UsersIcon,
   Image as ImageIcon, Settings as SettingsIcon, Download, Gauge, LogOut,
   Mail, Lock, UploadCloud, FileText, Video as VideoIcon, AlertTriangle,
-  Home, BarChart3, Tag, Search, CircleDot, Armchair, Copy, LayoutTemplate, Megaphone, List
+  Home, BarChart3, Tag, Search, CircleDot, Armchair, Copy, LayoutTemplate, Megaphone, List, Camera
 } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
 import {
   fetchCurrentProfile, getUsersMap, updateUserFields, recordLoginDay, getContent, updateContentFields,
   uploadImage as uploadToStorage, deleteStorageObject, publishConfirmationEmail, getUsage,
-  storagePathFromUrl, storagePathsIn, deleteUnusedFiles, getUnusedFiles, deleteFiles,
+  storagePathFromUrl, storagePathsIn, deleteUnusedFiles, getUnusedFiles,
 } from "./lib/data.js";
 
 /* ============================================================================
@@ -88,7 +88,7 @@ const DEFAULT_CONFIRMATION_EMAIL = {
 // admin preview matches the real email. Keep the two in sync by hand if either
 // changes — see supabase/functions/update-confirmation-email/index.ts.
 function buildConfirmationEmailHtml({ heading, body, buttonText, footer, accentColor, confirmUrl, logoUrl = EMAIL_LOGO_URL }) {
-  const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   const paragraphs = String(body || "").split("\n").map((p) => p.trim()).filter(Boolean)
     .map((p) => `<p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#3f3f46;">${esc(p)}</p>`).join("");
   return `<!DOCTYPE html><html><body style="margin:0;padding:0;background-color:#f4f4f5;font-family:Arial,Helvetica,sans-serif;">
@@ -195,8 +195,11 @@ function trainingDayForDate(content, user, dateKeyStr, level) {
   const startKey = firstLogin && firstLogin > signupKey ? firstLogin : signupKey;
   if (dateKeyStr < startKey) return null;
 
+  // Attendance is judged through today, not just up to the viewed day, so looking back at a day
+  // in the middle of a 3+ day absence shows it as paused rather than as a block you "missed".
+  const todayKey = dateKey(TODAY_DATE);
   const days = [];
-  for (let d = dateFromKey(startKey); dateKey(d) < dateKeyStr; d = addDays(d, 1)) {
+  for (let d = dateFromKey(startKey); dateKey(d) <= todayKey; d = addDays(d, 1)) {
     const key = dateKey(d);
     days.push({ key, away: !!firstLogin && key !== startKey && !loginDays[key], paused: false });
   }
@@ -208,6 +211,7 @@ function trainingDayForDate(content, user, dateKeyStr, level) {
     i = j;
   }
   const pausedKeys = new Set(days.filter((d) => d.paused).map((d) => d.key));
+  if (pausedKeys.has(dateKeyStr)) return null;
   const isAvailable = (date, sundayOk) => {
     const key = dateKey(date);
     return key >= startKey && !personalDayType(user, key) && !pausedKeys.has(key) && (date.getDay() !== 0 || sundayOk);
@@ -454,7 +458,22 @@ function RichTextEditor({ value, onChange, placeholder, rows = 3 }) {
   }, []);
 
   const commit = () => { if (ref.current) onChange(sanitizeRichHtml(ref.current.innerHTML)); };
-  const cmd = (name) => (e) => { e.preventDefault(); document.execCommand(name); ref.current?.focus(); commit(); };
+  const cmd = (name) => (e) => {
+    e.preventDefault();
+    const el = ref.current;
+    if (!el) return;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !el.contains(sel.anchorNode)) {
+      el.focus();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    document.execCommand(name);
+    commit();
+  };
   const handlePaste = (e) => {
     e.preventDefault();
     const html = e.clipboardData.getData("text/html");
@@ -770,7 +789,7 @@ function AuthScreen({ onAuthed }) {
                 {mode === "signup" && (
                   <label className="auth-field">
                     <span>Name</span>
-                    <input value={form.name} onChange={(e) => field("name", e.target.value)} placeholder="Jordan Reyes" />
+                    <input value={form.name} onChange={(e) => field("name", e.target.value)} placeholder="Jordan Reyes" maxLength={100} />
                   </label>
                 )}
                 <label className="auth-field">
@@ -1409,14 +1428,15 @@ function GameStatsForm({ initial, onSave, onCancel }) {
   const submit = (e) => {
     e.preventDefault();
     if (!opponent.trim()) { setError("Enter the opponent."); return; }
+    const wholeInRange = (n) => Number.isInteger(n) && n >= 0 && n <= 999;
     const m = Number(minutesPlayed);
-    if (!Number.isFinite(m) || m < 0) { setError("Minutes played must be a number 0 or higher."); return; }
+    if (!wholeInRange(m)) { setError("Minutes played must be a whole number from 0 to 999."); return; }
     const gf = Number(goalsFor);
-    if (!Number.isFinite(gf) || gf < 0) { setError("Goals scored must be a number 0 or higher."); return; }
+    if (!wholeInRange(gf)) { setError("Goals scored must be a whole number from 0 to 999."); return; }
 
     const parsed = periods.map((p) => ({ shots: Number(p.shots), goalsAgainst: Number(p.goalsAgainst) }));
-    if (!parsed.every((p) => Number.isFinite(p.shots) && p.shots >= 0 && Number.isFinite(p.goalsAgainst) && p.goalsAgainst >= 0)) {
-      setError("Every period needs shots and goals against as numbers 0 or higher.");
+    if (!parsed.every((p) => wholeInRange(p.shots) && wholeInRange(p.goalsAgainst))) {
+      setError("Every period needs shots and goals against as whole numbers from 0 to 999.");
       return;
     }
     if (parsed.some((p) => p.goalsAgainst > p.shots)) { setError("A period's goals against can't be more than its shots."); return; }
@@ -1428,7 +1448,7 @@ function GameStatsForm({ initial, onSave, onCancel }) {
     <form className="gamelog-form" onSubmit={submit}>
       <label className="auth-field">
         <span>Opponent</span>
-        <input value={opponent} onChange={(e) => setOpponent(e.target.value)} placeholder="e.g. Ice Wolves" />
+        <input value={opponent} onChange={(e) => setOpponent(e.target.value)} placeholder="e.g. Ice Wolves" maxLength={100} />
       </label>
 
       <div className="gamelog-toggle-row">
@@ -2045,9 +2065,9 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile }) {
                 </select>
               </label>
               <p className="planner-hint" style={{ marginTop: -4 }}>Changing your experience switches you to that level's training right away.</p>
-              <label className="auth-field"><span>Country</span><input value={country} onChange={(e) => setCountry(e.target.value)} placeholder="e.g. Canada" /></label>
-              <label className="auth-field"><span>League</span><input value={league} onChange={(e) => setLeague(e.target.value)} placeholder="e.g. OHL" /></label>
-              <label className="auth-field"><span>Team</span><input value={team} onChange={(e) => setTeam(e.target.value)} placeholder="e.g. London Knights" /></label>
+              <label className="auth-field"><span>Country</span><input value={country} onChange={(e) => setCountry(e.target.value)} placeholder="e.g. Canada" maxLength={100} /></label>
+              <label className="auth-field"><span>League</span><input value={league} onChange={(e) => setLeague(e.target.value)} placeholder="e.g. OHL" maxLength={100} /></label>
+              <label className="auth-field"><span>Team</span><input value={team} onChange={(e) => setTeam(e.target.value)} placeholder="e.g. London Knights" maxLength={100} /></label>
               {profileError && <div className="auth-error"><AlertTriangle size={13} /> {profileError}</div>}
               <div className="admin-form-actions">
                 <button type="button" className="btn btn--ghost btn--small" onClick={() => setEditingProfile(false)}>Cancel</button>
@@ -2961,7 +2981,7 @@ function AdminDrills({ content, updateContent }) {
       </div>
 
       {(creating || editingId) && (
-        <div className="admin-form">
+        <div className="admin-form" key={editingId || "new"}>
           <h3>{creating ? "Create drill" : "Edit drill"}</h3>
           <div className="admin-form-grid">
             <label>Title<input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Drill title" /></label>
@@ -3449,7 +3469,7 @@ function AdminFocusPoints({ content, updateContent }) {
     <div className="admin-page">
       <div className="admin-header-row"><h1 className="admin-h1">Practice Focus</h1><button className="btn btn--primary btn--small" onClick={startCreate}><Plus size={14} /> New practice focus</button></div>
       {(creating || editingId) && (
-        <div className="admin-form">
+        <div className="admin-form" key={editingId || "new"}>
           <h3>{creating ? "Create practice focus" : "Edit practice focus"}</h3>
           <div className="admin-form-grid">
             <label className="admin-form-span2">Title<input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Stay patient on your edges." /></label>
@@ -3773,7 +3793,7 @@ function AdminOffIce({ content, updateContent }) {
     <div className="admin-page">
       <div className="admin-header-row"><h1 className="admin-h1">Off-Ice</h1><button className="btn btn--primary btn--small" onClick={startCreate}><Plus size={14} /> New workout</button></div>
       {(creating || editingId) && (
-        <div className="admin-form">
+        <div className="admin-form" key={editingId || "new"}>
           <h3>{creating ? "Create workout" : "Edit workout"}</h3>
           <div className="admin-form-grid">
             <label>Title<input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></label>
@@ -4448,11 +4468,11 @@ function AdminMedia({ content, updateContent }) {
       <UnusedFiles />
       {error && <div className="auth-error" style={{ marginBottom: 16 }}><AlertTriangle size={13} /> {error}</div>}
 
-      <input ref={inputRef} type="file" accept="image/*,video/*" multiple onChange={onPick} style={{ display: "none" }} disabled={uploading} />
+      <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={onPick} style={{ display: "none" }} disabled={uploading} />
       <button className="upload-dropzone" onClick={() => inputRef.current?.click()} disabled={uploading}>
         <UploadCloud size={22} />
-        <span>{uploading ? "Uploading…" : "Click to upload images or videos"}</span>
-        <span className="upload-dropzone-hint">JPEG, PNG, WEBP, MP4, MOV</span>
+        <span>{uploading ? "Uploading…" : "Click to upload images"}</span>
+        <span className="upload-dropzone-hint">JPEG, PNG, WEBP, GIF — add videos as YouTube links</span>
       </button>
 
       {media.length === 0 ? (
@@ -4782,7 +4802,7 @@ function AdminConfirmationEmail({ content, updateContent }) {
               <span className="content-preview-label">Preview</span>
               <button className="icon-btn" onClick={() => setShowPreview(false)} aria-label="Close"><X size={16} /></button>
             </div>
-            <iframe title="Email preview" className="email-preview-frame" srcDoc={previewHtml} />
+            <iframe title="Email preview" className="email-preview-frame" sandbox="" srcDoc={previewHtml} />
           </div>
         </div>
       )}
@@ -5005,6 +5025,7 @@ function AppInner() {
     window.history.replaceState(null, "", window.location.pathname + window.location.search);
     const profile = await fetchCurrentProfile();
     if (profile && !profile.removed) { setContent(await getContent()); setUser(profile); }
+    else await supabase.auth.signOut();
   };
 
   useEffect(() => {
