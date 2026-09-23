@@ -2973,7 +2973,7 @@ function AdminDrills({ content, updateContent }) {
             <label>Duration<input value={draft.duration} onChange={(e) => setDraft({ ...draft, duration: e.target.value })} placeholder="e.g. 12 min" /></label>
             <label>Equipment<input value={draft.equipment} onChange={(e) => setDraft({ ...draft, equipment: e.target.value })} placeholder="e.g. Full gear" /></label>
             <label className="admin-form-span2">Short description (Main Page)<input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="One line for the card" /></label>
-            <label className="admin-form-span2">Objective<RichTextEditor rows={2} value={draft.objective} onChange={(v) => setDraft({ ...draft, objective: v })} placeholder="What this drill improves" /></label>
+            <div className="admin-form-span2 rich-field-wrap"><span className="rich-field-label">Objective</span><RichTextEditor rows={2} value={draft.objective} onChange={(v) => setDraft({ ...draft, objective: v })} placeholder="What this drill improves" /></div>
             <div className="admin-form-span2 media-field">
               <span className="media-field-label">Drill diagram (shown under the objective)</span>
               {draft.diagramUrl ? (
@@ -3369,7 +3369,7 @@ function FocusBlocksEditor({ blocks, setDraft, blockMedia, drills = [], drillCat
                 <label className="exercise-editor-instructions">Heading (optional)
                   <input className="exercise-editor-title" value={b.heading} onChange={(e) => updateField(b.id, "heading", e.target.value)} placeholder="e.g. Coaching point" />
                 </label>
-                <label className="exercise-editor-instructions">Text<RichTextEditor rows={3} value={b.body} onChange={(v) => updateField(b.id, "body", v)} /></label>
+                <div className="exercise-editor-instructions rich-field-wrap"><span className="rich-field-label">Text</span><RichTextEditor rows={3} value={b.body} onChange={(v) => updateField(b.id, "body", v)} /></div>
               </>
             )}
           </div>
@@ -3458,7 +3458,7 @@ function AdminFocusPoints({ content, updateContent }) {
                 {categoriesOfType(content, "focus").map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
               </select>
             </label>
-            <label className="admin-form-span2">Why it matters<RichTextEditor rows={3} value={draft.explanation} onChange={(v) => setDraft({ ...draft, explanation: v })} /></label>
+            <div className="admin-form-span2 rich-field-wrap"><span className="rich-field-label">Why it matters</span><RichTextEditor rows={3} value={draft.explanation} onChange={(v) => setDraft({ ...draft, explanation: v })} /></div>
             <label className="admin-form-span2">Today's cue<input value={draft.cue} onChange={(e) => setDraft({ ...draft, cue: e.target.value })} /></label>
 
             <MediaFields draft={draft} media={media} />
@@ -3618,7 +3618,7 @@ function ExerciseEditor({ exercises, setDraft, exMedia }) {
               <label>Reps / Sets<input value={ex.sets} onChange={(e) => updateField(ex.id, "sets", e.target.value)} placeholder="3 × 8 each side" /></label>
               <label>Rest / Duration<input value={ex.rest} onChange={(e) => updateField(ex.id, "rest", e.target.value)} placeholder="45 sec" /></label>
             </div>
-            <label className="exercise-editor-instructions">Instructions<RichTextEditor rows={2} value={ex.instructions} onChange={(v) => updateField(ex.id, "instructions", v)} placeholder="How to perform this exercise" /></label>
+            <div className="exercise-editor-instructions rich-field-wrap"><span className="rich-field-label">Instructions</span><RichTextEditor rows={2} value={ex.instructions} onChange={(v) => updateField(ex.id, "instructions", v)} placeholder="How to perform this exercise" /></div>
 
             <div className="exercise-editor-media">
               <div className="media-field">
@@ -3785,7 +3785,7 @@ function AdminOffIce({ content, updateContent }) {
               </select>
             </label>
             <label className="admin-form-span2">Short description<input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="One line for the card" /></label>
-            <label className="admin-form-span2">Description / objective<RichTextEditor rows={4} value={draft.objective} onChange={(v) => setDraft({ ...draft, objective: v })} placeholder="What this workout is for and what it builds" /></label>
+            <div className="admin-form-span2 rich-field-wrap"><span className="rich-field-label">Description / objective</span><RichTextEditor rows={4} value={draft.objective} onChange={(v) => setDraft({ ...draft, objective: v })} placeholder="What this workout is for and what it builds" /></div>
 
             <ExerciseEditor exercises={draft.exercises} setDraft={setDraft} exMedia={exMedia} />
 
@@ -5876,6 +5876,11 @@ button:focus {
 .admin-form-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-dim); }
 .admin-form-grid input, .admin-form-grid select, .admin-form-grid textarea { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; color: var(--text); font-size: 13px; font-family: inherit; resize: vertical; }
 .admin-form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+/* A plain div, not a <label> — a <label> wrapping the toolbar's buttons as well as the editable
+   text would make the browser forward any click inside it (including on the text itself) to the
+   first labelable descendant, i.e. the Bold button, stealing focus right back off the field. */
+.rich-field-wrap { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-dim); }
+.rich-field-label { font-size: 12px; color: var(--text-dim); }
 .rich-text-field { width: 100%; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface-2); }
 .exercise-editor-instructions .rich-text-field { background: var(--surface); }
 .rich-text-toolbar { display: flex; gap: 2px; padding: 4px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02); }
