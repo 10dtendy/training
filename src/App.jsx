@@ -476,6 +476,7 @@ function RichTextEditor({ value, onChange, placeholder, rows = 3 }) {
         style={{ minHeight }}
         contentEditable
         suppressContentEditableWarning
+        tabIndex={0}
         data-placeholder={placeholder}
         onBlur={commit}
         onInput={commit}
