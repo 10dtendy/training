@@ -1866,6 +1866,7 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
         <div className="meta-row meta-row--lg"><span>{office.duration}</span><span className="dot">•</span><span>{office.equipment}</span></div>
       </div>
       {office.objective && <section className="detail-block"><h2>Objective</h2><RichText value={office.objective} /></section>}
+      {office.exercises?.length > 0 && (
       <section className="detail-block">
         <h2>Exercises</h2>
         <div className="exercise-list">
@@ -1907,6 +1908,22 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
           ))}
         </div>
       </section>
+      )}
+      {office.planRows?.length > 0 && (
+        <section className="detail-block">
+          <h2>Training Table</h2>
+          <div className="plan-table-wrap">
+            <table className="plan-table">
+              <thead><tr><th>Exercise</th><th>Sets</th><th>Reps</th><th>Rest</th></tr></thead>
+              <tbody>
+                {office.planRows.map((r) => (
+                  <tr key={r.id}><td>{r.exercise}</td><td>{r.sets}</td><td>{r.reps}</td><td>{r.rest}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
       <button className={"btn btn--complete" + (complete ? " btn--complete-done" : "")} onClick={onComplete}>
         {complete ? <><Check size={16} /> Workout complete</> : "Mark workout complete"}
       </button>
@@ -3521,9 +3538,10 @@ const blankExercise = () => ({
 });
 
 const BLANK_OFFICE = {
-  title: "", duration: "", equipment: "", description: "", objective: "", exercises: [], category: "", published: false,
+  title: "", duration: "", equipment: "", description: "", objective: "", exercises: [], planRows: [], category: "", published: false,
   imageAssetId: null, imageUrl: "", videoAssetId: null, videoUrl: "",
 };
+const blankPlanRow = () => ({ id: uid("row"), exercise: "", sets: "", reps: "", rest: "" });
 
 // Uploads/removes photo or video for one exercise inside draft.exercises, keyed by the
 // exercise's own id so state stays correct even after rows are added, removed, or reordered.
@@ -3629,6 +3647,42 @@ function ExerciseEditor({ exercises, setDraft, exMedia }) {
   );
 }
 
+// A plain reps/sets/rest table for the workout as a whole — no photos or video, just rows a
+// coach can lay out like a written training plan. Separate from the exercise cards above, which
+// carry media and instructions for demonstrating each individual movement.
+function TrainingTableEditor({ rows, setDraft }) {
+  const setRows = (updater) => setDraft((d) => ({ ...d, planRows: updater(d.planRows || []) }));
+  const updateField = (id, field, value) => setRows((list) => list.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
+  const removeRow = (id) => setRows((list) => list.filter((r) => r.id !== id));
+  const addRow = () => setRows((list) => [...list, blankPlanRow()]);
+
+  return (
+    <div className="admin-form-span2 plan-table-editor">
+      <span className="media-field-label">Training table</span>
+      <p className="planner-hint" style={{ marginTop: 0 }}>A plain table of reps, sets and rest for the workout — no photos, just the numbers goalies follow.</p>
+      {rows.length === 0 ? (
+        <p className="exercise-editor-empty">No rows yet — add the first one below.</p>
+      ) : (
+        <div className="plan-table-rows">
+          <div className="plan-table-row plan-table-row--head">
+            <span>Exercise</span><span>Sets</span><span>Reps</span><span>Rest</span><span />
+          </div>
+          {rows.map((r) => (
+            <div className="plan-table-row" key={r.id}>
+              <input value={r.exercise} onChange={(e) => updateField(r.id, "exercise", e.target.value)} placeholder="e.g. Box jumps" />
+              <input value={r.sets} onChange={(e) => updateField(r.id, "sets", e.target.value)} placeholder="3" />
+              <input value={r.reps} onChange={(e) => updateField(r.id, "reps", e.target.value)} placeholder="10" />
+              <input value={r.rest} onChange={(e) => updateField(r.id, "rest", e.target.value)} placeholder="45 sec" />
+              <button type="button" className="icon-btn" onClick={() => removeRow(r.id)} aria-label="Remove row"><Trash2 size={14} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      <button type="button" className="btn btn--ghost btn--small" onClick={addRow}><Plus size={13} /> Add row</button>
+    </div>
+  );
+}
+
 function AdminOffIce({ content, updateContent }) {
   const [editingId, setEditingId] = useState(null);
   const [creating, setCreating] = useState(false);
@@ -3655,6 +3709,9 @@ function AdminOffIce({ content, updateContent }) {
       id: ex.id || uid("ex"), name: ex.name || "", sets: ex.sets || "", rest: ex.rest || "", instructions: ex.instructions || "",
       imageAssetId: ex.imageAssetId || null, imageUrl: ex.imageUrl || "", videoAssetId: ex.videoAssetId || null, videoUrl: ex.videoUrl || "",
     })),
+    planRows: (o.planRows || []).map((r) => ({
+      id: r.id || uid("row"), exercise: r.exercise || "", sets: r.sets || "", reps: r.reps || "", rest: r.rest || "",
+    })),
   });
   const startEdit = (o) => { setEditingId(o.id); setDraft(toDraft(o)); setCreating(false); media.clearError(); };
   const startCreate = () => { setCreating(true); setEditingId(null); setDraft(BLANK_OFFICE); media.clearError(); };
@@ -3665,6 +3722,9 @@ function AdminOffIce({ content, updateContent }) {
     exercises: (d.exercises || [])
       .filter((ex) => ex.name.trim() || ex.instructions.trim() || ex.imageUrl || ex.videoUrl)
       .map((ex) => ({ ...ex, name: ex.name.trim() || "Untitled exercise" })),
+    planRows: (d.planRows || [])
+      .filter((r) => r.exercise.trim() || r.sets.trim() || r.reps.trim() || r.rest.trim())
+      .map((r) => ({ ...r, exercise: r.exercise.trim() })),
     imageAssetId: d.imageAssetId || null, imageUrl: d.imageUrl || "", videoAssetId: d.videoAssetId || null, videoUrl: d.videoUrl || "",
   });
 
@@ -3728,6 +3788,8 @@ function AdminOffIce({ content, updateContent }) {
             <label className="admin-form-span2">Description / objective<RichTextEditor rows={4} value={draft.objective} onChange={(v) => setDraft({ ...draft, objective: v })} placeholder="What this workout is for and what it builds" /></label>
 
             <ExerciseEditor exercises={draft.exercises} setDraft={setDraft} exMedia={exMedia} />
+
+            <TrainingTableEditor rows={draft.planRows || []} setDraft={setDraft} />
 
             <span className="admin-form-span2 media-section-label">Workout cover photo/video</span>
             <MediaFields draft={draft} media={media} />
@@ -5949,6 +6011,19 @@ button:focus {
 .youtube-input-row input { flex: 1; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; color: var(--text); font-size: 13px; }
 .media-section-label { font-size: 12px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.03em; margin-top: 4px; }
 
+.plan-table-editor { display: flex; flex-direction: column; gap: 10px; }
+.plan-table-rows { display: flex; flex-direction: column; gap: 6px; }
+.plan-table-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 8px; align-items: center; }
+.plan-table-row input { min-width: 0; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text); font-size: 13px; font-family: inherit; }
+.plan-table-row--head { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; padding: 0 10px; }
+.plan-table-row--head span:last-child { width: 30px; }
+.plan-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.plan-table { width: 100%; min-width: 420px; border-collapse: collapse; font-size: 14px; }
+.plan-table th, .plan-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.plan-table th { color: var(--text-dim); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; font-weight: 600; }
+.plan-table td { color: var(--text); }
+.plan-table tr:last-child td { border-bottom: none; }
+
 .exercise-editor { display: flex; flex-direction: column; gap: 10px; }
 .exercise-editor-empty { font-size: 12.5px; color: var(--text-faint); margin: 0; }
 .exercise-editor-list { display: flex; flex-direction: column; gap: 12px; }
@@ -6081,6 +6156,13 @@ button:focus {
   .admin-nav-item { white-space: nowrap; flex-shrink: 0; }
   .admin-form-grid { grid-template-columns: minmax(0, 1fr); }
   .exercise-editor-grid, .exercise-editor-media { grid-template-columns: minmax(0, 1fr); }
+  .plan-table-row { grid-template-columns: 1fr 1fr; grid-template-areas: "exercise exercise" "sets reps" "rest remove"; row-gap: 6px; }
+  .plan-table-row input:nth-child(1) { grid-area: exercise; }
+  .plan-table-row input:nth-child(2) { grid-area: sets; }
+  .plan-table-row input:nth-child(3) { grid-area: reps; }
+  .plan-table-row input:nth-child(4) { grid-area: rest; }
+  .plan-table-row button { grid-area: remove; justify-self: end; }
+  .plan-table-row--head { display: none; }
   .planner-grid { grid-template-columns: minmax(0, 1fr); }
   .dashboard-health-grid { grid-template-columns: minmax(0, 1fr); }
   .admin-table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }

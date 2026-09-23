@@ -168,7 +168,7 @@ export async function getContent() {
   });
   const toWorkoutShape = (o) => ({
     id: o.id, title: o.title, category: o.category, duration: o.duration, equipment: o.equipment,
-    description: o.description, objective: o.objective, exercises: o.exercises || [],
+    description: o.description, objective: o.objective, exercises: o.exercises || [], planRows: o.plan_rows || [],
     published: o.published, imageAssetId: null, imageUrl: o.image_url || "", videoAssetId: null, videoUrl: o.video_url || "",
   });
 
@@ -280,7 +280,7 @@ export async function updateContentFields(patch, prev = {}) {
     if (patch.offIceWorkouts) {
       ok.push(await reconcileTable("off_ice_workouts", patch.offIceWorkouts, (o) => ({
         id: o.id, title: o.title, category: o.category, duration: o.duration, equipment: o.equipment,
-        description: o.description, objective: o.objective, exercises: o.exercises || [],
+        description: o.description, objective: o.objective, exercises: o.exercises || [], plan_rows: o.planRows || [],
         published: !!o.published, image_url: o.imageUrl || null, video_url: o.videoUrl || null,
       }), prev.offIceWorkouts));
     }
