@@ -1671,10 +1671,8 @@ function YouTubeEmbed({ url, title, size }) {
     return (
       <div className={"youtube-stage youtube-blocked" + (small ? " youtube-blocked--sm" : "")}>
         <VideoIcon size={small ? 18 : 26} />
-        {!small && <p>This video is played through YouTube, which can set cookies and receive data about your visit.</p>}
-        <button type="button" className="btn btn--primary btn--small" onClick={() => setConsent(true)}>
-          {small ? "Allow YouTube" : "Allow YouTube videos"}
-        </button>
+        {!small && <p>Accept cookies to watch this video.</p>}
+        <button type="button" className="btn btn--primary btn--small" onClick={() => setConsent(true)}>Accept cookies</button>
         {!small && <button type="button" className="cookie-link" onClick={openCookiePolicy}>Cookie policy</button>}
       </div>
     );
@@ -5016,18 +5014,18 @@ function CookieConsent() {
       {(!consent || settingsOpen) && (
         <div className="cookie-banner no-print" role="dialog" aria-label="Cookie settings">
           <div className="cookie-banner-text">
-            <div className="cookie-banner-title"><Cookie size={16} /> Cookies & videos</div>
+            <div className="cookie-banner-title"><Cookie size={16} /> Cookies</div>
             <p>
-              We only use essential browser storage to keep you logged in and remember your progress.
-              Training videos are played through YouTube, which can set cookies and share data with Google.{" "}
-              <button type="button" className="cookie-link" onClick={() => setPolicyOpen(true)}>Cookie policy</button>
+              We use cookies and similar technologies to keep you logged in and to play training videos,
+              including some set by third-party services. Details are in our{" "}
+              <button type="button" className="cookie-link" onClick={() => setPolicyOpen(true)}>Cookie policy</button>.
             </p>
-            {consent && <p className="cookie-banner-current">Current choice: {consent.youtube ? "YouTube videos allowed" : "essential only"}.</p>}
+            {consent && <p className="cookie-banner-current">Current choice: {consent.youtube ? "all cookies accepted" : "essential only"}.</p>}
           </div>
           <div className="cookie-banner-actions">
             {/* Equal weight on purpose: declining must be as easy as accepting. */}
             <button type="button" className="cookie-btn" onClick={() => choose(false)}>Essential only</button>
-            <button type="button" className="cookie-btn" onClick={() => choose(true)}>Allow YouTube</button>
+            <button type="button" className="cookie-btn" onClick={() => choose(true)}>Accept</button>
           </div>
           {consent && <button type="button" className="icon-btn cookie-banner-close" onClick={() => setSettingsOpen(false)} aria-label="Close"><X size={16} /></button>}
         </div>
@@ -5057,12 +5055,12 @@ function CookiePolicy({ onOpenSettings }) {
           <tbody>
             <tr><td><code>sb-…-auth-token</code></td><td>Keeps you logged in. Set by Supabase, the service that runs our logins and database.</td><td>Until you log out</td></tr>
             <tr><td><code>progress:&lt;date&gt;</code></td><td>Remembers which parts of a day's training you've ticked off, on this device only.</td><td>Until you clear your browser data</td></tr>
-            <tr><td><code>cookie-consent</code></td><td>Remembers the choice you made about YouTube videos.</td><td>Until you change it or clear your browser data</td></tr>
+            <tr><td><code>cookie-consent</code></td><td>Remembers your cookie choice.</td><td>Until you change it or clear your browser data</td></tr>
           </tbody>
         </table>
       </div>
 
-      <h3>YouTube videos (optional)</h3>
+      <h3>Video cookies (optional)</h3>
       <p>
         Training videos are hosted on YouTube, a service of Google Ireland Limited. We use YouTube's privacy-enhanced mode,
         but whenever a video or its preview image loads, YouTube receives your IP address and details about your device and browser,
@@ -5070,7 +5068,7 @@ function CookiePolicy({ onOpenSettings }) {
         Google may process this data in the United States. See{" "}
         <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google's privacy policy</a> for details.
       </p>
-      <p>These only load if you choose <strong>Allow YouTube</strong>. With <strong>Essential only</strong>, nothing is loaded from YouTube, and each video shows a button you can use to allow YouTube later.</p>
+      <p>These only load if you choose <strong>Accept</strong>. With <strong>Essential only</strong>, nothing is loaded from YouTube, and each video shows a button you can use to accept cookies later.</p>
 
       <h3>No analytics or advertising</h3>
       <p>We don't use analytics, advertising, or social media trackers. The app's fonts are part of the app itself, so no font service is contacted either.</p>
