@@ -5035,6 +5035,12 @@ function AppInner() {
         const profile = await fetchCurrentProfile();
         if (profile && !profile.removed) setUser(profile);
         else if (profile?.removed) await supabase.auth.signOut();
+        else {
+          // A stored login for an account that no longer exists: Auth rejects it
+          // outright (not a network blip), so clear it and start at the login screen.
+          const { error } = await supabase.auth.getUser();
+          if (error?.status === 401 || error?.status === 403) await supabase.auth.signOut({ scope: "local" });
+        }
       }
       const c = await getContent();
       setContent(c);

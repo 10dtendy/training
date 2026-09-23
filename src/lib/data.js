@@ -369,6 +369,9 @@ export async function publishConfirmationEmail(fields) {
   const { data, error } = await supabase.functions.invoke("update-confirmation-email", { body: fields });
   if (error) {
     const message = (await error.context?.json?.().catch(() => null))?.error || error.message || "Failed to publish";
+    if (error.context?.status === 401) {
+      return { ok: false, error: "Your login is no longer valid — log out, log back in, and publish again." };
+    }
     return { ok: false, error: message };
   }
   if (data?.error) return { ok: false, error: data.error };
