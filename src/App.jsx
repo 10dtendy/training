@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useLayoutEffect, useRef, useContext } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useContext, useSyncExternalStore } from "react";
 import {
   Play, Pause, Volume2, VolumeX, Maximize, ChevronLeft, ChevronRight, ChevronUp, ChevronDown,
   Check, Bell, Menu, X, Plus, Pencil, Trash2, Eye, EyeOff,
   Calendar as CalendarIcon, LayoutGrid, Users as UsersIcon,
   Image as ImageIcon, Settings as SettingsIcon, Download, Gauge, LogOut,
   Mail, Lock, UploadCloud, FileText, Video as VideoIcon, AlertTriangle,
-  Home, BarChart3, Tag, Search, CircleDot, Armchair, Copy, LayoutTemplate, Megaphone, List, Camera
+  Home, BarChart3, Tag, Search, CircleDot, Armchair, Copy, LayoutTemplate, Megaphone, List, Camera, Cookie
 } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
 import {
@@ -323,6 +323,28 @@ function setLocal(key, value) {
 async function loadDayProgress(key) {
   return getLocal(key) || { drill: false, focus: false, office: false };
 }
+
+// Cookie consent. The app's own browser storage (the login, the day's checkboxes, and
+// this choice itself) is strictly necessary and needs no consent. YouTube is the only
+// third party that can store identifiers, so no video content (player or thumbnails)
+// loads from it until the viewer allows it. The choice is per browser, like the login.
+const CONSENT_KEY = "cookie-consent";
+function readConsent() {
+  const c = getLocal(CONSENT_KEY);
+  return c && typeof c.youtube === "boolean" ? c : null;
+}
+let consentState = readConsent();
+const consentListeners = new Set();
+function setConsent(youtube) {
+  consentState = { youtube, at: new Date().toISOString() };
+  setLocal(CONSENT_KEY, consentState);
+  consentListeners.forEach((fn) => fn());
+}
+function subscribeConsent(fn) { consentListeners.add(fn); return () => consentListeners.delete(fn); }
+function useConsent() { return useSyncExternalStore(subscribeConsent, () => consentState); }
+// Links anywhere in the app open these through the one <CookieConsent /> at the root.
+function openCookieSettings() { window.dispatchEvent(new Event("open-cookie-settings")); }
+function openCookiePolicy() { window.dispatchEvent(new Event("open-cookie-policy")); }
 
 /* ============================================================================
    SHARED VISUAL MOTIF
@@ -843,6 +865,10 @@ function AuthScreen({ onAuthed }) {
               </form>
             </>
           )}
+          <div className="legal-links">
+            <button type="button" className="cookie-link" onClick={openCookieSettings}>Cookie settings</button>
+            <button type="button" className="cookie-link" onClick={openCookiePolicy}>Cookie policy</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1552,6 +1578,7 @@ const YOUTUBE_OVERLAY_SECONDS = 3.6;
 //    thumbnail so YouTube's paused/ended screens are never shown.
 function YouTubeEmbed({ url, title, size }) {
   const id = youtubeVideoId(url);
+  const allowed = !!useConsent()?.youtube;
   const stageRef = useRef(null);
   const hostRef = useRef(null);
   const playerRef = useRef(null);
@@ -1615,6 +1642,7 @@ function YouTubeEmbed({ url, title, size }) {
   };
 
   useEffect(() => {
+    if (!allowed) return;
     loadYouTubeApi().catch(() => {});
     setStatus("idle"); setThumbTier(0);
     readyRef.current = false; wantPlayRef.current = false;
@@ -1634,9 +1662,23 @@ function YouTubeEmbed({ url, title, size }) {
       playerRef.current = null; readyRef.current = false; creatingRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, allowed]);
 
   if (!id) return null;
+
+  if (!allowed) {
+    const small = size === "sm";
+    return (
+      <div className={"youtube-stage youtube-blocked" + (small ? " youtube-blocked--sm" : "")}>
+        <VideoIcon size={small ? 18 : 26} />
+        {!small && <p>This video is played through YouTube, which can set cookies and receive data about your visit.</p>}
+        <button type="button" className="btn btn--primary btn--small" onClick={() => setConsent(true)}>
+          {small ? "Allow YouTube" : "Allow YouTube videos"}
+        </button>
+        {!small && <button type="button" className="cookie-link" onClick={openCookiePolicy}>Cookie policy</button>}
+      </div>
+    );
+  }
 
   // Runs synchronously inside the click so the browser lets playback begin.
   const start = () => {
@@ -2104,6 +2146,10 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile }) {
         )}
 
         <button className="btn btn--ghost" onClick={onLogout}><LogOut size={14} /> Log out</button>
+        <div className="legal-links">
+          <button type="button" className="cookie-link" onClick={openCookieSettings}>Cookie settings</button>
+          <button type="button" className="cookie-link" onClick={openCookiePolicy}>Cookie policy</button>
+        </div>
       </section>
     </div>
   );
@@ -4942,7 +4988,97 @@ export default function App() {
   return (
     <ErrorBoundary>
       <AppInner />
+      <CookieConsent />
     </ErrorBoundary>
+  );
+}
+
+// The consent banner (shown until a choice is made, and again from "Cookie settings")
+// and the cookie policy, both reachable from the login screen and the profile page.
+function CookieConsent() {
+  const consent = useConsent();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [policyOpen, setPolicyOpen] = useState(false);
+  useEffect(() => {
+    const showSettings = () => setSettingsOpen(true);
+    const showPolicy = () => setPolicyOpen(true);
+    window.addEventListener("open-cookie-settings", showSettings);
+    window.addEventListener("open-cookie-policy", showPolicy);
+    return () => {
+      window.removeEventListener("open-cookie-settings", showSettings);
+      window.removeEventListener("open-cookie-policy", showPolicy);
+    };
+  }, []);
+  const choose = (youtube) => { setConsent(youtube); setSettingsOpen(false); };
+
+  return (
+    <div className="cookie-root">
+      {(!consent || settingsOpen) && (
+        <div className="cookie-banner no-print" role="dialog" aria-label="Cookie settings">
+          <div className="cookie-banner-text">
+            <div className="cookie-banner-title"><Cookie size={16} /> Cookies & videos</div>
+            <p>
+              We only use essential browser storage to keep you logged in and remember your progress.
+              Training videos are played through YouTube, which can set cookies and share data with Google.{" "}
+              <button type="button" className="cookie-link" onClick={() => setPolicyOpen(true)}>Cookie policy</button>
+            </p>
+            {consent && <p className="cookie-banner-current">Current choice: {consent.youtube ? "YouTube videos allowed" : "essential only"}.</p>}
+          </div>
+          <div className="cookie-banner-actions">
+            {/* Equal weight on purpose: declining must be as easy as accepting. */}
+            <button type="button" className="cookie-btn" onClick={() => choose(false)}>Essential only</button>
+            <button type="button" className="cookie-btn" onClick={() => choose(true)}>Allow YouTube</button>
+          </div>
+          {consent && <button type="button" className="icon-btn cookie-banner-close" onClick={() => setSettingsOpen(false)} aria-label="Close"><X size={16} /></button>}
+        </div>
+      )}
+      {policyOpen && (
+        <PreviewModal label="Cookie policy" onClose={() => setPolicyOpen(false)}>
+          <CookiePolicy onOpenSettings={() => { setPolicyOpen(false); setSettingsOpen(true); }} />
+        </PreviewModal>
+      )}
+    </div>
+  );
+}
+
+const COOKIE_POLICY_UPDATED = "23 September 2026";
+function CookiePolicy({ onOpenSettings }) {
+  return (
+    <div className="legal-doc">
+      <h2>Cookie policy</h2>
+      <p className="legal-updated">Last updated {COOKIE_POLICY_UPDATED}</p>
+      <p>This page explains what 10DTendy stores in your browser and which outside services are involved when you use the app.</p>
+
+      <h3>Essential storage (always on)</h3>
+      <p>The app can't work without these, so they don't need your consent. They are kept in your browser's local storage (not as cookies) and are never used for tracking or advertising.</p>
+      <div className="legal-table-wrap">
+        <table className="legal-table">
+          <thead><tr><th>Name</th><th>What it does</th><th>How long</th></tr></thead>
+          <tbody>
+            <tr><td><code>sb-…-auth-token</code></td><td>Keeps you logged in. Set by Supabase, the service that runs our logins and database.</td><td>Until you log out</td></tr>
+            <tr><td><code>progress:&lt;date&gt;</code></td><td>Remembers which parts of a day's training you've ticked off, on this device only.</td><td>Until you clear your browser data</td></tr>
+            <tr><td><code>cookie-consent</code></td><td>Remembers the choice you made about YouTube videos.</td><td>Until you change it or clear your browser data</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>YouTube videos (optional)</h3>
+      <p>
+        Training videos are hosted on YouTube, a service of Google Ireland Limited. We use YouTube's privacy-enhanced mode,
+        but whenever a video or its preview image loads, YouTube receives your IP address and details about your device and browser,
+        and it can store identifiers in your browser (cookies or similar storage) to play videos and measure how they're used.
+        Google may process this data in the United States. See{" "}
+        <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google's privacy policy</a> for details.
+      </p>
+      <p>These only load if you choose <strong>Allow YouTube</strong>. With <strong>Essential only</strong>, nothing is loaded from YouTube, and each video shows a button you can use to allow YouTube later.</p>
+
+      <h3>No analytics or advertising</h3>
+      <p>We don't use analytics, advertising, or social media trackers. The app's fonts are part of the app itself, so no font service is contacted either.</p>
+
+      <h3>Changing your choice</h3>
+      <p>You can change or withdraw your choice at any time from <strong>Cookie settings</strong> on the login screen or your profile page. Withdrawing stops YouTube content from loading from then on. To remove what YouTube has already stored, clear your browser's cookies and site data.</p>
+      <button type="button" className="btn btn--ghost btn--small" onClick={onOpenSettings}><Cookie size={14} /> Cookie settings</button>
+    </div>
   );
 }
 
@@ -5370,7 +5506,6 @@ function AppInner() {
    ============================================================================ */
 
 const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;900&family=Inter:wght@400;500;600;700&display=swap');
 
 :root {
   --bg: #0A0A0C;
@@ -6112,6 +6247,44 @@ button:focus {
 .welcome-modal-body { padding: 8px 28px 28px; }
 .welcome-title { font-size: 24px; font-weight: 900; margin-bottom: 16px; }
 .welcome-text { color: var(--text-dim); font-size: 14px; line-height: 1.6; margin-bottom: 12px; }
+
+.cookie-root { font-family: 'Inter', sans-serif; color: var(--text); }
+.cookie-banner { position: fixed; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 200; max-width: 760px; margin: 0 auto; display: flex; align-items: center; gap: 20px; padding: 18px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 16px 48px rgba(0,0,0,0.55); color: var(--text); font-family: 'Inter', sans-serif; }
+.cookie-banner-text { flex: 1; min-width: 0; }
+.cookie-banner-title { display: flex; align-items: center; gap: 8px; font-family: 'Archivo'; font-weight: 700; font-size: 15px; margin-bottom: 6px; color: var(--text); }
+.cookie-banner-text p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text-dim); }
+.cookie-banner-text .cookie-banner-current { margin-top: 6px; color: var(--text); }
+.cookie-banner-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.cookie-btn { padding: 11px 18px; border-radius: 30px; font-size: 13px; font-weight: 600; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); white-space: nowrap; }
+.cookie-btn:hover { border-color: #3a3a40; }
+.cookie-banner-close { position: absolute; top: 8px; right: 8px; }
+.cookie-link { padding: 0; font-size: inherit; color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.cookie-link:hover { color: var(--accent); }
+.legal-links { display: flex; justify-content: center; gap: 18px; margin-top: 18px; font-size: 12px; color: var(--text-dim); }
+.legal-links .cookie-link { color: var(--text-dim); }
+.legal-links .cookie-link:hover { color: var(--text); }
+.youtube-blocked { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; text-align: center; background: var(--surface-2); color: var(--text-dim); user-select: auto; -webkit-user-select: auto; }
+.youtube-blocked p { margin: 0; max-width: 360px; font-size: 13px; line-height: 1.5; }
+.youtube-blocked .cookie-link { font-size: 12px; color: var(--text-dim); }
+.youtube-blocked--sm { gap: 6px; padding: 8px; }
+.youtube-blocked--sm .btn { padding: 6px 12px; font-size: 12px; }
+.legal-doc { max-width: 640px; color: var(--text-dim); font-size: 14px; line-height: 1.6; }
+.legal-doc h2 { color: var(--text); font-size: 22px; margin-bottom: 4px; }
+.legal-doc h3 { color: var(--text); font-size: 15px; margin: 24px 0 8px; }
+.legal-doc p { margin: 0 0 12px; }
+.legal-doc a { color: var(--text); text-decoration: underline; }
+.legal-doc strong { color: var(--text); }
+.legal-updated { font-size: 12px; }
+.legal-table-wrap { overflow-x: auto; margin: 4px 0 8px; }
+.legal-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.legal-table th, .legal-table td { text-align: left; vertical-align: top; padding: 9px 10px; border-bottom: 1px solid var(--border); }
+.legal-table th { color: var(--text); font-weight: 600; }
+.legal-table code { font-size: 12px; color: var(--text); white-space: nowrap; }
+@media (max-width: 640px) {
+  .cookie-banner { flex-direction: column; align-items: stretch; gap: 14px; padding: 16px; left: 12px; right: 12px; }
+  .cookie-banner-actions > .cookie-btn { flex: 1; }
+  .cookie-banner-text { padding-right: 20px; }
+}
 .welcome-cta { width: 100%; justify-content: center; margin-top: 8px; }
 .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text-dim); gap: 20px; }
 .settings-row:last-child { border-bottom: none; }
