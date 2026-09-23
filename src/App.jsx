@@ -436,16 +436,22 @@ function RichText({ value, className }) {
 // (rendered by RichText above) and get upgraded to real HTML the next time they're edited.
 function RichTextEditor({ value, onChange, placeholder, rows = 3 }) {
   const ref = useRef(null);
-  const focused = useRef(false);
   const minHeight = rows * 20 + 16;
 
+  // Loads the starting value into the live DOM once, on mount, and never again for this
+  // component instance's lifetime. Every later change to `value` originates from this same
+  // editor's own commit() below — re-syncing on each of those (a plain [value] dependency) meant
+  // every keystroke's resulting parent re-render raced the browser's own native DOM update with
+  // a React-driven innerHTML overwrite, which could reset the field, drop the caret, or swallow
+  // input while typing. The admin form fully unmounts/remounts this editor on Cancel or when
+  // switching what's being edited, so a fresh mount always picks up the current saved value.
   useEffect(() => {
     const el = ref.current;
-    if (!el || focused.current) return;
+    if (!el) return;
     const html = looksLikeRichHtml(value) ? sanitizeRichHtml(value) : renderRichText(value);
     if (el.innerHTML !== html) el.innerHTML = html;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
+  }, []);
 
   const commit = () => { if (ref.current) onChange(sanitizeRichHtml(ref.current.innerHTML)); };
   const cmd = (name) => (e) => { e.preventDefault(); document.execCommand(name); ref.current?.focus(); commit(); };
@@ -471,8 +477,7 @@ function RichTextEditor({ value, onChange, placeholder, rows = 3 }) {
         contentEditable
         suppressContentEditableWarning
         data-placeholder={placeholder}
-        onFocus={() => { focused.current = true; }}
-        onBlur={() => { focused.current = false; commit(); }}
+        onBlur={commit}
         onInput={commit}
         onPaste={handlePaste}
       />
