@@ -1,10 +1,43 @@
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
+
+// A Content Security Policy for the built site: GitHub Pages can't send security
+// headers, so it goes in a <meta> tag instead. It only lists what the app really
+// uses — Supabase (data, logins, images), YouTube (videos, after cookie consent)
+// and the site itself — so injected scripts or data sent elsewhere are refused.
+// Build only: the dev server relies on inline scripts this policy would block.
+function contentSecurityPolicy(supabaseUrl) {
+  const supabase = supabaseUrl ? new URL(supabaseUrl).origin : ''
+  const supabaseWs = supabase.replace(/^https:/, 'wss:')
+  const csp = [
+    "default-src 'self'",
+    "script-src 'self' https://www.youtube.com",
+    "style-src 'self' 'unsafe-inline'",
+    `img-src 'self' data: blob: ${supabase} https://img.youtube.com https://i.ytimg.com https://10dtendy.github.io`,
+    "font-src 'self' data:",
+    `connect-src 'self' ${supabase} ${supabaseWs}`,
+    `media-src 'self' blob: ${supabase}`,
+    'frame-src https://www.youtube-nocookie.com https://www.youtube.com',
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join('; ')
+  return {
+    name: 'content-security-policy',
+    apply: 'build',
+    transformIndexHtml: () => [
+      { tag: 'meta', attrs: { 'http-equiv': 'Content-Security-Policy', content: csp }, injectTo: 'head-prepend' },
+    ],
+  }
+}
 
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [react()],
-  // Served at https://10dtendy.github.io/training/ (a project page, not a
-  // <user>.github.io root site), so every asset URL needs this prefix.
-  base: '/training/',
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
+  return {
+    plugins: [react(), contentSecurityPolicy(env.VITE_SUPABASE_URL)],
+    // Served at https://10dtendy.github.io/training/ (a project page, not a
+    // <user>.github.io root site), so every asset URL needs this prefix.
+    base: '/training/',
+  }
 })
