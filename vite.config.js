@@ -13,7 +13,7 @@ function contentSecurityPolicy(supabaseUrl) {
     "default-src 'self'",
     "script-src 'self' https://www.youtube.com",
     "style-src 'self' 'unsafe-inline'",
-    `img-src 'self' data: blob: ${supabase} https://img.youtube.com https://i.ytimg.com https://10dtendy.github.io`,
+    `img-src 'self' data: blob: ${supabase} https://img.youtube.com https://i.ytimg.com`,
     "font-src 'self' data:",
     `connect-src 'self' ${supabase} ${supabaseWs}`,
     `media-src 'self' blob: ${supabase}`,
@@ -36,8 +36,8 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   return {
     plugins: [react(), contentSecurityPolicy(env.VITE_SUPABASE_URL)],
-    // Served at https://10dtendy.github.io/training/ (a project page, not a
-    // <user>.github.io root site), so every asset URL needs this prefix.
-    base: '/training/',
+    // Served at the root of its own domain, https://app.10dtendy.com/ (GitHub Pages
+    // custom domain; the old 10dtendy.github.io/training/ address redirects there).
+    base: '/',
   }
 })

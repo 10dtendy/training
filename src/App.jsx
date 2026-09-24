@@ -76,7 +76,7 @@ const DEFAULT_WELCOME = {
 };
 const DEFAULT_ANNOUNCEMENT = { enabled: false, id: null, title: "", body: "", videoUrl: "", videoAssetId: null };
 // The real email links to the logo hosted with the app; the admin preview uses the built-in copy so it shows immediately.
-const EMAIL_LOGO_URL = "https://10dtendy.github.io/training/email-logo.png";
+const EMAIL_LOGO_URL = "https://app.10dtendy.com/email-logo.png";
 const DEFAULT_CONFIRMATION_EMAIL = {
   subject: "Confirm your 10DTendy account",
   heading: "Welcome to 10DTendy",

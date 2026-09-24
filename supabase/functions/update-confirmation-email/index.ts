@@ -23,7 +23,7 @@ function json(body: unknown, status = 200) {
 }
 
 // Hosted with the app (public/email-logo.png); email clients need a public https address, not embedded data.
-const LOGO_URL = "https://10dtendy.github.io/training/email-logo.png";
+const LOGO_URL = "https://app.10dtendy.com/email-logo.png";
 
 function escapeHtml(s: string) {
   return String(s ?? "")
