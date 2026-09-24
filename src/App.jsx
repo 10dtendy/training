@@ -819,7 +819,7 @@ function AuthScreen({ onAuthed }) {
             : trimmedInvite && /database error|invite code/i.test(signUpError.message)
               ? "That invite code isn't valid."
               : /database error|signups are closed/i.test(signUpError.message)
-                ? "Sign-ups are closed right now."
+                ? "We're getting things ready — new accounts will open soon."
                 : signUpError.message);
           return;
         }
@@ -905,8 +905,8 @@ function AuthScreen({ onAuthed }) {
 
               {mode === "signup" && signupsClosed && !inviteOpen ? (
                 <div className="auth-form auth-closed">
-                  <h2 className="auth-reset-title">Sign-ups are closed</h2>
-                  <p className="auth-reset-sub">We're not taking new accounts right now. If you already have one, log in instead.</p>
+                  <h2 className="auth-reset-title">We're getting things ready</h2>
+                  <p className="auth-reset-sub">New accounts will open soon. If you already have one, log in instead.</p>
                   <button type="button" className="btn btn--primary auth-submit" onClick={() => { setError(""); setMode("login"); }}>Go to log in</button>
                   <button type="button" className="auth-invite-link" onClick={() => setInviteOpen(true)}>Have a coach invite code?</button>
                 </div>
