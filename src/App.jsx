@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef, useContext, useSyncExternalStore } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useContext, useSyncExternalStore, useId } from "react";
 import {
   Play, Pause, Volume2, VolumeX, Maximize, ChevronLeft, ChevronRight, ChevronUp, ChevronDown,
   Check, Bell, Menu, X, Plus, Pencil, Trash2, Eye, EyeOff,
@@ -505,6 +505,154 @@ function RichText({ value, className }) {
   return <div className={className} dangerouslySetInnerHTML={{ __html: renderRichText(value) }} />;
 }
 
+/* ============================================================================
+   UI PRIMITIVES — shared dialog and menu behaviour
+   ----------------------------------------------------------------------------
+   Every popup window and dropdown in the app goes through these, so they all
+   behave the same way for mouse, touch, keyboard and screen-reader users:
+   - dialogs: announced as a dialog with their title, Escape closes the topmost
+     one, focus moves inside and can't Tab out to the page behind, the page
+     behind doesn't scroll, and focus returns to what opened it afterwards;
+   - menus: Escape or a click/tap outside closes them, and focus goes back to
+     the button that opened them.
+   ============================================================================ */
+const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
+const openDialogs = []; // innermost last — only it reacts to Escape/Tab
+let scrollLockCount = 0;
+let savedBodyOverflow = "";
+
+function useDialogBehavior(panelRef, onClose) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  // Remembered during the first render, before any autoFocus inside the dialog moves focus.
+  const returnFocusRef = useRef(undefined);
+  if (returnFocusRef.current === undefined) returnFocusRef.current = typeof document !== "undefined" ? document.activeElement : null;
+
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    const token = {};
+    openDialogs.push(token);
+    if (scrollLockCount++ === 0) { savedBodyOverflow = document.body.style.overflow; document.body.style.overflow = "hidden"; }
+    if (!panel.contains(document.activeElement)) panel.focus({ preventScroll: true });
+
+    const onKeyDown = (e) => {
+      if (openDialogs[openDialogs.length - 1] !== token) return;
+      if (e.key === "Escape") {
+        if (onCloseRef.current) { e.preventDefault(); onCloseRef.current(); }
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const items = [...panel.querySelectorAll(FOCUSABLE_SELECTOR)].filter((el) => el.getClientRects().length > 0);
+      if (!items.length) { e.preventDefault(); panel.focus({ preventScroll: true }); return; }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (!panel.contains(active)) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && (active === first || active === panel)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      const i = openDialogs.indexOf(token);
+      if (i >= 0) openDialogs.splice(i, 1);
+      if (--scrollLockCount === 0) document.body.style.overflow = savedBodyOverflow;
+      const back = returnFocusRef.current;
+      if (back && back.focus && document.contains(back)) back.focus({ preventScroll: true });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
+
+// The attributes that make an element a modal dialog for assistive technology.
+function dialogProps(labelId) {
+  return { role: "dialog", "aria-modal": "true", "aria-labelledby": labelId, tabIndex: -1 };
+}
+
+// Dropdowns and slide-down menus: Escape or a click/tap outside `refs` closes them.
+function useDismissable(open, onClose, refs, triggerRef) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    if (!open) return;
+    const inside = (target) => refs.some((r) => r.current && r.current.contains(target));
+    const onPointerDown = (e) => { if (!inside(e.target)) onCloseRef.current(); };
+    const onKeyDown = (e) => {
+      if (e.key !== "Escape" || openDialogs.length) return;
+      onCloseRef.current();
+      triggerRef?.current?.focus();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+}
+
+// In-app replacements for window.confirm / window.prompt, in the app's own style:
+//   if (!(await confirmDialog({ title, message, confirmLabel, danger }))) return;
+//   const text = await promptDialog({ title, label, placeholder, confirmLabel }); // null if cancelled
+// Rendered by the single <DialogHost /> at the root.
+let pendingDialog = null;
+const pendingDialogListeners = new Set();
+function setPendingDialog(next) { pendingDialog = next; pendingDialogListeners.forEach((fn) => fn()); }
+function openAppDialog(options, cancelValue) {
+  if (pendingDialog) pendingDialog.resolve(pendingDialog.cancelValue);
+  return new Promise((resolve) => setPendingDialog({ ...options, cancelValue, resolve, key: Date.now() + Math.random() }));
+}
+function confirmDialog(options) { return openAppDialog({ kind: "confirm", ...options }, false); }
+function promptDialog(options) { return openAppDialog({ kind: "prompt", ...options }, null); }
+
+function DialogHost() {
+  const dialog = useSyncExternalStore(
+    (fn) => { pendingDialogListeners.add(fn); return () => pendingDialogListeners.delete(fn); },
+    () => pendingDialog,
+  );
+  if (!dialog) return null;
+  const finish = (value) => { setPendingDialog(null); dialog.resolve(value); };
+  return <AppDialog key={dialog.key} dialog={dialog} onFinish={finish} />;
+}
+
+function AppDialog({ dialog, onFinish }) {
+  const panelRef = useRef(null);
+  const labelId = useId();
+  const [value, setValue] = useState(dialog.defaultValue || "");
+  const cancel = () => onFinish(dialog.cancelValue);
+  useDialogBehavior(panelRef, cancel);
+  const isPrompt = dialog.kind === "prompt";
+  const submit = (e) => {
+    e.preventDefault();
+    if (isPrompt) { if (value.trim()) onFinish(value.trim()); }
+    else onFinish(true);
+  };
+  return (
+    <div className="dialog-host no-print">
+      <div className="app-dialog-overlay" onClick={cancel}>
+        <form ref={panelRef} className="app-dialog" onClick={(e) => e.stopPropagation()} onSubmit={submit} {...dialogProps(labelId)}>
+          <h2 id={labelId} className="app-dialog-title">{dialog.title}</h2>
+          {dialog.message && <p className="app-dialog-message">{dialog.message}</p>}
+          {isPrompt && (
+            <label className="auth-field app-dialog-field">
+              {dialog.label && <span>{dialog.label}</span>}
+              <input value={value} onChange={(e) => setValue(e.target.value)} placeholder={dialog.placeholder} autoFocus />
+            </label>
+          )}
+          <div className="app-dialog-actions">
+            <button type="button" className="btn btn--ghost btn--small" onClick={cancel} autoFocus={!isPrompt}>{dialog.cancelLabel || "Cancel"}</button>
+            <button type="submit" className={"btn btn--small " + (dialog.danger ? "btn--danger" : "btn--primary")} disabled={isPrompt && !value.trim()}>
+              {dialog.confirmLabel || "OK"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // A small bold/italic/bullet-list editor for one field. Stores sanitized HTML back into the
 // same string field the plain textarea used to hold — old plain-text values still load fine
 // (rendered by RichText above) and get upgraded to real HTML the next time they're edited.
@@ -556,12 +704,14 @@ function RichTextEditor({ value, onChange, placeholder, rows = 3, legal = false 
     document.execCommand("formatBlock", false, current === "h3" ? "p" : "h3");
     commit();
   };
-  const addLink = (e) => {
+  const addLink = async (e) => {
     e.preventDefault();
     if (!ensureSelection()) return;
     const sel = window.getSelection();
     const range = sel.getRangeAt(0).cloneRange();
-    let url = (window.prompt("Link to (a web address or an email address):") || "").trim();
+    let url = (await promptDialog({
+      title: "Add a link", label: "Web address or email", placeholder: "https://… or name@example.com", confirmLabel: "Add link",
+    })) || "";
     if (!url) return;
     if (/^[^\s@/]+@[^\s@/]+\.[^\s@/]+$/.test(url)) url = "mailto:" + url;
     else if (!/^(https?:\/\/|mailto:)/i.test(url)) url = "https://" + url;
@@ -1115,6 +1265,14 @@ function ResetPasswordScreen({ onDone }) {
 
 function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen, user, onLogout, previewLevel, setPreviewLevel, dayType, onGoToday, reminders, onOpenReminder, onOpenCalendar, onOpenPlan }) {
   const [notifOpen, setNotifOpen] = useState(false);
+  const notifWrapRef = useRef(null);
+  const notifButtonRef = useRef(null);
+  const menuButtonRef = useRef(null);
+  const menuPanelRef = useRef(null);
+  const notifPanelId = useId();
+  const menuPanelId = useId();
+  useDismissable(notifOpen, () => setNotifOpen(false), [notifWrapRef], notifButtonRef);
+  useDismissable(mobileOpen, () => setMobileOpen(false), [menuPanelRef, menuButtonRef], menuButtonRef);
   const items = dayType
     ? [
         { key: "today", label: dayType === "game" ? "Game Day" : "Rest Day", view: "today" },
@@ -1162,13 +1320,13 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
               <CalendarIcon size={17} />
             </button>
           )}
-          <div className="nav-notif-wrap">
-            <button className="nav-icon-btn" aria-label="Notifications" onClick={() => setNotifOpen((v) => !v)}>
+          <div className="nav-notif-wrap" ref={notifWrapRef}>
+            <button ref={notifButtonRef} className="nav-icon-btn" aria-label="Notifications" aria-expanded={notifOpen} aria-controls={notifOpen ? notifPanelId : undefined} onClick={() => setNotifOpen((v) => !v)}>
               <Bell size={17} />
               {reminders.length > 0 && <span className="nav-notif-dot" />}
             </button>
             {notifOpen && (
-              <div className="nav-notif-panel">
+              <div className="nav-notif-panel" id={notifPanelId} role="region" aria-label="Reminders">
                 <div className="nav-notif-panel-head">
                   <span>Reminders</span>
                   <button className="icon-btn" onClick={() => setNotifOpen(false)} aria-label="Close"><X size={14} /></button>
@@ -1195,7 +1353,7 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
             {user.photoUrl ? <img src={user.photoUrl} alt="" className="nav-avatar-img" /> : initials(user.name)}
           </button>
           <button className="nav-icon-btn" aria-label="Log out" onClick={onLogout}><LogOut size={16} /></button>
-          <button className="nav-icon-btn nav-mobile-toggle" aria-label="Menu" aria-expanded={mobileOpen} onClick={() => setMobileOpen((v) => !v)}>
+          <button ref={menuButtonRef} className="nav-icon-btn nav-mobile-toggle" aria-label="Menu" aria-expanded={mobileOpen} aria-controls={mobileOpen ? menuPanelId : undefined} onClick={() => setMobileOpen((v) => !v)}>
             <span className="t-icon-swap" data-state={mobileOpen ? "b" : "a"}>
               <Menu size={19} className="t-icon" data-icon="a" />
               <X size={19} className="t-icon" data-icon="b" />
@@ -1205,7 +1363,7 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
       </div>
 
       {mobileOpen && (
-        <div className="nav-mobile-panel">
+        <nav className="nav-mobile-panel" id={menuPanelId} ref={menuPanelRef} aria-label="Menu">
           {items.map((it) => (
             <button key={it.key} className="nav-mobile-link"
               onClick={() => { setIsAdmin(false); if (it.key === "today") onGoToday(); else setView(it.view); setMobileOpen(false); }}>
@@ -1231,7 +1389,7 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
               {isAdmin ? "Exit admin" : "Admin"}
             </button>
           )}
-        </div>
+        </nav>
       )}
     </header>
   );
@@ -3071,8 +3229,10 @@ function MediaFields({ draft, media, imageLabel = "Photo" }) {
   );
 }
 
-function PreviewModal({ label, onClose, children, resizeIn }) {
+function PreviewModal({ label, onClose, children, resizeIn, panelClassName = "" }) {
   const panelRef = useRef(null);
+  const labelId = useId();
+  useDialogBehavior(panelRef, onClose);
   const [size, setSize] = useState(null);
   const [open, setOpen] = useState(false);
   const [settled, setSettled] = useState(false);
@@ -3105,13 +3265,14 @@ function PreviewModal({ label, onClose, children, resizeIn }) {
     <div className="content-preview-overlay" onClick={onClose}>
       <div
         ref={panelRef}
-        className={"content-preview-panel" + (resizeIn ? " t-resize" : "")}
+        className={"content-preview-panel" + (resizeIn ? " t-resize" : "") + (panelClassName ? " " + panelClassName : "")}
         style={resizeStyle}
         onClick={(e) => e.stopPropagation()}
         onTransitionEnd={() => resizeIn && open && setSettled(true)}
+        {...dialogProps(labelId)}
       >
         <div className="content-preview-header">
-          <span className="content-preview-label">{label}</span>
+          <span className="content-preview-label" id={labelId}>{label}</span>
           <button className="icon-btn" onClick={onClose} aria-label="Close preview"><X size={16} /></button>
         </div>
         <div className="main">{children}</div>
@@ -3120,14 +3281,19 @@ function PreviewModal({ label, onClose, children, resizeIn }) {
   );
 }
 
-function WelcomeModal({ label, data, onClose }) {
-  if (!data) return null;
+function WelcomeModal({ data, ...rest }) {
+  return data ? <WelcomeDialog data={data} {...rest} /> : null;
+}
+function WelcomeDialog({ label, data, onClose }) {
+  const panelRef = useRef(null);
+  const labelId = useId();
+  useDialogBehavior(panelRef, onClose);
   const paragraphs = (data.body || "").split("\n").filter(Boolean);
   return (
     <div className="content-preview-overlay no-print" onClick={onClose}>
-      <div className="content-preview-panel welcome-panel" onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} className="content-preview-panel welcome-panel" onClick={(e) => e.stopPropagation()} {...dialogProps(labelId)}>
         <div className="content-preview-header">
-          <span className="content-preview-label">{label}</span>
+          <span className="content-preview-label" id={labelId}>{label}</span>
           <button className="icon-btn" onClick={onClose} aria-label="Close"><X size={16} /></button>
         </div>
         <div className="main welcome-modal-body">
@@ -3207,7 +3373,7 @@ function AdminDrills({ content, updateContent }) {
     commit({ ...built, published: false });
   };
 
-  const remove = (id) => {
+  const remove = async (id) => {
     const dayUses = countDailyAssignmentUses(content, "drillId", id);
     const focusUses = content.focusPoints.reduce((n, f) => n + (f.blocks || []).filter((b) => b.type === "drill" && b.drillId === id).length, 0);
     const where = [
@@ -3215,9 +3381,9 @@ function AdminDrills({ content, updateContent }) {
       focusUses > 0 && `${focusUses} practice focus${focusUses === 1 ? "" : "es"}`,
     ].filter(Boolean).join(" and ");
     const msg = where
-      ? `This drill is used in ${where} — deleting it will remove it from there. Delete anyway?`
-      : "Delete this drill? This can't be undone.";
-    if (!window.confirm(msg)) return;
+      ? `This drill is used in ${where} — deleting it will remove it from there.`
+      : "This can't be undone.";
+    if (!(await confirmDialog({ title: "Delete this drill?", message: msg, confirmLabel: "Delete", danger: true }))) return;
     updateContent((c) => ({ ...c, drills: c.drills.filter((d) => d.id !== id) }));
   };
   const togglePublish = (id) => updateContent((c) => ({ ...c, drills: c.drills.map((d) => (d.id === id ? { ...d, published: !d.published } : d)) }));
@@ -3415,12 +3581,12 @@ function AdminCategories({ content, updateContent }) {
     cancelRename();
   };
 
-  const removeCategory = (cat) => {
+  const removeCategory = async (cat) => {
     const uses = countFor(cat.name, cat.type);
     const msg = uses > 0
-      ? `"${cat.name}" is used by ${uses} item${uses === 1 ? "" : "s"} — they'll keep their content but lose this category label. Delete anyway?`
-      : `Delete category "${cat.name}"?`;
-    if (!window.confirm(msg)) return;
+      ? `"${cat.name}" is used by ${uses} item${uses === 1 ? "" : "s"} — they'll keep their content but lose this category label.`
+      : "";
+    if (!(await confirmDialog({ title: `Delete category "${cat.name}"?`, message: msg, confirmLabel: "Delete", danger: true }))) return;
     updateContent((c) => {
       const key = collectionFor(cat.type);
       const data = c[key];
@@ -3582,8 +3748,8 @@ function FocusDrillPicker({ block, drills, categories, onChange }) {
 function FocusBlocksEditor({ blocks, setDraft, blockMedia, drills = [], drillCategories = [] }) {
   const setBlocks = (updater) => setDraft((d) => ({ ...d, blocks: updater(d.blocks) }));
   const updateField = (id, field, value) => setBlocks((list) => list.map((b) => (b.id === id ? { ...b, [field]: value } : b)));
-  const removeBlock = (id) => {
-    if (!window.confirm("Remove this content block?")) return;
+  const removeBlock = async (id) => {
+    if (!(await confirmDialog({ title: "Remove this content block?", confirmLabel: "Remove", danger: true }))) return;
     setBlocks((list) => list.filter((b) => b.id !== id));
   };
   const moveBlock = (id, dir) => setBlocks((list) => {
@@ -3704,12 +3870,12 @@ function AdminFocusPoints({ content, updateContent }) {
   const saveDraft = () => {
     commit({ ...draft, title: draft.title.trim() || "Untitled draft", published: false });
   };
-  const remove = (id) => {
+  const remove = async (id) => {
     const uses = countDailyAssignmentUses(content, "focusId", id);
     const msg = uses > 0
-      ? `This practice focus is assigned in ${uses} place${uses === 1 ? "" : "s"} (a training block) — deleting it will leave those without a focus. Delete anyway?`
-      : "Delete this practice focus? This can't be undone.";
-    if (!window.confirm(msg)) return;
+      ? `This practice focus is assigned in ${uses} place${uses === 1 ? "" : "s"} (a training block) — deleting it will leave those without a focus.`
+      : "This can't be undone.";
+    if (!(await confirmDialog({ title: "Delete this practice focus?", message: msg, confirmLabel: "Delete", danger: true }))) return;
     updateContent((c) => ({ ...c, focusPoints: c.focusPoints.filter((f) => f.id !== id) }));
   };
   const togglePublish = (id) => updateContent((c) => ({ ...c, focusPoints: c.focusPoints.map((f) => (f.id === id ? { ...f, published: !f.published } : f)) }));
@@ -3869,8 +4035,8 @@ function useExerciseMedia(setDraft) {
 function ExerciseEditor({ exercises, setDraft, exMedia }) {
   const setExercises = (updater) => setDraft((d) => ({ ...d, exercises: updater(d.exercises) }));
   const updateField = (id, field, value) => setExercises((list) => list.map((ex) => (ex.id === id ? { ...ex, [field]: value } : ex)));
-  const removeExercise = (id) => {
-    if (!window.confirm("Remove this exercise?")) return;
+  const removeExercise = async (id) => {
+    if (!(await confirmDialog({ title: "Remove this exercise?", confirmLabel: "Remove", danger: true }))) return;
     setExercises((list) => list.filter((ex) => ex.id !== id));
   };
   const moveExercise = (id, dir) => setExercises((list) => {
@@ -4028,12 +4194,12 @@ function AdminOffIce({ content, updateContent }) {
     const built = buildOffice({ ...draft, title: draft.title.trim() || "Untitled draft" });
     commit({ ...built, published: false });
   };
-  const remove = (id) => {
+  const remove = async (id) => {
     const uses = countDailyAssignmentUses(content, "workoutId", id);
     const msg = uses > 0
-      ? `This workout is used in ${uses} training block${uses === 1 ? "" : "s"} — deleting it will leave those blocks without an off-ice workout. Delete anyway?`
-      : "Delete this workout? This can't be undone.";
-    if (!window.confirm(msg)) return;
+      ? `This workout is used in ${uses} training block${uses === 1 ? "" : "s"} — deleting it will leave those blocks without an off-ice workout.`
+      : "This can't be undone.";
+    if (!(await confirmDialog({ title: "Delete this workout?", message: msg, confirmLabel: "Delete", danger: true }))) return;
     updateContent((c) => ({ ...c, offIceWorkouts: c.offIceWorkouts.filter((o) => o.id !== id) }));
   };
   const togglePublish = (id) => updateContent((c) => ({ ...c, offIceWorkouts: c.offIceWorkouts.map((o) => (o.id === id ? { ...o, published: !o.published } : o)) }));
@@ -4241,8 +4407,8 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
     setList(next);
   };
   // Deleting removes the same-numbered block from Youth, Junior and Pro together, so the levels stay lined up.
-  const removeDay = (i) => {
-    if (!window.confirm(`Delete Block ${i + 1}${list[i].title ? ` (${list[i].title})` : ""} from Youth, Junior and Pro? Every later block moves up one, so goalies partway through the list will see different training next.`)) return;
+  const removeDay = async (i) => {
+    if (!(await confirmDialog({ title: `Delete Block ${i + 1}${list[i].title ? ` (${list[i].title})` : ""}?`, message: `It's removed from Youth, Junior and Pro. Every later block moves up one, so goalies partway through the list will see different training next.`, confirmLabel: "Delete", danger: true }))) return;
     if (editingId === list[i].id) setEditingId(null);
     updateContent((c) => ({
       ...c,
@@ -4455,8 +4621,8 @@ function DayNotesEditor({ data, setFields, onPublish, extraDirty = false, extraP
     else setSaveError("Couldn't save — nothing was made live. Check your connection and try again.");
   };
   const reuse = (item) => { setSaveError(""); setText(item.text); setFields({ noteDraft: item.text }); };
-  const removeFromHistory = (item) => {
-    if (!window.confirm("Delete this note from the list? This can't be undone.")) return;
+  const removeFromHistory = async (item) => {
+    if (!(await confirmDialog({ title: "Delete this note from the list?", message: "This can't be undone.", confirmLabel: "Delete", danger: true }))) return;
     setFields({ noteHistory: history.filter((h) => h.id !== item.id) });
   };
   return (
@@ -4590,7 +4756,7 @@ function AdminUsers() {
       setError("You can't remove the last coach account.");
       return;
     }
-    if (!window.confirm(`Remove ${u.name || email}? They'll no longer be able to log in, but you can restore them later.`)) return;
+    if (!(await confirmDialog({ title: `Remove ${u.name || email}?`, message: "They'll no longer be able to log in, but you can restore them later.", confirmLabel: "Remove", danger: true }))) return;
     setError("");
     const ok = await updateUserFields(u.id, { removed: true });
     if (!ok) { setError("Couldn't save that — check your connection and try again."); return; }
@@ -4608,7 +4774,7 @@ function AdminUsers() {
   // record of theirs for good. Only offered once an account has been removed.
   const deleteUserPermanently = async (email) => {
     const u = users[email];
-    if (!window.confirm(`Permanently delete ${u.name || email}? Their account, calendar, game stats and notes will be erased. This can't be undone.`)) return;
+    if (!(await confirmDialog({ title: `Permanently delete ${u.name || email}?`, message: "Their account, calendar, game stats and notes will be erased. This can't be undone.", confirmLabel: "Delete permanently", danger: true }))) return;
     setError("");
     const res = await deleteAccount(u.id);
     if (!res.ok) { setError(`Couldn't delete that account: ${res.error}`); return; }
@@ -4670,7 +4836,7 @@ function UnusedFiles() {
 
   const total = (files || []).reduce((n, f) => n + f.size, 0);
   const clean = async () => {
-    if (!window.confirm(`Delete ${files.length} unused file${files.length === 1 ? "" : "s"} (${formatBytes(total)})? Nothing in the app uses them. This can't be undone.`)) return;
+    if (!(await confirmDialog({ title: `Delete ${files.length} unused file${files.length === 1 ? "" : "s"} (${formatBytes(total)})?`, message: "Nothing in the app uses them. This can't be undone.", confirmLabel: "Delete", danger: true }))) return;
     setBusy(true); setMessage("");
     const names = files.map((f) => f.name);
     const removed = await deleteUnusedFiles(names);
@@ -4727,7 +4893,7 @@ function AdminMedia({ content, updateContent }) {
   };
 
   const remove = async (item) => {
-    if (!window.confirm(`Remove "${item.name}"? This can't be undone, and it'll break anything still using this file.`)) return;
+    if (!(await confirmDialog({ title: `Remove "${item.name}"?`, message: "This can't be undone, and it'll break anything still using this file.", confirmLabel: "Remove", danger: true }))) return;
     setRemovingId(item.id);
     setError("");
     try {
@@ -4807,8 +4973,8 @@ function AdminAccess() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => { refreshAppAccess(); }, []);
-  const change = async (patch, confirmText) => {
-    if (confirmText && !window.confirm(confirmText)) return;
+  const change = async (patch, confirmOptions) => {
+    if (confirmOptions && !(await confirmDialog(confirmOptions))) return;
     setBusy(true); setError("");
     const ok = await setAppAccess(patch);
     await refreshAppAccess();
@@ -4828,7 +4994,7 @@ function AdminAccess() {
               ? "Anyone can create a goalie account from the sign-up page."
               : "Closed: nobody can create an account. Coach invite links still work."}
             checked={access.signupsOpen} disabled={busy}
-            onChange={(v) => change({ signupsOpen: v }, v ? "Open sign-ups? Anyone with the link will be able to create a goalie account." : null)}
+            onChange={(v) => change({ signupsOpen: v }, v ? { title: "Open sign-ups?", message: "Anyone with the link will be able to create a goalie account.", confirmLabel: "Open sign-ups" } : null)}
           />
           <AccessSwitch
             label="Goalies can use the app"
@@ -4836,7 +5002,7 @@ function AdminAccess() {
               ? "Goalies who already have an account can log in and train."
               : "Off: only coaches can use the app. Goalies who log in see a \u201ccoming soon\u201d message."}
             checked={access.goaliesEnabled} disabled={busy}
-            onChange={(v) => change({ goaliesEnabled: v }, v ? null : "Turn off goalie access? Goalies will see a \u201ccoming soon\u201d screen until you turn it back on. Their accounts and data are kept.")}
+            onChange={(v) => change({ goaliesEnabled: v }, v ? null : { title: "Turn off goalie access?", message: "Goalies will see a \u201ccoming soon\u201d screen until you turn it back on. Their accounts and data are kept.", confirmLabel: "Turn off", danger: true })}
           />
         </>
       )}
@@ -5146,15 +5312,9 @@ function AdminConfirmationEmail({ content, updateContent }) {
       </div>
 
       {showPreview && (
-        <div className="content-preview-overlay no-print" onClick={() => setShowPreview(false)}>
-          <div className="content-preview-panel email-preview-panel" onClick={(e) => e.stopPropagation()}>
-            <div className="content-preview-header">
-              <span className="content-preview-label">Preview</span>
-              <button className="icon-btn" onClick={() => setShowPreview(false)} aria-label="Close"><X size={16} /></button>
-            </div>
-            <iframe title="Email preview" className="email-preview-frame" sandbox="" srcDoc={previewHtml} />
-          </div>
-        </div>
+        <PreviewModal label="Preview" onClose={() => setShowPreview(false)} panelClassName="email-preview-panel">
+          <iframe title="Email preview" className="email-preview-frame" sandbox="" srcDoc={previewHtml} />
+        </PreviewModal>
       )}
     </div>
   );
@@ -5202,9 +5362,9 @@ function AdminLegal() {
   const dirty = draft !== null && sanitizeRichHtml(draft, true) !== sanitizeRichHtml(savedBody, true);
   const versioned = doc !== "cookies";
 
-  const switchTo = (nextDoc, nextLang) => {
+  const switchTo = async (nextDoc, nextLang) => {
     if (nextDoc === doc && nextLang === lang) return;
-    if (dirty && !window.confirm("You have unsaved changes. Discard them?")) return;
+    if (dirty && !(await confirmDialog({ title: "Discard unsaved changes?", message: "Your edits to this text haven't been saved.", confirmLabel: "Discard", danger: true }))) return;
     setDoc(nextDoc); setLang(nextLang); setDraft(null); setMessage(""); setError("");
   };
 
@@ -5213,7 +5373,7 @@ function AdminLegal() {
     const body = sanitizeRichHtml(current, true);
     const isEmpty = !body.replace(/<[^>]*>/g, "").trim();
     if (isEmpty && lang === "en") { setError("The English version can't be empty."); return; }
-    if (publish && !window.confirm("Publish a new version? Every goalie will be asked to read and accept the updated Terms of Use and Privacy Policy the next time they open the app.")) return;
+    if (publish && !(await confirmDialog({ title: "Publish a new version?", message: "Every goalie will be asked to read and accept the updated Terms of Use and Privacy Policy the next time they open the app.", confirmLabel: "Publish" }))) return;
     setBusy(true);
     try {
       if (dirty) {
@@ -5438,6 +5598,7 @@ export default function App() {
     <ErrorBoundary>
       <AppInner />
       <CookieConsent />
+      <DialogHost />
     </ErrorBoundary>
   );
 }
@@ -5527,6 +5688,9 @@ function LegalCheckboxes({ terms, age, onTerms, onAge }) {
 // Shown to goalies who haven't accepted the current Terms of Use / Privacy Policy yet
 // (accounts created before they existed, or after an update). It can't be dismissed.
 function TermsUpdatePrompt({ updated, onAccept, onLogout }) {
+  const panelRef = useRef(null);
+  const labelId = useId();
+  useDialogBehavior(panelRef, null); // must be answered: Escape and outside clicks don't close it
   const [terms, setTerms] = useState(false);
   const [age, setAge] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -5540,10 +5704,10 @@ function TermsUpdatePrompt({ updated, onAccept, onLogout }) {
   };
   return (
     <div className="content-preview-overlay no-print">
-      <div className="content-preview-panel welcome-panel">
+      <div ref={panelRef} className="content-preview-panel welcome-panel" {...dialogProps(labelId)}>
         <div className="content-preview-header"><span className="content-preview-label">Terms & privacy</span></div>
         <div className="main welcome-modal-body">
-          <h2 className="welcome-title">{updated ? "We've updated our terms" : "Please review our terms"}</h2>
+          <h2 className="welcome-title" id={labelId}>{updated ? "We've updated our terms" : "Please review our terms"}</h2>
           <p className="welcome-text">
             {updated
               ? "We've made changes to our Terms of Use and Privacy Policy. Please read them and confirm to keep training."
@@ -6851,6 +7015,17 @@ button:focus {
 .coming-soon .auth-sub { max-width: 420px; margin-bottom: 8px; }
 .auth-closed { text-align: center; }
 .turnstile-box { min-height: 65px; }
+.dialog-host { font-family: 'Inter', sans-serif; color: var(--text); }
+.app-dialog-overlay { position: fixed; inset: 0; z-index: 300; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0,0,0,0.6); }
+.app-dialog { width: 100%; max-width: 420px; padding: 22px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 16px 48px rgba(0,0,0,0.55); }
+.app-dialog:focus { outline: none; }
+.app-dialog-title { font-size: 17px; line-height: 1.35; margin: 0 0 8px; color: var(--text); }
+.app-dialog-message { margin: 0 0 4px; font-size: 14px; line-height: 1.55; color: var(--text-dim); }
+.app-dialog-field { margin-top: 12px; }
+.app-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+.btn--danger { background: #D63B3B; color: #fff; }
+.btn--danger:hover { filter: brightness(1.08); }
+.content-preview-panel:focus, .welcome-panel:focus { outline: none; }
 .legal-checks { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 2px; }
 .legal-check { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; color: var(--text-dim); text-align: left; cursor: pointer; }
 .legal-check input { width: 16px; height: 16px; margin: 2px 0 0; flex: none; accent-color: var(--accent); cursor: pointer; }
@@ -6911,6 +7086,8 @@ button:focus {
 .email-status--ok { background: rgba(34,197,94,0.12); color: #22c55e; }
 .email-status--error { background: rgba(239,68,68,0.12); color: #ef4444; }
 .email-preview-panel { max-width: 560px; }
+.email-preview-panel .main { padding: 0; max-width: none; }
+.email-preview-panel .email-preview-frame { display: block; }
 .email-preview-frame { width: 100%; height: 520px; border: 0; background: #fff; border-radius: 0 0 var(--radius) var(--radius); }
 
 .admin-sub { font-size: 13px; color: var(--text-dim); margin: -12px 0 20px; max-width: 620px; line-height: 1.5; }
