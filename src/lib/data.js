@@ -18,6 +18,7 @@ function shapeUser(p, dayTypes, gameLogs, restNotes, loginDays) {
     removed: p.removed, createdAt: p.created_at ? new Date(p.created_at).getTime() : null,
     dayTypes: dayTypes || {}, gameLogs: gameLogs || {}, restNotes: restNotes || {},
     loginDays: loginDays || {}, monthPlans: p.month_plans || {},
+    termsVersion: p.terms_version || null,
   };
 }
 
@@ -97,6 +98,11 @@ export async function updateUserFields(userId, patch) {
       lastSeenAnnouncementId: "last_seen_announcement_id",
       role: "role", removed: "removed", monthPlans: "month_plans",
     };
+    // Accepting the Terms of Use / Privacy Policy also records when it happened.
+    if (patch.termsVersion !== undefined) {
+      profileFields.terms_version = patch.termsVersion;
+      profileFields.terms_accepted_at = new Date().toISOString();
+    }
     for (const [jsKey, col] of Object.entries(fieldMap)) {
       if (jsKey in patch) profileFields[col] = patch[jsKey];
     }
@@ -337,6 +343,20 @@ export function storagePathsIn(value) {
     if (path) out.add(path);
   }
   return out;
+}
+
+// Permanently deletes an account (their own, or a goalie's when called by a coach): first
+// any profile photo files, then the login and all of its data through delete_account.
+export async function deleteAccount(userId) {
+  try {
+    const folder = `profile/${userId}`;
+    const { data: files } = await supabase.storage.from("media").list(folder);
+    if (files?.length) await supabase.storage.from("media").remove(files.map((f) => `${folder}/${f.name}`));
+    const { error } = await supabase.rpc("delete_account", { target: userId });
+    return error ? { ok: false, error: error.message } : { ok: true };
+  } catch {
+    return { ok: false, error: "Something went wrong. Please try again." };
+  }
 }
 
 export async function deleteStorageObject(path) {

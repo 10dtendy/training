@@ -11,7 +11,7 @@ import { supabase } from "./lib/supabase.js";
 import {
   fetchCurrentProfile, getUsersMap, updateUserFields, recordLoginDay, getContent, updateContentFields,
   uploadImage as uploadToStorage, deleteStorageObject, publishConfirmationEmail, getUsage,
-  storagePathFromUrl, storagePathsIn, deleteUnusedFiles, getUnusedFiles,
+  storagePathFromUrl, storagePathsIn, deleteUnusedFiles, getUnusedFiles, deleteAccount,
 } from "./lib/data.js";
 
 /* ============================================================================
@@ -344,7 +344,8 @@ function subscribeConsent(fn) { consentListeners.add(fn); return () => consentLi
 function useConsent() { return useSyncExternalStore(subscribeConsent, () => consentState); }
 // Links anywhere in the app open these through the one <CookieConsent /> at the root.
 function openCookieSettings() { window.dispatchEvent(new Event("open-cookie-settings")); }
-function openCookiePolicy() { window.dispatchEvent(new Event("open-cookie-policy")); }
+function openLegalDoc(doc) { window.dispatchEvent(new CustomEvent("open-legal-doc", { detail: doc })); }
+function openCookiePolicy() { openLegalDoc("cookies"); }
 
 /* ============================================================================
    SHARED VISUAL MOTIF
@@ -651,6 +652,8 @@ function AuthScreen({ onAuthed }) {
   const [inviteCode, setInviteCode] = useState("");
   const [checkEmail, setCheckEmail] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const [agreeTerms, setAgreeTerms] = useState(false);
+  const [agreeAge, setAgreeAge] = useState(false);
 
   // A shared link can look like ...#invite=<code> — when present,
   // switch to sign-up and pre-fill the code so the recipient doesn't need to
@@ -710,6 +713,7 @@ function AuthScreen({ onAuthed }) {
       const problem = passwordProblem(form.password);
       if (problem) { setError(problem); return; }
       if (form.password !== form.confirmPassword) { setError("The two passwords don't match."); return; }
+      if (!agreeTerms || !agreeAge) { setError("Please accept the Terms of Use and confirm your age to create an account."); return; }
     }
     const trimmedInvite = inviteCode.trim();
     setBusy(true);
@@ -717,7 +721,7 @@ function AuthScreen({ onAuthed }) {
       if (mode === "signup") {
         const { data, error: signUpError } = await supabase.auth.signUp({
           email, password: form.password,
-          options: { data: { name: form.name.trim(), position: form.position, experience: form.experience, invite_code: trimmedInvite } },
+          options: { data: { name: form.name.trim(), position: form.position, experience: form.experience, invite_code: trimmedInvite, terms_version: TERMS_VERSION } },
         });
         if (signUpError) {
           setError(signUpError.message === "User already registered"
@@ -853,6 +857,10 @@ function AuthScreen({ onAuthed }) {
                   </label>
                 )}
 
+                {mode === "signup" && (
+                  <LegalCheckboxes terms={agreeTerms} age={agreeAge} onTerms={setAgreeTerms} onAge={setAgreeAge} />
+                )}
+
                 {mode === "login" && (
                   <button type="button" className="auth-invite-link" onClick={() => { setError(""); setMode("forgot"); }}>Forgot password?</button>
                 )}
@@ -865,10 +873,7 @@ function AuthScreen({ onAuthed }) {
               </form>
             </>
           )}
-          <div className="legal-links">
-            <button type="button" className="cookie-link" onClick={openCookieSettings}>Cookie settings</button>
-            <button type="button" className="cookie-link" onClick={openCookiePolicy}>Cookie policy</button>
-          </div>
+          <LegalLinks />
         </div>
       </div>
     </div>
@@ -1395,6 +1400,7 @@ function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, o
                 placeholder="What did you do today? e.g. light skate, gym, full recovery…"
                 autoFocus
               />
+              <p className="planner-hint">Please don't include medical or injury details here.</p>
               <div className="admin-form-actions">
                 <button className="btn btn--ghost btn--small" onClick={() => { setRestNoteDraft(restNote || ""); setRestNoteError(""); setNotingRest(false); }} disabled={restNoteBusy}>Cancel</button>
                 <button className="btn btn--primary btn--small" onClick={handleSaveRestNote} disabled={restNoteBusy}>{restNoteBusy ? "Saving…" : "Save note"}</button>
@@ -1996,8 +2002,16 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
    PROFILE PAGE
    ============================================================================ */
 
-function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile }) {
+function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile, onDeleteAccount }) {
   const isCoach = user.role === "coach";
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const confirmDelete = async () => {
+    setDeleting(true); setDeleteError("");
+    const res = await onDeleteAccount();
+    if (!res.ok) { setDeleting(false); setDeleteError("Couldn't delete your account — check your connection and try again."); }
+  };
   const planKey = dateKey(TODAY_DATE).slice(0, 7);
   const currentPlan = (user.monthPlans || {})[planKey] || "sunday";
   const [changingPassword, setChangingPassword] = useState(false);
@@ -2144,10 +2158,21 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile }) {
         )}
 
         <button className="btn btn--ghost" onClick={onLogout}><LogOut size={14} /> Log out</button>
-        <div className="legal-links">
-          <button type="button" className="cookie-link" onClick={openCookieSettings}>Cookie settings</button>
-          <button type="button" className="cookie-link" onClick={openCookiePolicy}>Cookie policy</button>
-        </div>
+
+        {!isCoach && (!confirmingDelete ? (
+          <button type="button" className="profile-delete-link" onClick={() => setConfirmingDelete(true)}>Delete my account</button>
+        ) : (
+          <div className="profile-delete-confirm">
+            <p><strong>Delete your account permanently?</strong> Your profile, calendar, game stats and notes will be erased right away. This can't be undone.</p>
+            {deleteError && <div className="auth-error"><AlertTriangle size={13} /> {deleteError}</div>}
+            <div className="admin-form-actions">
+              <button type="button" className="btn btn--ghost btn--small" onClick={() => { setConfirmingDelete(false); setDeleteError(""); }} disabled={deleting}>Cancel</button>
+              <button type="button" className="btn btn--primary btn--small" onClick={confirmDelete} disabled={deleting}>{deleting ? "Deleting…" : "Delete permanently"}</button>
+            </div>
+          </div>
+        ))}
+
+        <LegalLinks />
       </section>
     </div>
   );
@@ -4359,7 +4384,7 @@ function AdminUsers() {
       return;
     }
     const nextRole = u.role === "coach" ? "goalie" : "coach";
-    const ok = await updateUserFields(email, { role: nextRole });
+    const ok = await updateUserFields(u.id, { role: nextRole });
     if (!ok) { setError("Couldn't save that — check your connection and try again."); return; }
     setUsers((prev) => ({ ...prev, [email]: { ...prev[email], role: nextRole } }));
   };
@@ -4372,16 +4397,27 @@ function AdminUsers() {
     }
     if (!window.confirm(`Remove ${u.name || email}? They'll no longer be able to log in, but you can restore them later.`)) return;
     setError("");
-    const ok = await updateUserFields(email, { removed: true });
+    const ok = await updateUserFields(u.id, { removed: true });
     if (!ok) { setError("Couldn't save that — check your connection and try again."); return; }
     setUsers((prev) => ({ ...prev, [email]: { ...prev[email], removed: true } }));
   };
 
   const restoreUser = async (email) => {
     setError("");
-    const ok = await updateUserFields(email, { removed: false });
+    const ok = await updateUserFields(users[email].id, { removed: false });
     if (!ok) { setError("Couldn't save that — check your connection and try again."); return; }
     setUsers((prev) => ({ ...prev, [email]: { ...prev[email], removed: false } }));
+  };
+
+  // For deletion requests (the goalie's right to erasure): removes the login and every
+  // record of theirs for good. Only offered once an account has been removed.
+  const deleteUserPermanently = async (email) => {
+    const u = users[email];
+    if (!window.confirm(`Permanently delete ${u.name || email}? Their account, calendar, game stats and notes will be erased. This can't be undone.`)) return;
+    setError("");
+    const res = await deleteAccount(u.id);
+    if (!res.ok) { setError(`Couldn't delete that account: ${res.error}`); return; }
+    setUsers((prev) => { const next = { ...prev }; delete next[email]; return next; });
   };
 
   return (
@@ -4403,7 +4439,12 @@ function AdminUsers() {
                 <td>{u.removed ? <span className="chip">Removed</span> : <span className="chip chip--done">Active</span>}</td>
                 <td className="admin-row-actions">
                   {u.removed ? (
-                    <button className="status-pill" onClick={() => restoreUser(u.email)}>Restore</button>
+                    <>
+                      <button className="status-pill" onClick={() => restoreUser(u.email)}>Restore</button>
+                      {u.role !== "coach" && (
+                        <button className="icon-btn" onClick={() => deleteUserPermanently(u.email)} aria-label="Delete permanently" title="Delete permanently"><Trash2 size={14} /></button>
+                      )}
+                    </>
                   ) : (
                     <>
                       <button className="status-pill" onClick={() => toggleRole(u.email)}>{u.role === "coach" ? "Make goalie" : "Make coach"}</button>
@@ -4996,15 +5037,15 @@ export default function App() {
 function CookieConsent() {
   const consent = useConsent();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [policyOpen, setPolicyOpen] = useState(false);
+  const [legalDoc, setLegalDoc] = useState(null); // null | "privacy" | "terms" | "cookies"
   useEffect(() => {
     const showSettings = () => setSettingsOpen(true);
-    const showPolicy = () => setPolicyOpen(true);
+    const showDoc = (e) => { if (LEGAL_DOC_LABELS[e.detail]) setLegalDoc(e.detail); };
     window.addEventListener("open-cookie-settings", showSettings);
-    window.addEventListener("open-cookie-policy", showPolicy);
+    window.addEventListener("open-legal-doc", showDoc);
     return () => {
       window.removeEventListener("open-cookie-settings", showSettings);
-      window.removeEventListener("open-cookie-policy", showPolicy);
+      window.removeEventListener("open-legal-doc", showDoc);
     };
   }, []);
   const choose = (youtube) => { setConsent(youtube); setSettingsOpen(false); };
@@ -5018,7 +5059,7 @@ function CookieConsent() {
             <p>
               We use cookies and similar technologies to keep you logged in and to play training videos,
               including some set by third-party services. Details are in our{" "}
-              <button type="button" className="cookie-link" onClick={() => setPolicyOpen(true)}>Cookie policy</button>.
+              <button type="button" className="cookie-link" onClick={() => setLegalDoc("cookies")}>Cookie policy</button>.
             </p>
             {consent && <p className="cookie-banner-current">Current choice: {consent.youtube ? "all cookies accepted" : "essential only"}.</p>}
           </div>
@@ -5030,11 +5071,221 @@ function CookieConsent() {
           {consent && <button type="button" className="icon-btn cookie-banner-close" onClick={() => setSettingsOpen(false)} aria-label="Close"><X size={16} /></button>}
         </div>
       )}
-      {policyOpen && (
-        <PreviewModal label="Cookie policy" onClose={() => setPolicyOpen(false)}>
-          <CookiePolicy onOpenSettings={() => { setPolicyOpen(false); setSettingsOpen(true); }} />
+      {legalDoc && (
+        <PreviewModal label={LEGAL_DOC_LABELS[legalDoc]} onClose={() => setLegalDoc(null)}>
+          {legalDoc === "privacy" && <PrivacyPolicy />}
+          {legalDoc === "terms" && <TermsOfUse />}
+          {legalDoc === "cookies" && <CookiePolicy onOpenSettings={() => { setLegalDoc(null); setSettingsOpen(true); }} />}
         </PreviewModal>
       )}
+    </div>
+  );
+}
+
+// Bump TERMS_VERSION whenever the Terms of Use or Privacy Policy change in a way goalies
+// must accept again: everyone whose accepted version differs is asked once more.
+const TERMS_VERSION = "2026-09-23";
+const LEGAL_UPDATED = "23 September 2026";
+const COMPANY = {
+  name: "10DTendy, s. r. o.",
+  address: "Ústecko-Orlická 3300/25, 058 01 Poprad, Slovakia",
+  ico: "53 155 149",
+  register: "Commercial Register of the District Court Prešov, section Sro, insert no. 40586/P",
+  email: "info@10dtendy.com",
+};
+const LEGAL_DOC_LABELS = { privacy: "Privacy policy", terms: "Terms of use", cookies: "Cookie policy" };
+
+function LegalLinks() {
+  return (
+    <div className="legal-links">
+      <button type="button" className="cookie-link" onClick={() => openLegalDoc("privacy")}>Privacy policy</button>
+      <button type="button" className="cookie-link" onClick={() => openLegalDoc("terms")}>Terms of use</button>
+      <button type="button" className="cookie-link" onClick={() => openLegalDoc("cookies")}>Cookie policy</button>
+      <button type="button" className="cookie-link" onClick={openCookieSettings}>Cookie settings</button>
+    </div>
+  );
+}
+
+function CompanyBlock() {
+  return (
+    <p>
+      <strong>{COMPANY.name}</strong><br />
+      {COMPANY.address}<br />
+      IČO {COMPANY.ico}, registered in the {COMPANY.register}<br />
+      Email: <a href={`mailto:${COMPANY.email}`}>{COMPANY.email}</a>
+    </p>
+  );
+}
+
+// The two agreements every goalie gives, at signup and again whenever TERMS_VERSION changes.
+function LegalCheckboxes({ terms, age, onTerms, onAge }) {
+  return (
+    <div className="legal-checks">
+      <label className="legal-check">
+        <input type="checkbox" checked={terms} onChange={(e) => onTerms(e.target.checked)} />
+        <span>
+          I agree to the <button type="button" className="cookie-link" onClick={() => openLegalDoc("terms")}>Terms of Use</button> and
+          have read the <button type="button" className="cookie-link" onClick={() => openLegalDoc("privacy")}>Privacy Policy</button>.
+        </span>
+      </label>
+      <label className="legal-check">
+        <input type="checkbox" checked={age} onChange={(e) => onAge(e.target.checked)} />
+        <span>I'm 16 or older, or my parent or legal guardian has agreed to me using 10DTendy.</span>
+      </label>
+    </div>
+  );
+}
+
+// Shown to goalies who haven't accepted the current Terms of Use / Privacy Policy yet
+// (accounts created before they existed, or after an update). It can't be dismissed.
+function TermsUpdatePrompt({ onAccept, onLogout }) {
+  const [terms, setTerms] = useState(false);
+  const [age, setAge] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const accept = async () => {
+    if (!terms || !age) { setError("Please tick both boxes to continue."); return; }
+    setBusy(true); setError("");
+    const ok = await onAccept();
+    setBusy(false);
+    if (!ok) setError("Couldn't save that — check your connection and try again.");
+  };
+  return (
+    <div className="content-preview-overlay no-print">
+      <div className="content-preview-panel welcome-panel">
+        <div className="content-preview-header"><span className="content-preview-label">Terms & privacy</span></div>
+        <div className="main welcome-modal-body">
+          <h2 className="welcome-title">Please review our terms</h2>
+          <p className="welcome-text">
+            We've published Terms of Use and a Privacy Policy for 10DTendy, explaining how the app works and how we look after
+            your data. Please read them and confirm to keep training.
+          </p>
+          <LegalCheckboxes terms={terms} age={age} onTerms={setTerms} onAge={setAge} />
+          {error && <div className="auth-error"><AlertTriangle size={13} /> {error}</div>}
+          <div className="admin-form-actions">
+            <button type="button" className="btn btn--ghost btn--small" onClick={onLogout} disabled={busy}>Log out</button>
+            <button type="button" className="btn btn--primary btn--small" onClick={accept} disabled={busy}>{busy ? "Saving…" : "Accept and continue"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PrivacyPolicy() {
+  return (
+    <div className="legal-doc">
+      <h2>Privacy policy</h2>
+      <p className="legal-updated">Last updated {LEGAL_UPDATED}</p>
+
+      <h3>1. Who we are</h3>
+      <p>The 10DTendy app is run by the company below, which is the controller of the personal data processed through it ("we", "us").</p>
+      <CompanyBlock />
+
+      <h3>2. What data we process</h3>
+      <ul>
+        <li><strong>Account data:</strong> your name, email address, position, experience level and role. Your password is stored only in encrypted (hashed) form by our login provider; we can never see it.</li>
+        <li><strong>Profile details you add:</strong> country, league, team, and a profile photo if one is added.</li>
+        <li><strong>Training data:</strong> the game and rest days you mark, game statistics (opponent, result, shots, goals, minutes played, periods), rest day notes, your monthly plan choices, the days you open the app, when you were last active, and whether you've seen welcome messages and announcements.</li>
+        <li><strong>Agreement records:</strong> which version of these terms you accepted and when.</li>
+        <li><strong>Data kept only on your device:</strong> which parts of a day's training you've ticked off, and your cookie choice (see the Cookie policy).</li>
+        <li><strong>Technical data:</strong> when you use the app, our hosting and database providers process your IP address and browser details in server logs.</li>
+      </ul>
+      <p>We don't ask for health information. Please don't include medical or injury details in notes.</p>
+
+      <h3>3. Why we use it, and our legal basis</h3>
+      <ul>
+        <li><strong>To provide the app</strong> — creating and running your account, showing your training program, and keeping your calendar and statistics. Your coach uses your profile, activity and statistics to guide your training. Legal basis: performance of our contract with you (Art. 6(1)(b) GDPR).</li>
+        <li><strong>Account emails</strong> — sign-up confirmation, password resets and important notices about the service. Legal basis: contract.</li>
+        <li><strong>Security and reliability</strong> — protecting accounts, preventing misuse and fixing problems, including server logs. Legal basis: our legitimate interest in a safe, working service (Art. 6(1)(f) GDPR).</li>
+        <li><strong>Video cookies</strong> — only if you accept them. Legal basis: your consent (Art. 6(1)(a) GDPR), which you can withdraw at any time in Cookie settings.</li>
+        <li><strong>Legal obligations</strong> — for example keeping records of your agreement to these terms, and accounting records once paid subscriptions are introduced (Art. 6(1)(c) GDPR).</li>
+      </ul>
+      <p>We don't sell your data, use it for advertising, or make automated decisions about you that have legal or similarly significant effects.</p>
+
+      <h3>4. Who can see your data</h3>
+      <ul>
+        <li><strong>Our coaches</strong> with admin access to the app. Other goalies can't see your data.</li>
+        <li><strong>Service providers</strong> who process data for us under data processing agreements: Supabase, Inc. (database, logins and file storage, with data stored in the EU in Frankfurt, Germany); GitHub, Inc. (hosts the app's website and processes IP addresses in its server logs); and our email delivery provider (sends account emails).</li>
+        <li><strong>Google Ireland Limited (YouTube)</strong> — only if you accept video cookies. See the Cookie policy.</li>
+        <li><strong>Authorities</strong>, where the law requires us to share data.</li>
+      </ul>
+
+      <h3>5. Transfers outside the EU</h3>
+      <p>Some of our providers are part of groups based in the United States. Where personal data is transferred outside the European Economic Area, it's protected by the EU–U.S. Data Privacy Framework or the European Commission's standard contractual clauses.</p>
+
+      <h3>6. How long we keep it</h3>
+      <ul>
+        <li>Account and training data: for as long as your account exists. When you delete your account, it's removed from our database straight away.</li>
+        <li>If a coach deactivates your account, your data is kept so the account can be restored, until it's deleted permanently. You can ask for that at any time.</li>
+        <li>Server logs: kept by our providers for a short time, usually a few days.</li>
+        <li>Records we're required to keep by law: for the period the law requires.</li>
+      </ul>
+
+      <h3>7. Your rights</h3>
+      <p>You have the right to access your data, correct it, have it deleted, restrict or object to its processing, receive it in a portable format, and withdraw consent at any time. You can edit most details on your profile page and delete your account there with <strong>Delete my account</strong>. For anything else, email <a href={`mailto:${COMPANY.email}`}>{COMPANY.email}</a> — we'll reply within one month.</p>
+      <p>You can also complain to the Slovak data protection authority: Úrad na ochranu osobných údajov Slovenskej republiky, Hraničná 12, 820 07 Bratislava 27, <a href="https://dataprotection.gov.sk" target="_blank" rel="noopener noreferrer">dataprotection.gov.sk</a>, or to the authority in the EU country where you live.</p>
+
+      <h3>8. Young goalies</h3>
+      <p>If you're under 16, you may use 10DTendy only with the agreement of a parent or legal guardian. A parent or guardian can contact us to exercise these rights on your behalf.</p>
+
+      <h3>9. Security</h3>
+      <p>All connections to the app are encrypted (HTTPS), passwords are stored only in hashed form, and access rules in our database make sure each goalie can only reach their own data.</p>
+
+      <h3>10. Changes</h3>
+      <p>If we change this policy, we'll update this page. If the change is significant, we'll tell you in the app.</p>
+    </div>
+  );
+}
+
+function TermsOfUse() {
+  return (
+    <div className="legal-doc">
+      <h2>Terms of use</h2>
+      <p className="legal-updated">Last updated {LEGAL_UPDATED}</p>
+
+      <h3>1. About these terms</h3>
+      <p>These terms apply to your use of the 10DTendy goalie training app, provided by:</p>
+      <CompanyBlock />
+      <p>By creating an account, you agree to these terms. Please also read our Privacy Policy and Cookie policy.</p>
+
+      <h3>2. Your account</h3>
+      <ul>
+        <li>Give accurate information, keep your password secret, and don't share your account. One account is for one person.</li>
+        <li>You're responsible for what happens under your account. Tell us straight away if you think someone else has accessed it.</li>
+        <li>If you're under 16, you may use 10DTendy only with the agreement of a parent or legal guardian, who is responsible for supervising your use of it.</li>
+      </ul>
+
+      <h3>3. The service</h3>
+      <p>10DTendy gives you a goalie training program, including daily drills, practice focus sessions, off-ice workouts, a training calendar and game statistics. We keep improving it, so content and features may be added, changed or removed.</p>
+      <p>The app is currently free to use. We plan to introduce paid monthly subscriptions. Before you're charged anything, we'll show you the price and subscription terms, and you'll have to choose to subscribe. You'll never be charged just for continuing to use a free account.</p>
+
+      <h3>4. Training safety</h3>
+      <p>Hockey and physical training carry a risk of injury. Our content is general training guidance. It isn't medical advice, and it doesn't replace supervision by a qualified coach or advice from a doctor or physiotherapist.</p>
+      <ul>
+        <li>Make sure you're healthy enough to train, and ask a doctor if you're unsure.</li>
+        <li>Warm up, use proper protective equipment, and train within your limits.</li>
+        <li>Stop immediately if you feel pain, dizziness or discomfort.</li>
+        <li>Goalies under 18 should train under the supervision of an adult.</li>
+      </ul>
+
+      <h3>5. Our content</h3>
+      <p>All drills, videos, text, images, the 10DTendy name and logo, and the app's design belong to us or our licensors. You may use them only for your own personal training. You may not copy, record, download, share, publish or resell them, or give anyone else access to your account.</p>
+
+      <h3>6. Acceptable use</h3>
+      <p>Don't misuse the app. That includes trying to access other people's accounts or data, getting around security measures, using automated tools to copy content, interfering with how the app works, or uploading unlawful or offensive content.</p>
+
+      <h3>7. Ending your account</h3>
+      <p>You can delete your account at any time on your profile page. We may suspend or close accounts that break these terms. We may also discontinue the service, in which case we'll give reasonable notice where we can.</p>
+
+      <h3>8. Availability and liability</h3>
+      <p>We work to keep 10DTendy available and accurate, but we can't guarantee it will always be uninterrupted or error-free. To the extent the law allows, we're not liable for indirect or consequential loss. Nothing in these terms limits our liability where the law doesn't allow it, including for damage caused intentionally or through gross negligence, or affects your statutory rights as a consumer.</p>
+
+      <h3>9. Changes to these terms</h3>
+      <p>We may update these terms. If we make important changes, we'll tell you in the app and ask you to accept the new version. If you don't agree, you can delete your account.</p>
+
+      <h3>10. Law and disputes</h3>
+      <p>These terms are governed by Slovak law. If you're a consumer, you also keep the protection of the mandatory laws of the country where you live. If you have a complaint, please contact us first at <a href={`mailto:${COMPANY.email}`}>{COMPANY.email}</a>. Consumers can also use alternative dispute resolution, for example through the Slovak Trade Inspection (Slovenská obchodná inšpekcia, <a href="https://www.soi.sk" target="_blank" rel="noopener noreferrer">soi.sk</a>).</p>
     </div>
   );
 }
@@ -5344,6 +5595,13 @@ function AppInner() {
     setViewDate(TODAY_DATE);
   };
 
+  const deleteMyAccount = async () => {
+    const res = await deleteAccount(user.id);
+    if (res.ok) await onLogout();
+    return res;
+  };
+  const acceptTerms = () => updateProfile({ termsVersion: TERMS_VERSION });
+
   const goTo = (v) => { setView(v); window.scrollTo?.({ top: 0, behavior: "smooth" }); };
   // Distinct from goTo("today"): a detail page's own "back" button means "return to
   // the day I was already looking at", but the nav's "Today" (and the logo) mean
@@ -5457,7 +5715,7 @@ function AppInner() {
               if (view === "focus") return focus ? <FocusDetailPage focus={focus} branding={content.branding} drills={content.drills} onBack={() => goTo("today")} complete={progress.focus} onComplete={() => toggleComplete("focus")} /> : todayPage;
               if (view === "office") return office ? <OffIceDetailPage office={office} branding={content.branding} onBack={() => goTo("today")} complete={progress.office} onComplete={() => toggleComplete("office")} /> : todayPage;
               if (view === "progress") return <ProgressPage user={user} content={content} />;
-              if (view === "profile") return <ProfilePage user={user} onLogout={onLogout} onChangePassword={changePassword} onUpdateProfile={updateProfile} />;
+              if (view === "profile") return <ProfilePage user={user} onLogout={onLogout} onChangePassword={changePassword} onUpdateProfile={updateProfile} onDeleteAccount={deleteMyAccount} />;
               return todayPage;
             })()}
           </>
@@ -5494,6 +5752,7 @@ function AppInner() {
       )}
       {welcomeOpen && <WelcomeModal label="Welcome" data={content.welcome || DEFAULT_WELCOME} onClose={markWelcomeSeen} />}
       {announcementOpen && <WelcomeModal label="Announcement" data={content.announcement} onClose={markAnnouncementSeen} />}
+      {!isCoach && user.termsVersion !== TERMS_VERSION && <TermsUpdatePrompt onAccept={acceptTerms} onLogout={onLogout} />}
     </div>
     </MonthPlanContext.Provider>
   );
@@ -6246,6 +6505,17 @@ button:focus {
 .welcome-title { font-size: 24px; font-weight: 900; margin-bottom: 16px; }
 .welcome-text { color: var(--text-dim); font-size: 14px; line-height: 1.6; margin-bottom: 12px; }
 
+.legal-checks { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 2px; }
+.legal-check { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; color: var(--text-dim); text-align: left; cursor: pointer; }
+.legal-check input { width: 16px; height: 16px; margin: 2px 0 0; flex: none; accent-color: var(--accent); cursor: pointer; }
+.legal-check .cookie-link { color: var(--text); }
+.legal-doc ul { margin: 0 0 12px; padding-left: 20px; }
+.legal-doc li { margin-bottom: 8px; }
+.profile-delete-link { margin-top: 6px; font-size: 13px; color: var(--text-dim); text-decoration: underline; text-underline-offset: 2px; }
+.profile-delete-link:hover { color: var(--accent); }
+.profile-delete-confirm { width: 100%; max-width: 380px; margin-top: 6px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); text-align: left; font-size: 13px; line-height: 1.5; color: var(--text-dim); }
+.profile-delete-confirm p { margin: 0 0 12px; }
+.profile-delete-confirm strong { color: var(--text); }
 .cookie-root { font-family: 'Inter', sans-serif; color: var(--text); }
 .cookie-banner { position: fixed; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 200; max-width: 760px; margin: 0 auto; display: flex; align-items: center; gap: 20px; padding: 18px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 16px 48px rgba(0,0,0,0.55); color: var(--text); font-family: 'Inter', sans-serif; }
 .cookie-banner-text { flex: 1; min-width: 0; }
@@ -6258,7 +6528,7 @@ button:focus {
 .cookie-banner-close { position: absolute; top: 8px; right: 8px; }
 .cookie-link { padding: 0; font-size: inherit; color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
 .cookie-link:hover { color: var(--accent); }
-.legal-links { display: flex; justify-content: center; gap: 18px; margin-top: 18px; font-size: 12px; color: var(--text-dim); }
+.legal-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 18px; margin-top: 18px; font-size: 12px; color: var(--text-dim); }
 .legal-links .cookie-link { color: var(--text-dim); }
 .legal-links .cookie-link:hover { color: var(--text); }
 .youtube-blocked { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; text-align: center; background: var(--surface-2); color: var(--text-dim); user-select: auto; -webkit-user-select: auto; }
