@@ -4371,8 +4371,6 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
   const [copyAfter, setCopyAfter] = useState(0);
 
   const list = content.trainingDays?.[level] || [];
-  const setList = (next) =>
-    updateContent((c) => ({ ...c, trainingDays: { ...c.trainingDays, [level]: next } }));
   const LEVELS = ["Youth", "Junior", "Pro"];
   // Edits are held as a draft per block until "Save block". Saving also copies each changed field
   // to the same-numbered block in the other levels while those still match, so a freshly built
@@ -4420,12 +4418,19 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
     setEditingId(ids[level]);
     setQuery("");
   };
+  // Moving swaps the same-numbered blocks in Youth, Junior and Pro together (like add, copy and
+  // delete), so "Block 4" keeps meaning the same slot in every level.
   const moveDay = (i, dir) => {
     const j = i + dir;
     if (j < 0 || j >= list.length) return;
-    const next = [...list];
-    [next[i], next[j]] = [next[j], next[i]];
-    setList(next);
+    updateContent((c) => ({
+      ...c,
+      trainingDays: Object.fromEntries(LEVELS.map((lv) => {
+        const arr = [...(c.trainingDays[lv] || [])];
+        if (arr[i] && arr[j]) [arr[i], arr[j]] = [arr[j], arr[i]];
+        return [lv, arr];
+      })),
+    }));
   };
   // Deleting removes the same-numbered block from Youth, Junior and Pro together, so the levels stay lined up.
   const removeDay = async (i) => {
@@ -4473,7 +4478,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
   return (
     <div className="admin-page">
       <h1 className="admin-h1">Training blocks</h1>
-      <p className="admin-sub">Build the ordered list of training blocks each level works through. A new block is added to Youth, Junior and Pro at once and what you fill in and save is copied to all three, so open a level afterwards to adjust its text or intensity. Each week has 3 blocks of about 2 days. With nothing marked it runs block 1 Monday–Tuesday, block 2 Wednesday–Thursday, block 3 Friday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day that week, Sunday opens up as a training day and the blocks shift along the days they have left (a game day Wednesday and a rest day Saturday gives Monday–Tuesday, Thursday–Friday, and Sunday alone as block 3). A new goalie starts at Block 1 the first day they open the app, and being away 3 or more days in a row pauses their list until they're back.</p>
+      <p className="admin-sub">Build the ordered list of training blocks each level works through. A new block is added to Youth, Junior and Pro at once and what you fill in and save is copied to all three, so open a level afterwards to adjust its text or intensity. Moving, copying or deleting a block does the same in all three levels, so each block number always lines up. Each week has 3 blocks of about 2 days. With nothing marked it runs block 1 Monday–Tuesday, block 2 Wednesday–Thursday, block 3 Friday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day that week, Sunday opens up as a training day and the blocks shift along the days they have left (a game day Wednesday and a rest day Saturday gives Monday–Tuesday, Thursday–Friday, and Sunday alone as block 3). A new goalie starts at Block 1 the first day they open the app, and being away 3 or more days in a row pauses their list until they're back.</p>
 
       <div className="admin-panel">
         <div className="planner-header">
