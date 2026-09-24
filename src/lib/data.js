@@ -359,6 +359,23 @@ export async function deleteAccount(userId) {
   }
 }
 
+// Coach-controlled access switches (Admin -> Settings), enforced by the database: while
+// signupsOpen is false only the coach invite code can create an account, and while
+// goaliesEnabled is false only coaches can read content or save anything.
+export async function getAppAccess() {
+  const { data, error } = await supabase.from("app_access").select("signups_open, goalies_enabled").eq("id", 1).maybeSingle();
+  if (error || !data) return null;
+  return { signupsOpen: data.signups_open, goaliesEnabled: data.goalies_enabled };
+}
+
+export async function setAppAccess(patch) {
+  const row = {};
+  if ("signupsOpen" in patch) row.signups_open = patch.signupsOpen;
+  if ("goaliesEnabled" in patch) row.goalies_enabled = patch.goaliesEnabled;
+  const { error } = await supabase.from("app_access").update(row).eq("id", 1);
+  return !error;
+}
+
 // Legal texts (Admin -> Legal) and the Terms/Privacy version goalies must have accepted.
 // Readable while logged out too, since the signup screen links to them.
 export async function getLegal() {

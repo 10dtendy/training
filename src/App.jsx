@@ -12,7 +12,7 @@ import {
   fetchCurrentProfile, getUsersMap, updateUserFields, recordLoginDay, getContent, updateContentFields,
   uploadImage as uploadToStorage, deleteStorageObject, publishConfirmationEmail, getUsage,
   storagePathFromUrl, storagePathsIn, deleteUnusedFiles, getUnusedFiles, deleteAccount,
-  getLegal, saveLegalDoc, publishLegalVersion, legalAcceptanceCount,
+  getLegal, saveLegalDoc, publishLegalVersion, legalAcceptanceCount, getAppAccess, setAppAccess,
 } from "./lib/data.js";
 
 /* ============================================================================
@@ -740,6 +740,8 @@ function AuthScreen({ onAuthed }) {
   const [checkEmail, setCheckEmail] = useState(false);
   const [resetSent, setResetSent] = useState(false);
   const legal = useLegal();
+  const access = useAppAccess();
+  const signupsClosed = access?.signupsOpen === false;
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [agreeAge, setAgreeAge] = useState(false);
 
@@ -816,7 +818,9 @@ function AuthScreen({ onAuthed }) {
             ? "An account with this email already exists — try logging in instead."
             : trimmedInvite && /database error|invite code/i.test(signUpError.message)
               ? "That invite code isn't valid."
-              : signUpError.message);
+              : /database error|signups are closed/i.test(signUpError.message)
+                ? "Sign-ups are closed right now."
+                : signUpError.message);
           return;
         }
         if (!data.session) {
@@ -899,6 +903,14 @@ function AuthScreen({ onAuthed }) {
                 <button className={"auth-tab" + (mode === "signup" ? " active" : "")} onClick={() => setMode("signup")}>Sign up</button>
               </div>
 
+              {mode === "signup" && signupsClosed && !inviteOpen ? (
+                <div className="auth-form auth-closed">
+                  <h2 className="auth-reset-title">Sign-ups are closed</h2>
+                  <p className="auth-reset-sub">We're not taking new accounts right now. If you already have one, log in instead.</p>
+                  <button type="button" className="btn btn--primary auth-submit" onClick={() => { setError(""); setMode("login"); }}>Go to log in</button>
+                  <button type="button" className="auth-invite-link" onClick={() => setInviteOpen(true)}>Have a coach invite code?</button>
+                </div>
+              ) : (
               <form onSubmit={submit} className="auth-form">
                 {mode === "signup" && (
                   <label className="auth-field">
@@ -959,6 +971,7 @@ function AuthScreen({ onAuthed }) {
                   {busy ? "Please wait…" : mode === "signup" ? "Create account" : "Log in"}
                 </button>
               </form>
+              )}
             </>
           )}
           <LegalLinks />
@@ -4673,12 +4686,82 @@ function AdminMedia({ content, updateContent }) {
 }
 
 const DEFAULT_ACCENT = "#BE202E";
+// Shown to goalies while Admin -> Settings -> "Goalies can use the app" is off.
+function ComingSoonScreen({ onLogout }) {
+  return (
+    <div className="coming-soon">
+      <img src={LOGO_SRC} alt="10DTendy" className="brand-logo brand-logo--auth" />
+      <h1 className="auth-headline">We're getting things ready.</h1>
+      <p className="auth-sub">Your coach is setting up new training for you. The app will be back soon — check again in a little while.</p>
+      <button className="btn btn--ghost" onClick={onLogout}><LogOut size={14} /> Log out</button>
+    </div>
+  );
+}
+
+function AccessSwitch({ label, hint, checked, onChange, disabled }) {
+  return (
+    <div className="access-row">
+      <div className="access-row-text">
+        <span className="access-row-label">{label}</span>
+        <span className="access-row-hint">{hint}</span>
+      </div>
+      <button type="button" role="switch" aria-checked={checked} aria-label={label} className={"access-switch" + (checked ? " on" : "")} onClick={() => onChange(!checked)} disabled={disabled}>
+        <span className="access-switch-knob" />
+      </button>
+    </div>
+  );
+}
+
+function AdminAccess() {
+  const access = useAppAccess();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => { refreshAppAccess(); }, []);
+  const change = async (patch, confirmText) => {
+    if (confirmText && !window.confirm(confirmText)) return;
+    setBusy(true); setError("");
+    const ok = await setAppAccess(patch);
+    await refreshAppAccess();
+    setBusy(false);
+    if (!ok) setError("Couldn't save that — check your connection and try again.");
+  };
+  return (
+    <div className="admin-panel">
+      <h3>Access</h3>
+      {access === undefined ? <div className="skeleton-hero" style={{ height: 80 }} /> : access === null ? (
+        <div className="auth-error"><AlertTriangle size={13} /> Couldn't load the access settings — reload to try again.</div>
+      ) : (
+        <>
+          <AccessSwitch
+            label="Allow new sign-ups"
+            hint={access.signupsOpen
+              ? "Anyone can create a goalie account from the sign-up page."
+              : "Closed: nobody can create an account. Coach invite links still work."}
+            checked={access.signupsOpen} disabled={busy}
+            onChange={(v) => change({ signupsOpen: v }, v ? "Open sign-ups? Anyone with the link will be able to create a goalie account." : null)}
+          />
+          <AccessSwitch
+            label="Goalies can use the app"
+            hint={access.goaliesEnabled
+              ? "Goalies who already have an account can log in and train."
+              : "Off: only coaches can use the app. Goalies who log in see a \u201ccoming soon\u201d message."}
+            checked={access.goaliesEnabled} disabled={busy}
+            onChange={(v) => change({ goaliesEnabled: v }, v ? null : "Turn off goalie access? Goalies will see a \u201ccoming soon\u201d screen until you turn it back on. Their accounts and data are kept.")}
+          />
+        </>
+      )}
+      {error && <div className="auth-error" style={{ marginTop: 10 }}><AlertTriangle size={13} /> {error}</div>}
+    </div>
+  );
+}
+
 function AdminSettings({ content, updateContent }) {
   const accentColor = content.accentColor || DEFAULT_ACCENT;
   const setAccent = (color) => updateContent((c) => ({ ...c, accentColor: color }));
   return (
     <div className="admin-page">
       <h1 className="admin-h1">Settings</h1>
+      <AdminAccess />
       <div className="admin-panel">
         <label className="settings-row">
           <span>Accent color</span>
@@ -5260,7 +5343,7 @@ function PrintSheet({ content, date, assignment }) {
    ============================================================================ */
 
 export default function App() {
-  useEffect(() => { refreshLegal(); }, []);
+  useEffect(() => { refreshLegal(); refreshAppAccess(); }, []);
   return (
     <ErrorBoundary>
       <AppInner />
@@ -5403,6 +5486,20 @@ async function refreshLegal() {
 function subscribeLegal(fn) { legalListeners.add(fn); return () => legalListeners.delete(fn); }
 function useLegal() { return useSyncExternalStore(subscribeLegal, () => legalState); }
 
+// The access switches (see getAppAccess), shared by the login screen, the app and
+// Admin -> Settings. undefined = still loading, null = couldn't be loaded.
+let appAccessState;
+const appAccessListeners = new Set();
+async function refreshAppAccess() {
+  const next = await getAppAccess();
+  if (next || appAccessState === undefined) {
+    appAccessState = next;
+    appAccessListeners.forEach((fn) => fn());
+  }
+}
+function subscribeAppAccess(fn) { appAccessListeners.add(fn); return () => appAccessListeners.delete(fn); }
+function useAppAccess() { return useSyncExternalStore(subscribeAppAccess, () => appAccessState); }
+
 function formatLegalDate(iso, lang) {
   if (!iso) return "";
   return new Date(iso).toLocaleDateString(lang === "sk" ? "sk-SK" : "en-GB", { day: "numeric", month: "long", year: "numeric" });
@@ -5486,6 +5583,7 @@ class ErrorBoundary extends React.Component {
 
 function AppInner() {
   const legal = useLegal();
+  const access = useAppAccess();
   const [authChecked, setAuthChecked] = useState(false);
   const [user, setUser] = useState(null);
   const [view, setView] = useState("today");
@@ -5765,6 +5863,14 @@ function AppInner() {
   }
 
   const isCoach = user.role === "coach";
+  if (!isCoach && access?.goaliesEnabled === false) {
+    return (
+      <div className="app"><style>{CSS}</style>
+        <AccentOverride color={content.accentColor} />
+        <ComingSoonScreen onLogout={onLogout} />
+      </div>
+    );
+  }
   const experience = isCoach ? previewLevel : (EXPERIENCE_LEVELS.includes(user.experience) ? user.experience : "Junior");
   const assignment = trainingDayForDate(content, user, dateKey(viewDate), experience);
   const drill = assignment && content.drills.find((d) => d.id === assignment.drillId && d.published);
@@ -6641,6 +6747,19 @@ button:focus {
 .rich-text-input h3 { font-size: 15px; margin: 14px 0 6px; }
 .rich-text-input a { color: var(--accent); text-decoration: underline; }
 .rich-text-input ol { padding-left: 20px; }
+.access-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.access-row:last-of-type { border-bottom: none; }
+.access-row-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.access-row-label { font-size: 14px; font-weight: 600; color: var(--text); }
+.access-row-hint { font-size: 12px; line-height: 1.5; color: var(--text-dim); }
+.access-switch { position: relative; flex: none; width: 44px; height: 26px; border-radius: 13px; background: var(--surface-2); border: 1px solid var(--border); transition: background .18s ease, border-color .18s ease; }
+.access-switch.on { background: var(--accent); border-color: var(--accent); }
+.access-switch:disabled { opacity: 0.6; cursor: default; }
+.access-switch-knob { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .18s ease; }
+.access-switch.on .access-switch-knob { transform: translateX(18px); }
+.coming-soon { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 32px 16px; text-align: center; }
+.coming-soon .auth-sub { max-width: 420px; margin-bottom: 8px; }
+.auth-closed { text-align: center; }
 .legal-checks { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 2px; }
 .legal-check { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; color: var(--text-dim); text-align: left; cursor: pointer; }
 .legal-check input { width: 16px; height: 16px; margin: 2px 0 0; flex: none; accent-color: var(--accent); cursor: pointer; }
