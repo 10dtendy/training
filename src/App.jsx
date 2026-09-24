@@ -474,6 +474,33 @@ function renderRichText(value) {
   if (looksLikeRichHtml(v)) return sanitizeRichHtml(v);
   return v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\r\n|\r|\n/g, "<br>");
 }
+// The plain text of a rich-text value (for places like the printed sheet that can't show formatting).
+function richTextToPlain(value) {
+  const html = renderRichText(value).replace(/<\/(p|li)>|<br\s*\/?>/gi, " ");
+  return (new DOMParser().parseFromString(html, "text/html").body.textContent || "").replace(/\s+/g, " ").trim();
+}
+
+// "25 min • Cones or pucks" under a detail page's title, leaving out blank parts (and the
+// whole row when everything is blank).
+function MetaRow({ items }) {
+  const parts = items.map((v) => String(v || "").trim()).filter(Boolean);
+  if (!parts.length) return null;
+  return (
+    <div className="meta-row meta-row--lg">
+      {parts.map((p, i) => (
+        <React.Fragment key={i}>{i > 0 && <span className="dot">•</span>}<span>{p}</span></React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+// An exercise's "3 × 8 · Rest 45 sec" line, leaving out whichever parts are blank.
+function exerciseSummary(ex) {
+  const sets = (ex.sets || "").trim();
+  const rest = (ex.rest || "").trim();
+  return [sets, rest && `Rest ${rest}`].filter(Boolean).join(" · ");
+}
+
 function RichText({ value, className }) {
   return <div className={className} dangerouslySetInnerHTML={{ __html: renderRichText(value) }} />;
 }
@@ -1931,7 +1958,7 @@ function DrillDetailPage({ drill, branding, onBack, complete, onComplete }) {
       <VideoPlayer title={drill.title} poster={drillImg.src} src={drill.videoUrl} />
       <div className="detail-header">
         <h1 className="detail-title">{drill.title}</h1>
-        <div className="meta-row meta-row--lg"><span>{drill.duration}</span><span className="dot">•</span><span>{drill.equipment}</span></div>
+        <MetaRow items={[drill.duration, drill.equipment]} />
       </div>
       <DrillBody drill={drill} />
       <button className={"btn btn--complete" + (complete ? " btn--complete-done" : "")} onClick={onComplete}>
@@ -1977,6 +2004,10 @@ function FocusDetailPage({ focus, branding, drills = [], onBack, complete, onCom
 function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
   const [open, setOpen] = useState(null);
   const officeImg = brandImage(office.imageUrl, branding?.office, OFFICE_IMG);
+  // Training Table columns left blank in every row aren't shown at all.
+  const planColumns = [["exercise", "Exercise"], ["sets", "Sets"], ["reps", "Reps"], ["rest", "Rest"]]
+    .filter(([key]) => key === "exercise" || (office.planRows || []).some((r) => String(r[key] || "").trim()))
+    .map(([key, label]) => ({ key, label }));
   return (
     <div className="page detail">
       <button className="back-link" onClick={onBack}><ChevronLeft size={16} /> Today</button>
@@ -1991,7 +2022,7 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
       <div className="detail-header">
         <span className="label">OFF-ICE</span>
         <h1 className="detail-title">{office.title}</h1>
-        <div className="meta-row meta-row--lg"><span>{office.duration}</span><span className="dot">•</span><span>{office.equipment}</span></div>
+        <MetaRow items={[office.duration, office.equipment]} />
       </div>
       {office.objective && <section className="detail-block"><h2>Objective</h2><RichText value={office.objective} /></section>}
       {office.exercises?.length > 0 && (
@@ -2004,7 +2035,7 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
                 <div className="exercise-thumb">
                   <CircleDot size={16} />
                 </div>
-                <div className="exercise-info"><span className="exercise-name">{ex.name}</span><span className="exercise-sets">{ex.sets} · Rest {ex.rest}</span></div>
+                <div className="exercise-info"><span className="exercise-name">{ex.name}</span>{exerciseSummary(ex) && <span className="exercise-sets">{exerciseSummary(ex)}</span>}</div>
                 <span className="t-acc-chevron exercise-chevron">
                   <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6.5L8 10.5L12 6.5" /></svg>
                 </span>
@@ -2042,10 +2073,10 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
           <h2>Training Table</h2>
           <div className="plan-table-wrap">
             <table className="plan-table">
-              <thead><tr><th>Exercise</th><th>Sets</th><th>Reps</th><th>Rest</th></tr></thead>
+              <thead><tr>{planColumns.map((c) => <th key={c.key}>{c.label}</th>)}</tr></thead>
               <tbody>
                 {office.planRows.map((r) => (
-                  <tr key={r.id}><td>{r.exercise}</td><td>{r.sets}</td><td>{r.reps}</td><td>{r.rest}</td></tr>
+                  <tr key={r.id}>{planColumns.map((c) => <td key={c.key}>{r[c.key]}</td>)}</tr>
                 ))}
               </tbody>
             </table>
@@ -5202,11 +5233,17 @@ function PrintSheet({ content, date, assignment }) {
           {office ? (
             <>
               <h2 className="print-card-title">{office.title}</h2>
-              <div className="print-card-meta">{office.duration} · {office.equipment}</div>
+              {[office.duration, office.equipment].some((v) => (v || "").trim()) && (
+                <div className="print-card-meta">{[office.duration, office.equipment].map((v) => (v || "").trim()).filter(Boolean).join(" · ")}</div>
+              )}
               <ul className="print-exercises">
-                {office.exercises.map((e, i) => (
-                  <li key={i}><strong>{e.name}</strong> — {e.sets}, rest {e.rest}. {e.instructions}</li>
-                ))}
+                {office.exercises.map((e, i) => {
+                  const summary = exerciseSummary(e);
+                  const instructions = richTextToPlain(e.instructions);
+                  return (
+                    <li key={i}><strong>{e.name}</strong>{summary && ` — ${summary}`}{instructions && `. ${instructions}`}</li>
+                  );
+                })}
               </ul>
             </>
           ) : <p className="print-card-text print-card-text--muted">Not assigned</p>}
