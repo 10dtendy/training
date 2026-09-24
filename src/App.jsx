@@ -517,7 +517,11 @@ function RichText({ value, className }) {
      the button that opened them.
    ============================================================================ */
 const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
-const openDialogs = []; // innermost last — only it reacts to Escape/Tab
+const openDialogs = []; // panels of every open dialog
+// The dialog in front is the one latest in the page: overlays share a z-index, so later wins.
+function topDialog() {
+  return openDialogs.reduce((top, p) => (!top || (top.compareDocumentPosition(p) & Node.DOCUMENT_POSITION_FOLLOWING) ? p : top), null);
+}
 let scrollLockCount = 0;
 let savedBodyOverflow = "";
 
@@ -531,13 +535,21 @@ function useDialogBehavior(panelRef, onClose) {
   useEffect(() => {
     const panel = panelRef.current;
     if (!panel) return;
-    const token = {};
-    openDialogs.push(token);
+    openDialogs.push(panel);
     if (scrollLockCount++ === 0) { savedBodyOverflow = document.body.style.overflow; document.body.style.overflow = "hidden"; }
-    if (!panel.contains(document.activeElement)) panel.focus({ preventScroll: true });
+    // A dialog that opens underneath another one (e.g. a popup behind a prompt) mustn't take focus.
+    // Retried for a few frames: a panel that animates in starts out invisible, and browsers
+    // can't focus an invisible element.
+    let focusFrame = 0;
+    const focusIn = (tries) => {
+      if (topDialog() !== panel || panel.contains(document.activeElement)) return;
+      panel.focus({ preventScroll: true });
+      if (!panel.contains(document.activeElement) && tries < 20) focusFrame = requestAnimationFrame(() => focusIn(tries + 1));
+    };
+    focusIn(0);
 
     const onKeyDown = (e) => {
-      if (openDialogs[openDialogs.length - 1] !== token) return;
+      if (topDialog() !== panel) return;
       if (e.key === "Escape") {
         if (onCloseRef.current) { e.preventDefault(); onCloseRef.current(); }
         return;
@@ -554,12 +566,20 @@ function useDialogBehavior(panelRef, onClose) {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {
+      cancelAnimationFrame(focusFrame);
       document.removeEventListener("keydown", onKeyDown);
-      const i = openDialogs.indexOf(token);
+      const i = openDialogs.indexOf(panel);
       if (i >= 0) openDialogs.splice(i, 1);
       if (--scrollLockCount === 0) document.body.style.overflow = savedBodyOverflow;
+      // Hand focus back to what opened this dialog — unless another dialog is still in front,
+      // in which case focus stays (or goes) inside that one.
+      const front = topDialog();
       const back = returnFocusRef.current;
-      if (back && back.focus && document.contains(back)) back.focus({ preventScroll: true });
+      if (front && !(back && front.contains(back))) {
+        if (!front.contains(document.activeElement)) front.focus({ preventScroll: true });
+      } else if (back && back.focus && document.contains(back)) {
+        back.focus({ preventScroll: true });
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -5938,26 +5958,30 @@ function AppInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
+  // A goalie who hasn't accepted the current Terms/Privacy version sees that prompt first;
+  // the welcome, announcement and month-planning popups wait until it's answered.
+  const termsPending = !!(user && user.role !== "coach" && legal?.version && user.termsVersion !== legal.version);
+
   // First-time-login welcome screen, and/or a coach-published announcement — checked
   // once per session, right after both the account and the shared content are loaded.
   useEffect(() => {
     if (popupsCheckedRef.current) return;
-    if (!user || !content || user.role === "coach") return;
+    if (!user || !content || user.role === "coach" || legal === undefined || termsPending) return;
     popupsCheckedRef.current = true;
     if (!user.hasSeenWelcome) {
       setWelcomeOpen(true);
     } else if (content.announcement?.enabled && content.announcement.id && user.lastSeenAnnouncementId !== content.announcement.id) {
       setAnnouncementOpen(true);
     }
-  }, [user, content]);
+  }, [user, content, legal, termsPending]);
 
   // Once per visit, right after any welcome/announcement popup, ask new-month planning questions.
   useEffect(() => {
-    if (planPromptedRef.current || !user || !content || user.role === "coach" || welcomeOpen || announcementOpen) return;
+    if (planPromptedRef.current || !user || !content || user.role === "coach" || welcomeOpen || announcementOpen || legal === undefined || termsPending) return;
     planPromptedRef.current = true;
     if (getReminders(user).some((r) => r.action === "plan-month")) setPlanOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, content, welcomeOpen, announcementOpen]);
+  }, [user, content, welcomeOpen, announcementOpen, legal, termsPending]);
 
   const setMonthPlan = async (mode) => {
     const key = dateKey(TODAY_DATE).slice(0, 7);
@@ -6233,7 +6257,7 @@ function AppInner() {
       )}
       {welcomeOpen && <WelcomeModal label="Welcome" data={content.welcome || DEFAULT_WELCOME} onClose={markWelcomeSeen} />}
       {announcementOpen && <WelcomeModal label="Announcement" data={content.announcement} onClose={markAnnouncementSeen} />}
-      {!isCoach && legal?.version && user.termsVersion !== legal.version && <TermsUpdatePrompt updated={!!user.termsVersion} onAccept={acceptTerms} onLogout={onLogout} />}
+      {termsPending && <TermsUpdatePrompt updated={!!user.termsVersion} onAccept={acceptTerms} onLogout={onLogout} />}
     </div>
     </MonthPlanContext.Provider>
   );
