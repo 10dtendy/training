@@ -5,13 +5,14 @@ import {
   Calendar as CalendarIcon, LayoutGrid, Users as UsersIcon,
   Image as ImageIcon, Settings as SettingsIcon, Download, Gauge, LogOut,
   Mail, Lock, UploadCloud, FileText, Video as VideoIcon, AlertTriangle,
-  Home, BarChart3, Tag, Search, CircleDot, Armchair, Copy, LayoutTemplate, Megaphone, List, Camera, Cookie
+  Home, BarChart3, Tag, Search, CircleDot, Armchair, Copy, LayoutTemplate, Megaphone, List, Camera, Cookie, ListOrdered, Heading, Link2, Scale
 } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
 import {
   fetchCurrentProfile, getUsersMap, updateUserFields, recordLoginDay, getContent, updateContentFields,
   uploadImage as uploadToStorage, deleteStorageObject, publishConfirmationEmail, getUsage,
   storagePathFromUrl, storagePathsIn, deleteUnusedFiles, getUnusedFiles, deleteAccount,
+  getLegal, saveLegalDoc, publishLegalVersion, legalAcceptanceCount,
 } from "./lib/data.js";
 
 /* ============================================================================
@@ -406,9 +407,17 @@ function richTextIsItalic(el) {
   return el.tagName === "I" || el.tagName === "EM";
 }
 
+// Links in legal texts may only point to web pages or email addresses.
+function safeLinkHref(href) {
+  const h = String(href || "").trim();
+  return /^(https?:\/\/|mailto:)/i.test(h) ? h : null;
+}
+const RICH_TEXT_HEADINGS = { H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1 };
+
 // Keeps only bold, italic, bulleted/numbered lists, line breaks and paragraphs — everything
 // else (spans, fonts, colors, links, images, tables, scripts...) is unwrapped to plain text.
-function sanitizeRichHtml(html) {
+// Legal texts (legal = true) additionally keep headings (as <h3>) and web/email links.
+function sanitizeRichHtml(html, legal = false) {
   const doc = new DOMParser().parseFromString(String(html ?? ""), "text/html");
   const walk = (node) => {
     const out = [];
@@ -423,8 +432,19 @@ function sanitizeRichHtml(html) {
       let children = walk(child);
       if (richTextIsBold(child)) { const b = document.createElement("strong"); b.append(...children); children = [b]; }
       if (richTextIsItalic(child)) { const i = document.createElement("em"); i.append(...children); children = [i]; }
+      const href = legal && tag === "A" ? safeLinkHref(child.getAttribute("href")) : null;
       if (RICH_TEXT_ALLOWED_STRUCT[tag]) {
         const el = document.createElement(RICH_TEXT_ALLOWED_STRUCT[tag]);
+        el.append(...children);
+        out.push(el);
+      } else if (legal && RICH_TEXT_HEADINGS[tag]) {
+        const el = document.createElement("h3");
+        el.append(...children);
+        out.push(el);
+      } else if (href) {
+        const el = document.createElement("a");
+        el.setAttribute("href", href);
+        if (!/^mailto:/i.test(href)) { el.setAttribute("target", "_blank"); el.setAttribute("rel", "noopener noreferrer"); }
         el.append(...children);
         out.push(el);
       } else if (tag === "DIV") {
@@ -461,7 +481,7 @@ function RichText({ value, className }) {
 // A small bold/italic/bullet-list editor for one field. Stores sanitized HTML back into the
 // same string field the plain textarea used to hold — old plain-text values still load fine
 // (rendered by RichText above) and get upgraded to real HTML the next time they're edited.
-function RichTextEditor({ value, onChange, placeholder, rows = 3 }) {
+function RichTextEditor({ value, onChange, placeholder, rows = 3, legal = false }) {
   const ref = useRef(null);
   const minHeight = rows * 20 + 16;
 
@@ -475,18 +495,18 @@ function RichTextEditor({ value, onChange, placeholder, rows = 3 }) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const html = looksLikeRichHtml(value) ? sanitizeRichHtml(value) : renderRichText(value);
+    const html = looksLikeRichHtml(value) ? sanitizeRichHtml(value, legal) : renderRichText(value);
     if (el.innerHTML !== html) el.innerHTML = html;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const commit = () => { if (ref.current) onChange(sanitizeRichHtml(ref.current.innerHTML)); };
-  const cmd = (name) => (e) => {
-    e.preventDefault();
+  const commit = () => { if (ref.current) onChange(sanitizeRichHtml(ref.current.innerHTML, legal)); };
+  // Puts the caret at the end of the field if the selection isn't already inside it.
+  const ensureSelection = () => {
     const el = ref.current;
-    if (!el) return;
     const sel = window.getSelection();
-    if (!sel || !sel.rangeCount || !el.contains(sel.anchorNode)) {
+    if (!el || !sel) return false;
+    if (!sel.rangeCount || !el.contains(sel.anchorNode)) {
       el.focus();
       const range = document.createRange();
       range.selectNodeContents(el);
@@ -494,13 +514,46 @@ function RichTextEditor({ value, onChange, placeholder, rows = 3 }) {
       sel.removeAllRanges();
       sel.addRange(range);
     }
+    return true;
+  };
+  const cmd = (name) => (e) => {
+    e.preventDefault();
+    if (!ensureSelection()) return;
     document.execCommand(name);
+    commit();
+  };
+  const toggleHeading = (e) => {
+    e.preventDefault();
+    if (!ensureSelection()) return;
+    const current = String(document.queryCommandValue("formatBlock") || "").toLowerCase();
+    document.execCommand("formatBlock", false, current === "h3" ? "p" : "h3");
+    commit();
+  };
+  const addLink = (e) => {
+    e.preventDefault();
+    if (!ensureSelection()) return;
+    const sel = window.getSelection();
+    const range = sel.getRangeAt(0).cloneRange();
+    let url = (window.prompt("Link to (a web address or an email address):") || "").trim();
+    if (!url) return;
+    if (/^[^\s@/]+@[^\s@/]+\.[^\s@/]+$/.test(url)) url = "mailto:" + url;
+    else if (!/^(https?:\/\/|mailto:)/i.test(url)) url = "https://" + url;
+    ref.current.focus();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    if (range.collapsed) {
+      const text = url.replace(/^mailto:/i, "");
+      const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+      document.execCommand("insertHTML", false, `<a href="${esc(url)}">${esc(text)}</a>`);
+    } else {
+      document.execCommand("createLink", false, url);
+    }
     commit();
   };
   const handlePaste = (e) => {
     e.preventDefault();
     const html = e.clipboardData.getData("text/html");
-    const insert = html ? sanitizeRichHtml(html) : renderRichText(e.clipboardData.getData("text/plain"));
+    const insert = html ? sanitizeRichHtml(html, legal) : renderRichText(e.clipboardData.getData("text/plain"));
     document.execCommand("insertHTML", false, insert);
     commit();
   };
@@ -511,6 +564,13 @@ function RichTextEditor({ value, onChange, placeholder, rows = 3 }) {
         <button type="button" className="rich-text-btn" onMouseDown={cmd("bold")} aria-label="Bold"><strong>B</strong></button>
         <button type="button" className="rich-text-btn rich-text-btn--i" onMouseDown={cmd("italic")} aria-label="Italic"><em>i</em></button>
         <button type="button" className="rich-text-btn" onMouseDown={cmd("insertUnorderedList")} aria-label="Bulleted list"><List size={14} /></button>
+        {legal && (
+          <>
+            <button type="button" className="rich-text-btn" onMouseDown={cmd("insertOrderedList")} aria-label="Numbered list"><ListOrdered size={14} /></button>
+            <button type="button" className="rich-text-btn" onMouseDown={toggleHeading} aria-label="Heading"><Heading size={14} /></button>
+            <button type="button" className="rich-text-btn" onMouseDown={addLink} aria-label="Link"><Link2 size={14} /></button>
+          </>
+        )}
       </div>
       <div
         ref={ref}
@@ -652,6 +712,7 @@ function AuthScreen({ onAuthed }) {
   const [inviteCode, setInviteCode] = useState("");
   const [checkEmail, setCheckEmail] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const legal = useLegal();
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [agreeAge, setAgreeAge] = useState(false);
 
@@ -721,7 +782,7 @@ function AuthScreen({ onAuthed }) {
       if (mode === "signup") {
         const { data, error: signUpError } = await supabase.auth.signUp({
           email, password: form.password,
-          options: { data: { name: form.name.trim(), position: form.position, experience: form.experience, invite_code: trimmedInvite, terms_version: TERMS_VERSION } },
+          options: { data: { name: form.name.trim(), position: form.position, experience: form.experience, invite_code: trimmedInvite, terms_version: legal?.version || "" } },
         });
         if (signUpError) {
           setError(signUpError.message === "User already registered"
@@ -4899,6 +4960,142 @@ function AdminConfirmationEmail({ content, updateContent }) {
    ADMIN SHELL
    ============================================================================ */
 
+/* ============================================================================
+   ADMIN — LEGAL (privacy policy, terms of use, cookie policy)
+   ============================================================================ */
+
+// A new Terms/Privacy version is named after the day it's published: "2026-10-02", then
+// "2026-10-02-2" if there's a second one the same day, and so on.
+function nextLegalVersion(current) {
+  const today = dateKey(new Date());
+  if (!current || !current.startsWith(today)) return today;
+  const n = parseInt(current.slice(today.length + 1), 10);
+  return `${today}-${Number.isNaN(n) ? 2 : n + 1}`;
+}
+
+function AdminLegal() {
+  const legal = useLegal();
+  const [doc, setDoc] = useState("privacy");
+  const [lang, setLang] = useState("en");
+  const [draft, setDraft] = useState(null); // null = showing what's saved
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [previewing, setPreviewing] = useState(false);
+  const [acceptance, setAcceptance] = useState(null);
+
+  useEffect(() => { refreshLegal(); }, []);
+  useEffect(() => {
+    if (legal?.version) legalAcceptanceCount(legal.version).then(setAcceptance);
+  }, [legal?.version]);
+
+  if (legal === undefined) return <div className="admin-page"><h1 className="admin-h1">Legal</h1><div className="skeleton-hero" style={{ height: 140 }} /></div>;
+  if (legal === null) return <div className="admin-page"><h1 className="admin-h1">Legal</h1><div className="auth-error"><AlertTriangle size={13} /> Couldn't load the legal texts — check your connection and reload.</div></div>;
+
+  const saved = legal.docs?.[doc]?.[lang];
+  const savedBody = saved?.body || "";
+  const current = draft ?? savedBody;
+  const dirty = draft !== null && sanitizeRichHtml(draft, true) !== sanitizeRichHtml(savedBody, true);
+  const versioned = doc !== "cookies";
+
+  const switchTo = (nextDoc, nextLang) => {
+    if (nextDoc === doc && nextLang === lang) return;
+    if (dirty && !window.confirm("You have unsaved changes. Discard them?")) return;
+    setDoc(nextDoc); setLang(nextLang); setDraft(null); setMessage(""); setError("");
+  };
+
+  const save = async (publish) => {
+    setMessage(""); setError("");
+    const body = sanitizeRichHtml(current, true);
+    const isEmpty = !body.replace(/<[^>]*>/g, "").trim();
+    if (isEmpty && lang === "en") { setError("The English version can't be empty."); return; }
+    if (publish && !window.confirm("Publish a new version? Every goalie will be asked to read and accept the updated Terms of Use and Privacy Policy the next time they open the app.")) return;
+    setBusy(true);
+    try {
+      if (dirty) {
+        const ok = await saveLegalDoc(doc, lang, isEmpty ? "" : body);
+        if (!ok) { setError("Couldn't save — check your connection and try again."); return; }
+      }
+      if (publish) {
+        const ok = await publishLegalVersion(nextLegalVersion(legal.version));
+        if (!ok) { setError("The text was saved, but the new version couldn't be published. Try publishing again."); await refreshLegal(); setDraft(null); return; }
+      }
+      await refreshLegal();
+      setDraft(null);
+      setMessage(publish
+        ? "Published. Goalies will be asked to accept the new version the next time they open the app."
+        : isEmpty ? "Slovak version removed — goalies see the English text." : "Saved. Goalies see the new text right away.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="admin-page">
+      <h1 className="admin-h1">Legal</h1>
+      <p className="planner-hint legal-admin-intro">
+        The texts goalies see from the links on the login screen, the signup form and their profile page.
+        Pasting from Word or Google Docs keeps headings, bold, italic, lists and links.
+      </p>
+
+      <div className="legal-admin-status">
+        <span>Terms & Privacy version <strong>{legal.version || "—"}</strong>{legal.publishedAt && <>, published {formatLegalDate(legal.publishedAt, "en")}</>}</span>
+        {acceptance && <span>{acceptance.accepted} of {acceptance.total} goalie{acceptance.total === 1 ? " has" : "s have"} accepted it</span>}
+      </div>
+
+      <div className="legal-admin-tabs">
+        <div className="level-tabs">
+          {Object.keys(LEGAL_DOC_LABELS).map((d) => (
+            <button key={d} type="button" className={"level-tab" + (doc === d ? " active" : "")} onClick={() => switchTo(d, lang)}>{LEGAL_DOC_LABELS[d]}</button>
+          ))}
+        </div>
+        <div className="level-tabs">
+          {[["en", "English"], ["sk", "Slovenčina"]].map(([l, label]) => (
+            <button key={l} type="button" className={"level-tab" + (lang === l ? " active" : "")} onClick={() => switchTo(doc, l)}>
+              {label}{legal.docs?.[doc]?.[l]?.body?.trim() && <span className="level-tab-dot" />}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {lang === "sk" && !savedBody.trim() && (
+        <p className="planner-hint">There's no Slovak version yet, so goalies only see English. Paste the Slovak text here and save to add one — goalies can then switch languages.</p>
+      )}
+      {saved?.updatedAt && <p className="planner-hint">Last saved {formatLegalDate(saved.updatedAt, "en")} — shown to goalies as "Last updated".</p>}
+
+      <RichTextEditor key={`${doc}-${lang}-${saved?.updatedAt || ""}`} value={current} onChange={setDraft} legal rows={18} placeholder="Paste or type the text here…" />
+
+      {error && <div className="auth-error" style={{ marginTop: 12 }}><AlertTriangle size={13} /> {error}</div>}
+      {message && <div className="profile-password-success" style={{ marginTop: 12 }}><Check size={13} /> {message}</div>}
+
+      <div className="admin-form-actions legal-admin-actions">
+        <button type="button" className="btn btn--ghost btn--small" onClick={() => setPreviewing(true)}><Eye size={14} /> Preview</button>
+        {dirty && <button type="button" className="btn btn--ghost btn--small" onClick={() => { setDraft(null); setMessage(""); setError(""); }} disabled={busy}>Discard changes</button>}
+        <button type="button" className={"btn btn--small " + (versioned ? "btn--ghost" : "btn--primary")} onClick={() => save(false)} disabled={busy || !dirty}>
+          {busy ? "Saving…" : versioned ? "Save correction" : "Save"}
+        </button>
+        {versioned && (
+          <button type="button" className="btn btn--primary btn--small" onClick={() => save(true)} disabled={busy}>Publish new version</button>
+        )}
+      </div>
+      {versioned && (
+        <ul className="legal-admin-help">
+          <li><strong>Save correction</strong> — for typos and small wording fixes. The text updates right away and goalies aren't asked anything.</li>
+          <li><strong>Publish new version</strong> — for real changes, such as new rules or adding payments. It saves the text and asks every goalie to accept the Terms of Use and Privacy Policy again.</li>
+        </ul>
+      )}
+
+      {previewing && (
+        <PreviewModal label="Preview — how goalies will see it" onClose={() => setPreviewing(false)}>
+          <div className="legal-doc">
+            <LegalDocContent doc={doc} lang={lang} body={current} updatedAt={dirty ? new Date().toISOString() : saved?.updatedAt} />
+          </div>
+        </PreviewModal>
+      )}
+    </div>
+  );
+}
+
 function AdminApp({ content, updateContent, saveContent }) {
   const [section, setSection] = useState("dashboard");
   const nav = [
@@ -4913,6 +5110,7 @@ function AdminApp({ content, updateContent, saveContent }) {
     { key: "frontpage", label: "Front Page", icon: LayoutTemplate },
     { key: "welcome", label: "Welcome", icon: Megaphone },
     { key: "email", label: "Confirmation Email", icon: Mail },
+    { key: "legal", label: "Legal", icon: Scale },
     { key: "users", label: "Users", icon: UsersIcon },
     { key: "media", label: "Media", icon: ImageIcon },
     { key: "settings", label: "Settings", icon: SettingsIcon },
@@ -4938,6 +5136,7 @@ function AdminApp({ content, updateContent, saveContent }) {
         {section === "frontpage" && <AdminFrontPage content={content} updateContent={updateContent} />}
         {section === "welcome" && <AdminWelcome content={content} updateContent={updateContent} saveContent={saveContent} />}
         {section === "email" && <AdminConfirmationEmail content={content} updateContent={updateContent} />}
+        {section === "legal" && <AdminLegal />}
         {section === "users" && <AdminUsers />}
         {section === "media" && <AdminMedia content={content} updateContent={updateContent} />}
         {section === "settings" && <AdminSettings content={content} updateContent={updateContent} />}
@@ -5024,6 +5223,7 @@ function PrintSheet({ content, date, assignment }) {
    ============================================================================ */
 
 export default function App() {
+  useEffect(() => { refreshLegal(); }, []);
   return (
     <ErrorBoundary>
       <AppInner />
@@ -5073,27 +5273,16 @@ function CookieConsent() {
       )}
       {legalDoc && (
         <PreviewModal label={LEGAL_DOC_LABELS[legalDoc]} onClose={() => setLegalDoc(null)}>
-          {legalDoc === "privacy" && <PrivacyPolicy />}
-          {legalDoc === "terms" && <TermsOfUse />}
-          {legalDoc === "cookies" && <CookiePolicy onOpenSettings={() => { setLegalDoc(null); setSettingsOpen(true); }} />}
+          <LegalDocView doc={legalDoc} onOpenSettings={() => { setLegalDoc(null); setSettingsOpen(true); }} />
         </PreviewModal>
       )}
     </div>
   );
 }
 
-// Bump TERMS_VERSION whenever the Terms of Use or Privacy Policy change in a way goalies
-// must accept again: everyone whose accepted version differs is asked once more.
-const TERMS_VERSION = "2026-09-23";
-const LEGAL_UPDATED = "23 September 2026";
-const COMPANY = {
-  name: "10DTendy, s. r. o.",
-  address: "Ústecko-Orlická 3300/25, 058 01 Poprad, Slovakia",
-  ico: "53 155 149",
-  register: "Commercial Register of the District Court Prešov, section Sro, insert no. 40586/P",
-  email: "info@10dtendy.com",
-};
 const LEGAL_DOC_LABELS = { privacy: "Privacy policy", terms: "Terms of use", cookies: "Cookie policy" };
+const LEGAL_DOC_LABELS_SK = { privacy: "Zásady ochrany osobných údajov", terms: "Podmienky používania", cookies: "Zásady používania cookies" };
+const LEGAL_CONTACT_EMAIL = "info@10dtendy.com";
 
 function LegalLinks() {
   return (
@@ -5106,18 +5295,7 @@ function LegalLinks() {
   );
 }
 
-function CompanyBlock() {
-  return (
-    <p>
-      <strong>{COMPANY.name}</strong><br />
-      {COMPANY.address}<br />
-      IČO {COMPANY.ico}, registered in the {COMPANY.register}<br />
-      Email: <a href={`mailto:${COMPANY.email}`}>{COMPANY.email}</a>
-    </p>
-  );
-}
-
-// The two agreements every goalie gives, at signup and again whenever TERMS_VERSION changes.
+// The two agreements every goalie gives, at signup and again whenever a new version is published.
 function LegalCheckboxes({ terms, age, onTerms, onAge }) {
   return (
     <div className="legal-checks">
@@ -5138,7 +5316,7 @@ function LegalCheckboxes({ terms, age, onTerms, onAge }) {
 
 // Shown to goalies who haven't accepted the current Terms of Use / Privacy Policy yet
 // (accounts created before they existed, or after an update). It can't be dismissed.
-function TermsUpdatePrompt({ onAccept, onLogout }) {
+function TermsUpdatePrompt({ updated, onAccept, onLogout }) {
   const [terms, setTerms] = useState(false);
   const [age, setAge] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -5155,10 +5333,11 @@ function TermsUpdatePrompt({ onAccept, onLogout }) {
       <div className="content-preview-panel welcome-panel">
         <div className="content-preview-header"><span className="content-preview-label">Terms & privacy</span></div>
         <div className="main welcome-modal-body">
-          <h2 className="welcome-title">Please review our terms</h2>
+          <h2 className="welcome-title">{updated ? "We've updated our terms" : "Please review our terms"}</h2>
           <p className="welcome-text">
-            We've published Terms of Use and a Privacy Policy for 10DTendy, explaining how the app works and how we look after
-            your data. Please read them and confirm to keep training.
+            {updated
+              ? "We've made changes to our Terms of Use and Privacy Policy. Please read them and confirm to keep training."
+              : "We've published Terms of Use and a Privacy Policy for 10DTendy, explaining how the app works and how we look after your data. Please read them and confirm to keep training."}
           </p>
           <LegalCheckboxes terms={terms} age={age} onTerms={setTerms} onAge={setAge} />
           {error && <div className="auth-error"><AlertTriangle size={13} /> {error}</div>}
@@ -5172,161 +5351,65 @@ function TermsUpdatePrompt({ onAccept, onLogout }) {
   );
 }
 
-function PrivacyPolicy() {
+// Legal texts live in the database (edited in Admin -> Legal) and are shared by the login
+// screen, the policy windows, the terms prompt and the admin page, so they're kept in one
+// small store. undefined = still loading, null = couldn't be loaded.
+let legalState;
+const legalListeners = new Set();
+async function refreshLegal() {
+  const next = await getLegal();
+  if (next || legalState === undefined) {
+    legalState = next;
+    legalListeners.forEach((fn) => fn());
+  }
+}
+function subscribeLegal(fn) { legalListeners.add(fn); return () => legalListeners.delete(fn); }
+function useLegal() { return useSyncExternalStore(subscribeLegal, () => legalState); }
+
+function formatLegalDate(iso, lang) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleDateString(lang === "sk" ? "sk-SK" : "en-GB", { day: "numeric", month: "long", year: "numeric" });
+}
+
+// One document as goalies see it. `body`/`updatedAt` override what's saved (the admin preview).
+function LegalDocContent({ doc, lang, body, updatedAt }) {
   return (
-    <div className="legal-doc">
-      <h2>Privacy policy</h2>
-      <p className="legal-updated">Last updated {LEGAL_UPDATED}</p>
-
-      <h3>1. Who we are</h3>
-      <p>The 10DTendy app is run by the company below, which is the controller of the personal data processed through it ("we", "us").</p>
-      <CompanyBlock />
-
-      <h3>2. What data we process</h3>
-      <ul>
-        <li><strong>Account data:</strong> your name, email address, position, experience level and role. Your password is stored only in encrypted (hashed) form by our login provider; we can never see it.</li>
-        <li><strong>Profile details you add:</strong> country, league, team, and a profile photo if one is added.</li>
-        <li><strong>Training data:</strong> the game and rest days you mark, game statistics (opponent, result, shots, goals, minutes played, periods), rest day notes, your monthly plan choices, the days you open the app, when you were last active, and whether you've seen welcome messages and announcements.</li>
-        <li><strong>Agreement records:</strong> which version of these terms you accepted and when.</li>
-        <li><strong>Data kept only on your device:</strong> which parts of a day's training you've ticked off, and your cookie choice (see the Cookie policy).</li>
-        <li><strong>Technical data:</strong> when you use the app, our hosting and database providers process your IP address and browser details in server logs.</li>
-      </ul>
-      <p>We don't ask for health information. Please don't include medical or injury details in notes.</p>
-
-      <h3>3. Why we use it, and our legal basis</h3>
-      <ul>
-        <li><strong>To provide the app</strong> — creating and running your account, showing your training program, and keeping your calendar and statistics. Your coach uses your profile, activity and statistics to guide your training. Legal basis: performance of our contract with you (Art. 6(1)(b) GDPR).</li>
-        <li><strong>Account emails</strong> — sign-up confirmation, password resets and important notices about the service. Legal basis: contract.</li>
-        <li><strong>Security and reliability</strong> — protecting accounts, preventing misuse and fixing problems, including server logs. Legal basis: our legitimate interest in a safe, working service (Art. 6(1)(f) GDPR).</li>
-        <li><strong>Video cookies</strong> — only if you accept them. Legal basis: your consent (Art. 6(1)(a) GDPR), which you can withdraw at any time in Cookie settings.</li>
-        <li><strong>Legal obligations</strong> — for example keeping records of your agreement to these terms, and accounting records once paid subscriptions are introduced (Art. 6(1)(c) GDPR).</li>
-      </ul>
-      <p>We don't sell your data, use it for advertising, or make automated decisions about you that have legal or similarly significant effects.</p>
-
-      <h3>4. Who can see your data</h3>
-      <ul>
-        <li><strong>Our coaches</strong> with admin access to the app. Other goalies can't see your data.</li>
-        <li><strong>Service providers</strong> who process data for us under data processing agreements: Supabase, Inc. (database, logins and file storage, with data stored in the EU in Frankfurt, Germany); GitHub, Inc. (hosts the app's website and processes IP addresses in its server logs); and our email delivery provider (sends account emails).</li>
-        <li><strong>Google Ireland Limited (YouTube)</strong> — only if you accept video cookies. See the Cookie policy.</li>
-        <li><strong>Authorities</strong>, where the law requires us to share data.</li>
-      </ul>
-
-      <h3>5. Transfers outside the EU</h3>
-      <p>Some of our providers are part of groups based in the United States. Where personal data is transferred outside the European Economic Area, it's protected by the EU–U.S. Data Privacy Framework or the European Commission's standard contractual clauses.</p>
-
-      <h3>6. How long we keep it</h3>
-      <ul>
-        <li>Account and training data: for as long as your account exists. When you delete your account, it's removed from our database straight away.</li>
-        <li>If a coach deactivates your account, your data is kept so the account can be restored, until it's deleted permanently. You can ask for that at any time.</li>
-        <li>Server logs: kept by our providers for a short time, usually a few days.</li>
-        <li>Records we're required to keep by law: for the period the law requires.</li>
-      </ul>
-
-      <h3>7. Your rights</h3>
-      <p>You have the right to access your data, correct it, have it deleted, restrict or object to its processing, receive it in a portable format, and withdraw consent at any time. You can edit most details on your profile page and delete your account there with <strong>Delete my account</strong>. For anything else, email <a href={`mailto:${COMPANY.email}`}>{COMPANY.email}</a> — we'll reply within one month.</p>
-      <p>You can also complain to the Slovak data protection authority: Úrad na ochranu osobných údajov Slovenskej republiky, Hraničná 12, 820 07 Bratislava 27, <a href="https://dataprotection.gov.sk" target="_blank" rel="noopener noreferrer">dataprotection.gov.sk</a>, or to the authority in the EU country where you live.</p>
-
-      <h3>8. Young goalies</h3>
-      <p>If you're under 16, you may use 10DTendy only with the agreement of a parent or legal guardian. A parent or guardian can contact us to exercise these rights on your behalf.</p>
-
-      <h3>9. Security</h3>
-      <p>All connections to the app are encrypted (HTTPS), passwords are stored only in hashed form, and access rules in our database make sure each goalie can only reach their own data.</p>
-
-      <h3>10. Changes</h3>
-      <p>If we change this policy, we'll update this page. If the change is significant, we'll tell you in the app.</p>
-    </div>
+    <>
+      <h2>{(lang === "sk" ? LEGAL_DOC_LABELS_SK : LEGAL_DOC_LABELS)[doc]}</h2>
+      {updatedAt && <p className="legal-updated">{lang === "sk" ? "Posledná aktualizácia" : "Last updated"} {formatLegalDate(updatedAt, lang)}</p>}
+      <div className="legal-body" dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(body, true) }} />
+    </>
   );
 }
 
-function TermsOfUse() {
-  return (
-    <div className="legal-doc">
-      <h2>Terms of use</h2>
-      <p className="legal-updated">Last updated {LEGAL_UPDATED}</p>
-
-      <h3>1. About these terms</h3>
-      <p>These terms apply to your use of the 10DTendy goalie training app, provided by:</p>
-      <CompanyBlock />
-      <p>By creating an account, you agree to these terms. Please also read our Privacy Policy and Cookie policy.</p>
-
-      <h3>2. Your account</h3>
-      <ul>
-        <li>Give accurate information, keep your password secret, and don't share your account. One account is for one person.</li>
-        <li>You're responsible for what happens under your account. Tell us straight away if you think someone else has accessed it.</li>
-        <li>If you're under 16, you may use 10DTendy only with the agreement of a parent or legal guardian, who is responsible for supervising your use of it.</li>
-      </ul>
-
-      <h3>3. The service</h3>
-      <p>10DTendy gives you a goalie training program, including daily drills, practice focus sessions, off-ice workouts, a training calendar and game statistics. We keep improving it, so content and features may be added, changed or removed.</p>
-      <p>The app is currently free to use. We plan to introduce paid monthly subscriptions. Before you're charged anything, we'll show you the price and subscription terms, and you'll have to choose to subscribe. You'll never be charged just for continuing to use a free account.</p>
-
-      <h3>4. Training safety</h3>
-      <p>Hockey and physical training carry a risk of injury. Our content is general training guidance. It isn't medical advice, and it doesn't replace supervision by a qualified coach or advice from a doctor or physiotherapist.</p>
-      <ul>
-        <li>Make sure you're healthy enough to train, and ask a doctor if you're unsure.</li>
-        <li>Warm up, use proper protective equipment, and train within your limits.</li>
-        <li>Stop immediately if you feel pain, dizziness or discomfort.</li>
-        <li>Goalies under 18 should train under the supervision of an adult.</li>
-      </ul>
-
-      <h3>5. Our content</h3>
-      <p>All drills, videos, text, images, the 10DTendy name and logo, and the app's design belong to us or our licensors. You may use them only for your own personal training. You may not copy, record, download, share, publish or resell them, or give anyone else access to your account.</p>
-
-      <h3>6. Acceptable use</h3>
-      <p>Don't misuse the app. That includes trying to access other people's accounts or data, getting around security measures, using automated tools to copy content, interfering with how the app works, or uploading unlawful or offensive content.</p>
-
-      <h3>7. Ending your account</h3>
-      <p>You can delete your account at any time on your profile page. We may suspend or close accounts that break these terms. We may also discontinue the service, in which case we'll give reasonable notice where we can.</p>
-
-      <h3>8. Availability and liability</h3>
-      <p>We work to keep 10DTendy available and accurate, but we can't guarantee it will always be uninterrupted or error-free. To the extent the law allows, we're not liable for indirect or consequential loss. Nothing in these terms limits our liability where the law doesn't allow it, including for damage caused intentionally or through gross negligence, or affects your statutory rights as a consumer.</p>
-
-      <h3>9. Changes to these terms</h3>
-      <p>We may update these terms. If we make important changes, we'll tell you in the app and ask you to accept the new version. If you don't agree, you can delete your account.</p>
-
-      <h3>10. Law and disputes</h3>
-      <p>These terms are governed by Slovak law. If you're a consumer, you also keep the protection of the mandatory laws of the country where you live. If you have a complaint, please contact us first at <a href={`mailto:${COMPANY.email}`}>{COMPANY.email}</a>. Consumers can also use alternative dispute resolution, for example through the Slovak Trade Inspection (Slovenská obchodná inšpekcia, <a href="https://www.soi.sk" target="_blank" rel="noopener noreferrer">soi.sk</a>).</p>
-    </div>
-  );
-}
-
-const COOKIE_POLICY_UPDATED = "23 September 2026";
-function CookiePolicy({ onOpenSettings }) {
-  return (
-    <div className="legal-doc">
-      <h2>Cookie policy</h2>
-      <p className="legal-updated">Last updated {COOKIE_POLICY_UPDATED}</p>
-      <p>This page explains what 10DTendy stores in your browser and which outside services are involved when you use the app.</p>
-
-      <h3>Essential storage (always on)</h3>
-      <p>The app can't work without these, so they don't need your consent. They are kept in your browser's local storage (not as cookies) and are never used for tracking or advertising.</p>
-      <div className="legal-table-wrap">
-        <table className="legal-table">
-          <thead><tr><th>Name</th><th>What it does</th><th>How long</th></tr></thead>
-          <tbody>
-            <tr><td><code>sb-…-auth-token</code></td><td>Keeps you logged in. Set by Supabase, the service that runs our logins and database.</td><td>Until you log out</td></tr>
-            <tr><td><code>progress:&lt;date&gt;</code></td><td>Remembers which parts of a day's training you've ticked off, on this device only.</td><td>Until you clear your browser data</td></tr>
-            <tr><td><code>cookie-consent</code></td><td>Remembers your cookie choice.</td><td>Until you change it or clear your browser data</td></tr>
-          </tbody>
-        </table>
+function LegalDocView({ doc, onOpenSettings }) {
+  const legal = useLegal();
+  const [lang, setLang] = useState("en");
+  if (legal === undefined) return <div className="legal-doc"><p>Loading…</p></div>;
+  const versions = legal?.docs?.[doc] || {};
+  const hasSk = !!versions.sk?.body?.trim();
+  const shownLang = lang === "sk" && hasSk ? "sk" : "en";
+  const entry = versions[shownLang];
+  if (!entry?.body?.trim()) {
+    return (
+      <div className="legal-doc">
+        <h2>{LEGAL_DOC_LABELS[doc]}</h2>
+        <p>This document couldn't be loaded. Please check your connection and try again, or contact us at <a href={`mailto:${LEGAL_CONTACT_EMAIL}`}>{LEGAL_CONTACT_EMAIL}</a>.</p>
       </div>
-
-      <h3>Video cookies (optional)</h3>
-      <p>
-        Training videos are hosted on YouTube, a service of Google Ireland Limited. We use YouTube's privacy-enhanced mode,
-        but whenever a video or its preview image loads, YouTube receives your IP address and details about your device and browser,
-        and it can store identifiers in your browser (cookies or similar storage) to play videos and measure how they're used.
-        Google may process this data in the United States. See{" "}
-        <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google's privacy policy</a> for details.
-      </p>
-      <p>These only load if you choose <strong>Accept</strong>. With <strong>Essential only</strong>, nothing is loaded from YouTube, and each video shows a button you can use to accept cookies later.</p>
-
-      <h3>No analytics or advertising</h3>
-      <p>We don't use analytics, advertising, or social media trackers. The app's fonts are part of the app itself, so no font service is contacted either.</p>
-
-      <h3>Changing your choice</h3>
-      <p>You can change or withdraw your choice at any time from <strong>Cookie settings</strong> on the login screen or your profile page. Withdrawing stops YouTube content from loading from then on. To remove what YouTube has already stored, clear your browser's cookies and site data.</p>
-      <button type="button" className="btn btn--ghost btn--small" onClick={onOpenSettings}><Cookie size={14} /> Cookie settings</button>
+    );
+  }
+  return (
+    <div className="legal-doc">
+      {hasSk && (
+        <div className="level-tabs legal-lang-tabs">
+          <button type="button" className={"level-tab" + (shownLang === "en" ? " active" : "")} onClick={() => setLang("en")}>English</button>
+          <button type="button" className={"level-tab" + (shownLang === "sk" ? " active" : "")} onClick={() => setLang("sk")}>Slovenčina</button>
+        </div>
+      )}
+      <LegalDocContent doc={doc} lang={shownLang} body={entry.body} updatedAt={entry.updatedAt} />
+      {doc === "cookies" && onOpenSettings && (
+        <button type="button" className="btn btn--ghost btn--small" onClick={onOpenSettings}><Cookie size={14} /> {shownLang === "sk" ? "Nastavenia cookies" : "Cookie settings"}</button>
+      )}
     </div>
   );
 }
@@ -5365,6 +5448,7 @@ class ErrorBoundary extends React.Component {
 }
 
 function AppInner() {
+  const legal = useLegal();
   const [authChecked, setAuthChecked] = useState(false);
   const [user, setUser] = useState(null);
   const [view, setView] = useState("today");
@@ -5600,7 +5684,7 @@ function AppInner() {
     if (res.ok) await onLogout();
     return res;
   };
-  const acceptTerms = () => updateProfile({ termsVersion: TERMS_VERSION });
+  const acceptTerms = () => updateProfile({ termsVersion: legal.version });
 
   const goTo = (v) => { setView(v); window.scrollTo?.({ top: 0, behavior: "smooth" }); };
   // Distinct from goTo("today"): a detail page's own "back" button means "return to
@@ -5752,7 +5836,7 @@ function AppInner() {
       )}
       {welcomeOpen && <WelcomeModal label="Welcome" data={content.welcome || DEFAULT_WELCOME} onClose={markWelcomeSeen} />}
       {announcementOpen && <WelcomeModal label="Announcement" data={content.announcement} onClose={markAnnouncementSeen} />}
-      {!isCoach && user.termsVersion !== TERMS_VERSION && <TermsUpdatePrompt onAccept={acceptTerms} onLogout={onLogout} />}
+      {!isCoach && legal?.version && user.termsVersion !== legal.version && <TermsUpdatePrompt updated={!!user.termsVersion} onAccept={acceptTerms} onLogout={onLogout} />}
     </div>
     </MonthPlanContext.Provider>
   );
@@ -6505,6 +6589,21 @@ button:focus {
 .welcome-title { font-size: 24px; font-weight: 900; margin-bottom: 16px; }
 .welcome-text { color: var(--text-dim); font-size: 14px; line-height: 1.6; margin-bottom: 12px; }
 
+.legal-lang-tabs { display: inline-flex; margin-bottom: 18px; }
+.legal-body h3 { color: var(--text); font-size: 15px; margin: 24px 0 8px; }
+.legal-body ol { margin: 0 0 12px; padding-left: 20px; }
+.legal-admin-intro { max-width: 640px; margin-bottom: 16px; }
+.legal-admin-status { display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 12px 14px; margin-bottom: 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); font-size: 13px; color: var(--text-dim); }
+.legal-admin-status strong { color: var(--text); }
+.legal-admin-tabs { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.legal-admin-tabs .level-tabs { display: inline-flex; }
+.legal-admin-actions { margin-top: 14px; flex-wrap: wrap; }
+.legal-admin-help { margin: 14px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.6; color: var(--text-dim); max-width: 640px; }
+.legal-admin-help li { margin-bottom: 4px; }
+.legal-admin-help strong { color: var(--text); }
+.rich-text-input h3 { font-size: 15px; margin: 14px 0 6px; }
+.rich-text-input a { color: var(--accent); text-decoration: underline; }
+.rich-text-input ol { padding-left: 20px; }
 .legal-checks { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 2px; }
 .legal-check { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; color: var(--text-dim); text-align: left; cursor: pointer; }
 .legal-check input { width: 16px; height: 16px; margin: 2px 0 0; flex: none; accent-color: var(--accent); cursor: pointer; }

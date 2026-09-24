@@ -359,6 +359,39 @@ export async function deleteAccount(userId) {
   }
 }
 
+// Legal texts (Admin -> Legal) and the Terms/Privacy version goalies must have accepted.
+// Readable while logged out too, since the signup screen links to them.
+export async function getLegal() {
+  const [{ data: docs, error: docsError }, { data: state, error: stateError }] = await Promise.all([
+    supabase.from("legal_documents").select("doc, lang, body, updated_at"),
+    supabase.from("legal_state").select("version, published_at").eq("id", 1).maybeSingle(),
+  ]);
+  if (docsError || stateError) return null;
+  const out = { version: state?.version || null, publishedAt: state?.published_at || null, docs: {} };
+  for (const d of docs || []) (out.docs[d.doc] ||= {})[d.lang] = { body: d.body, updatedAt: d.updated_at };
+  return out;
+}
+
+export async function saveLegalDoc(doc, lang, body) {
+  const { data, error } = await supabase.from("legal_documents")
+    .upsert({ doc, lang, body, updated_at: new Date().toISOString() })
+    .select("updated_at").single();
+  return error ? null : data.updated_at;
+}
+
+export async function publishLegalVersion(version) {
+  const { error } = await supabase.from("legal_state")
+    .update({ version, published_at: new Date().toISOString() }).eq("id", 1);
+  return !error;
+}
+
+// How many goalies have accepted the given version (for the admin page).
+export async function legalAcceptanceCount(version) {
+  const { data, error } = await supabase.from("profiles").select("terms_version").eq("role", "goalie").eq("removed", false);
+  if (error) return null;
+  return { accepted: data.filter((p) => p.terms_version === version).length, total: data.length };
+}
+
 export async function deleteStorageObject(path) {
   if (!path) return true;
   const { error } = await supabase.storage.from("media").remove([path]);
