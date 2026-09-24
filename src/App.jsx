@@ -734,7 +734,7 @@ function PasswordChecklist({ password }) {
 // The site key is public. While it's empty the widget isn't shown and no token is sent, so
 // CAPTCHA protection must only be switched on in Supabase (Authentication -> Attack
 // Protection) after a key is set here and deployed, or every login would be refused.
-const TURNSTILE_SITE_KEY = "";
+const TURNSTILE_SITE_KEY = "0x4AAAAAAFClBEEJH0UJW0Bc";
 let turnstileScript = null;
 function loadTurnstile() {
   if (window.turnstile) return Promise.resolve(window.turnstile);
