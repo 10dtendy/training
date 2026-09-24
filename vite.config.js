@@ -3,21 +3,21 @@ import { defineConfig, loadEnv } from 'vite'
 
 // A Content Security Policy for the built site: GitHub Pages can't send security
 // headers, so it goes in a <meta> tag instead. It only lists what the app really
-// uses — Supabase (data, logins, images), YouTube (videos, after cookie consent)
-// and the site itself — so injected scripts or data sent elsewhere are refused.
+// uses — Supabase (data, logins, images), YouTube (videos, after cookie consent),
+// Cloudflare Turnstile (the bot check on login) and the site itself — so injected scripts or data sent elsewhere are refused.
 // Build only: the dev server relies on inline scripts this policy would block.
 function contentSecurityPolicy(supabaseUrl) {
   const supabase = supabaseUrl ? new URL(supabaseUrl).origin : ''
   const supabaseWs = supabase.replace(/^https:/, 'wss:')
   const csp = [
     "default-src 'self'",
-    "script-src 'self' https://www.youtube.com",
+    "script-src 'self' https://www.youtube.com https://challenges.cloudflare.com",
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' data: blob: ${supabase} https://img.youtube.com https://i.ytimg.com`,
     "font-src 'self' data:",
-    `connect-src 'self' ${supabase} ${supabaseWs}`,
+    `connect-src 'self' ${supabase} ${supabaseWs} https://challenges.cloudflare.com`,
     `media-src 'self' blob: ${supabase}`,
-    'frame-src https://www.youtube-nocookie.com https://www.youtube.com',
+    'frame-src https://www.youtube-nocookie.com https://www.youtube.com https://challenges.cloudflare.com',
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

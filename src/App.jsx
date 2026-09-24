@@ -730,6 +730,64 @@ function PasswordChecklist({ password }) {
   );
 }
 
+// Cloudflare Turnstile, the bot check on login, sign-up, password reset and password change.
+// The site key is public. While it's empty the widget isn't shown and no token is sent, so
+// CAPTCHA protection must only be switched on in Supabase (Authentication -> Attack
+// Protection) after a key is set here and deployed, or every login would be refused.
+const TURNSTILE_SITE_KEY = "";
+let turnstileScript = null;
+function loadTurnstile() {
+  if (window.turnstile) return Promise.resolve(window.turnstile);
+  if (!turnstileScript) {
+    turnstileScript = new Promise((resolve, reject) => {
+      const tag = document.createElement("script");
+      tag.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      tag.async = true;
+      tag.onload = () => resolve(window.turnstile);
+      tag.onerror = () => { turnstileScript = null; reject(new Error("Turnstile failed to load")); };
+      document.head.appendChild(tag);
+    });
+  }
+  return turnstileScript;
+}
+
+// Renders the check and reports its one-time token through onToken ("" when there's none).
+// Bump resetKey after every attempt: a token can only be used once.
+function TurnstileWidget({ onToken, resetKey = 0 }) {
+  const hostRef = useRef(null);
+  const widgetRef = useRef(null);
+  const onTokenRef = useRef(onToken);
+  onTokenRef.current = onToken;
+  useEffect(() => {
+    if (!TURNSTILE_SITE_KEY) return;
+    let cancelled = false;
+    loadTurnstile().then((ts) => {
+      if (cancelled || !hostRef.current) return;
+      widgetRef.current = ts.render(hostRef.current, {
+        sitekey: TURNSTILE_SITE_KEY, theme: "dark", size: "flexible",
+        callback: (token) => onTokenRef.current(token),
+        "expired-callback": () => onTokenRef.current(""),
+        "error-callback": () => onTokenRef.current(""),
+      });
+    }).catch(() => onTokenRef.current(""));
+    return () => {
+      cancelled = true;
+      if (widgetRef.current != null && window.turnstile) window.turnstile.remove(widgetRef.current);
+      widgetRef.current = null;
+      onTokenRef.current("");
+    };
+  }, []);
+  useEffect(() => {
+    if (!resetKey || widgetRef.current == null || !window.turnstile) return;
+    onTokenRef.current("");
+    window.turnstile.reset(widgetRef.current);
+  }, [resetKey]);
+  if (!TURNSTILE_SITE_KEY) return null;
+  return <div ref={hostRef} className="turnstile-box" />;
+}
+const CAPTCHA_WAIT_MESSAGE = "Just a moment — we're checking you're not a bot. Try again in a second.";
+const isCaptchaError = (message) => /captcha/i.test(message || "");
+
 function AuthScreen({ onAuthed }) {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "", position: "Goalie", experience: "Junior" });
@@ -744,6 +802,9 @@ function AuthScreen({ onAuthed }) {
   const signupsClosed = access?.signupsOpen === false;
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [agreeAge, setAgreeAge] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaReset, setCaptchaReset] = useState(0);
+  const captchaMissing = () => { if (TURNSTILE_SITE_KEY && !captchaToken) { setError(CAPTCHA_WAIT_MESSAGE); return true; } return false; };
 
   // A shared link can look like ...#invite=<code> — when present,
   // switch to sign-up and pre-fill the code so the recipient doesn't need to
@@ -771,15 +832,19 @@ function AuthScreen({ onAuthed }) {
     setError("");
     const email = form.email.trim().toLowerCase();
     if (!email) { setError("Enter the email you signed up with."); return; }
+    if (captchaMissing()) return;
     setBusy(true);
     try {
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: window.location.origin + import.meta.env.BASE_URL,
+        captchaToken: captchaToken || undefined,
       });
       if (resetError) {
-        setError(/rate|seconds|too many/i.test(resetError.message)
-          ? "Too many requests — wait a minute and try again."
-          : "We couldn't send the email right now. Please try again in a few minutes.");
+        setError(isCaptchaError(resetError.message)
+          ? "The security check didn't go through. Please try again."
+          : /rate|seconds|too many/i.test(resetError.message)
+            ? "Too many requests — wait a minute and try again."
+            : "We couldn't send the email right now. Please try again in a few minutes.");
         return;
       }
       // Same message whether or not an account exists, so this can't be used to find out who has one.
@@ -788,6 +853,7 @@ function AuthScreen({ onAuthed }) {
       setError("Something went wrong. Please try again.");
     } finally {
       setBusy(false);
+      setCaptchaReset((n) => n + 1);
     }
   };
 
@@ -806,15 +872,21 @@ function AuthScreen({ onAuthed }) {
       if (!agreeTerms || !agreeAge) { setError("Please accept the Terms of Use and confirm your age to create an account."); return; }
     }
     const trimmedInvite = inviteCode.trim();
+    if (captchaMissing()) return;
     setBusy(true);
     try {
       if (mode === "signup") {
         const { data, error: signUpError } = await supabase.auth.signUp({
           email, password: form.password,
-          options: { data: { name: form.name.trim(), position: form.position, experience: form.experience, invite_code: trimmedInvite, terms_version: legal?.version || "" } },
+          options: {
+            data: { name: form.name.trim(), position: form.position, experience: form.experience, invite_code: trimmedInvite, terms_version: legal?.version || "" },
+            captchaToken: captchaToken || undefined,
+          },
         });
         if (signUpError) {
-          setError(signUpError.message === "User already registered"
+          setError(isCaptchaError(signUpError.message)
+            ? "The security check didn't go through. Please try again."
+            : signUpError.message === "User already registered"
             ? "An account with this email already exists — try logging in instead."
             : trimmedInvite && /database error|invite code/i.test(signUpError.message)
               ? "That invite code isn't valid."
@@ -831,11 +903,15 @@ function AuthScreen({ onAuthed }) {
         const profile = await fetchCurrentProfile();
         if (profile) onAuthed(profile);
       } else {
-        const { error: signInError } = await supabase.auth.signInWithPassword({ email, password: form.password });
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email, password: form.password, options: { captchaToken: captchaToken || undefined },
+        });
         if (signInError) {
           setError(signInError.message === "Email not confirmed"
             ? "Check your inbox and confirm your email before logging in."
-            : "Incorrect email or password.");
+            : isCaptchaError(signInError.message)
+              ? "The security check didn't go through. Please try again."
+              : "Incorrect email or password.");
           return;
         }
         const profile = await fetchCurrentProfile();
@@ -851,6 +927,7 @@ function AuthScreen({ onAuthed }) {
       setError("Something went wrong. Please try again.");
     } finally {
       setBusy(false);
+      setCaptchaReset((n) => n + 1);
     }
   };
 
@@ -884,6 +961,7 @@ function AuthScreen({ onAuthed }) {
                   <span>Email</span>
                   <div className="auth-input-icon"><Mail size={14} /><input type="email" value={form.email} onChange={(e) => field("email", e.target.value)} placeholder="you@example.com" autoFocus /></div>
                 </label>
+                <TurnstileWidget onToken={setCaptchaToken} resetKey={captchaReset} />
                 {error && <div className="auth-error"><AlertTriangle size={13} /> {error}</div>}
                 <button className="btn btn--primary auth-submit" disabled={busy} type="submit">{busy ? "Please wait…" : "Send reset link"}</button>
                 <button type="button" className="auth-invite-link" onClick={() => { setError(""); setMode("login"); }}>Back to log in</button>
@@ -965,6 +1043,7 @@ function AuthScreen({ onAuthed }) {
                   <button type="button" className="auth-invite-link" onClick={() => { setError(""); setMode("forgot"); }}>Forgot password?</button>
                 )}
 
+                <TurnstileWidget onToken={setCaptchaToken} resetKey={captchaReset} />
                 {error && <div className="auth-error"><AlertTriangle size={13} /> {error}</div>}
 
                 <button className="btn btn--primary auth-submit" disabled={busy} type="submit">
@@ -2134,6 +2213,8 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile, onDele
   const [profileError, setProfileError] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
   const [photoError, setPhotoError] = useState("");
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaReset, setCaptchaReset] = useState(0);
 
   const removePhoto = async () => {
     setPhotoError("");
@@ -2165,9 +2246,17 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile, onDele
     const pwProblem = passwordProblem(newPw);
     if (pwProblem) { setPwError(pwProblem); return; }
     if (newPw !== confirmPw) { setPwError("New passwords don't match."); return; }
+    if (TURNSTILE_SITE_KEY && !captchaToken) { setPwError(CAPTCHA_WAIT_MESSAGE); return; }
     setSaving(true);
-    const { error: reauthError } = await supabase.auth.signInWithPassword({ email: user.email, password: currentPw });
-    if (reauthError) { setSaving(false); setPwError("Current password is incorrect."); return; }
+    const { error: reauthError } = await supabase.auth.signInWithPassword({
+      email: user.email, password: currentPw, options: { captchaToken: captchaToken || undefined },
+    });
+    setCaptchaReset((n) => n + 1);
+    if (reauthError) {
+      setSaving(false);
+      setPwError(isCaptchaError(reauthError.message) ? "The security check didn't go through. Please try again." : "Current password is incorrect.");
+      return;
+    }
     const ok = await onChangePassword(newPw);
     setSaving(false);
     if (ok) {
@@ -2253,6 +2342,7 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile, onDele
               <span>Confirm new password</span>
               <div className="auth-input-icon"><Lock size={14} /><input type="password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} /></div>
             </label>
+            <TurnstileWidget onToken={setCaptchaToken} resetKey={captchaReset} />
             {pwError && <div className="auth-error"><AlertTriangle size={13} /> {pwError}</div>}
             {pwSuccess && <div className="profile-password-success"><Check size={13} /> Password updated.</div>}
             <div className="admin-form-actions">
@@ -6760,6 +6850,7 @@ button:focus {
 .coming-soon { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 32px 16px; text-align: center; }
 .coming-soon .auth-sub { max-width: 420px; margin-bottom: 8px; }
 .auth-closed { text-align: center; }
+.turnstile-box { min-height: 65px; }
 .legal-checks { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 2px; }
 .legal-check { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; color: var(--text-dim); text-align: left; cursor: pointer; }
 .legal-check input { width: 16px; height: 16px; margin: 2px 0 0; flex: none; accent-color: var(--accent); cursor: pointer; }
