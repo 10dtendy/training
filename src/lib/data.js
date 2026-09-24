@@ -49,6 +49,15 @@ export async function fetchCurrentProfile() {
   return shapeUser(p, dayTypes, gameLogs, restNotes, loginDays);
 }
 
+// Just the accounts (no calendars, game stats or notes) — for pages that only list people,
+// so they don't download every goalie's full history.
+export async function getProfilesMap() {
+  const { data: profiles } = await supabase.from("profiles").select("*");
+  const out = {};
+  for (const p of profiles || []) out[p.email] = shapeUser(p);
+  return out;
+}
+
 export async function getUsersMap() {
   const [{ data: profiles }, { data: dayTypes }, { data: gameLogs }, { data: restNotes }] = await Promise.all([
     supabase.from("profiles").select("*"),
