@@ -2268,19 +2268,8 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
     if (next !== null) scrollOpenedAccordionIntoView(exerciseRefs.current[i]);
   };
   const officeImg = brandImage(office.imageUrl, branding?.office, OFFICE_IMG);
-  // The Workout section is a list of exercise rows and set descriptions, in the coach's order:
-  // each run of exercise rows becomes a table, each description a highlighted note between them.
-  const planItems = office.planRows || [];
-  const planSegments = [];
-  for (const item of planItems) {
-    if (isPlanNote(item)) planSegments.push({ note: item });
-    else if (planSegments.length && planSegments[planSegments.length - 1].rows) planSegments[planSegments.length - 1].rows.push(item);
-    else planSegments.push({ rows: [item] });
-  }
-  // Workout table columns left blank in every exercise row aren't shown at all.
-  const planColumns = [["exercise", "Exercise"], ["sets", "Sets"], ["reps", "Reps"], ["rest", "Rest"]]
-    .filter(([key]) => key === "exercise" || planItems.some((r) => !isPlanNote(r) && String(r[key] || "").trim()))
-    .map(([key, label]) => ({ key, label }));
+  const planSegments = workoutPlanSegments(office);
+  const planColumns = workoutPlanColumns(office);
   return (
     <div className="page detail">
       <button className="back-link" onClick={onBack}><ChevronLeft size={16} /> Today</button>
@@ -4038,6 +4027,25 @@ function isPlanNote(item) { return item?.type === "note"; }
 function planNoteHasText(item) { return !!String(item?.text || "").replace(/<[^>]*>/g, "").trim(); }
 // A set description counts as filled in if it has text or an intensity.
 function planNoteHasContent(item) { return planNoteHasText(item) || !!String(item?.intensity || "").trim(); }
+
+// A workout's plan as goalies follow it, in the coach's order: each run of exercise rows becomes
+// one table, each set description a note between them. Shared by the Off-Ice page and the PDF.
+function workoutPlanSegments(office) {
+  const segments = [];
+  for (const item of office.planRows || []) {
+    if (isPlanNote(item)) segments.push({ note: item });
+    else if (segments.length && segments[segments.length - 1].rows) segments[segments.length - 1].rows.push(item);
+    else segments.push({ rows: [item] });
+  }
+  return segments;
+}
+// The table columns worth showing: Exercise always, the others only if some row fills them in.
+function workoutPlanColumns(office) {
+  const items = office.planRows || [];
+  return [["exercise", "Exercise"], ["sets", "Sets"], ["reps", "Reps"], ["rest", "Rest"]]
+    .filter(([key]) => key === "exercise" || items.some((r) => !isPlanNote(r) && String(r[key] || "").trim()))
+    .map(([key, label]) => ({ key, label }));
+}
 
 // Uploads/removes photo or video for one exercise inside draft.exercises, keyed by the
 // exercise's own id so state stays correct even after rows are added, removed, or reordered.
@@ -5910,19 +5918,22 @@ function PrintSheet({ content, date, assignment }) {
           <div className="print-card-label">Off-Ice</div>
           {office ? (
             <>
+              {/* Off-Ice on paper: cover image, objective and the Workout (set descriptions + table). */}
               <h2 className="print-card-title">{office.title}</h2>
-              {[office.duration, office.equipment].some((v) => (v || "").trim()) && (
-                <div className="print-card-meta">{[office.duration, office.equipment].map((v) => (v || "").trim()).filter(Boolean).join(" · ")}</div>
-              )}
-              <ul className="print-exercises">
-                {office.exercises.map((e, i) => {
-                  const summary = exerciseSummary(e);
-                  const instructions = richTextToPlain(e.instructions);
-                  return (
-                    <li key={i}><strong>{e.name}</strong>{summary && ` — ${summary}`}{instructions && `. ${instructions}`}</li>
-                  );
-                })}
-              </ul>
+              {richTextToPlain(office.objective) && <p className="print-card-text"><strong>Objective:</strong> {richTextToPlain(office.objective)}</p>}
+              {workoutPlanSegments(office).map((seg) => (seg.note ? (
+                <p className="print-card-text print-plan-note" key={seg.note.id}>
+                  {(seg.note.intensity || "").trim() && <strong>Intensity: {seg.note.intensity.trim()}{planNoteHasText(seg.note) ? ". " : ""}</strong>}
+                  {richTextToPlain(seg.note.text)}
+                </p>
+              ) : (
+                <table className="print-plan-table" key={seg.rows[0].id}>
+                  <thead><tr>{workoutPlanColumns(office).map((c) => <th key={c.key}>{c.label}</th>)}</tr></thead>
+                  <tbody>
+                    {seg.rows.map((r) => <tr key={r.id}>{workoutPlanColumns(office).map((c) => <td key={c.key}>{r[c.key]}</td>)}</tr>)}
+                  </tbody>
+                </table>
+              )))}
             </>
           ) : <p className="print-card-text print-card-text--muted">Not assigned</p>}
         </div>
@@ -7522,8 +7533,10 @@ button:focus {
   .print-card-text { font-size: 10.5px; line-height: 1.45; color: #222; margin-bottom: 4px; }
   .print-card-text--muted { color: #999; font-style: italic; }
   .print-steps { margin: 4px 0 0 16px; font-size: 10.5px; line-height: 1.45; padding: 0; }
-  .print-exercises { list-style: none; margin: 4px 0 0; padding: 0; font-size: 10.5px; line-height: 1.45; }
-  .print-exercises li { margin-bottom: 4px; }
+  .print-plan-note { margin: 6px 0 4px; padding-left: 8px; border-left: 2px solid #BE202E; }
+  .print-plan-table { width: 100%; border-collapse: collapse; margin: 4px 0 6px; font-size: 10px; }
+  .print-plan-table th, .print-plan-table td { text-align: left; padding: 3px 6px; border-bottom: 1px solid #e2e2e2; }
+  .print-plan-table th { font-size: 8.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #777; }
   .print-footer { margin-top: 16px; text-align: center; font-size: 9px; color: #999; letter-spacing: 0.08em; }
 }
 
