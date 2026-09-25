@@ -6814,7 +6814,7 @@ button:focus {
 .hero--progress { margin-bottom: 48px; }
 
 /* ---------------- BENTO ---------------- */
-.bento { display: grid; grid-template-columns: 1fr 1.6fr; grid-template-rows: auto auto; gap: 18px; margin-bottom: 20px; }
+.bento { display: grid; grid-template-columns: 1.6fr 1fr; grid-template-rows: auto auto; gap: 18px; margin-bottom: 20px; }
 .card { text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; position: relative; overflow: hidden; transition: transform .22s ease, border-color .22s ease; }
 .card:hover { transform: translateY(-3px); border-color: #34343a; }
 .card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; position: relative; z-index: 1; }
