@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useContext, useSyncExternalStore, useId } from "react";
 import {
-  Play, Pause, Volume2, VolumeX, Maximize, ChevronLeft, ChevronRight, ChevronUp, ChevronDown,
-  Check, Bell, Menu, X, Plus, Pencil, Trash2, Eye, EyeOff,
-  Calendar as CalendarIcon, LayoutGrid, Users as UsersIcon,
-  Image as ImageIcon, Settings as SettingsIcon, Download, Gauge, LogOut,
-  Mail, Lock, UploadCloud, FileText, Video as VideoIcon, AlertTriangle,
-  Home, BarChart3, Tag, Search, CircleDot, Armchair, Copy, LayoutTemplate, Megaphone, List, Camera, Cookie, ListOrdered, Heading, Link2, Scale
+  Play, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, Bell, Menu, X, Plus, Pencil,
+  Trash2, Eye, EyeOff, Calendar as CalendarIcon, LayoutGrid, Users as UsersIcon,
+  Image as ImageIcon, Settings as SettingsIcon, Download, LogOut, Mail, Lock, UploadCloud,
+  FileText, Video as VideoIcon, AlertTriangle, Home, BarChart3, Tag, Search, CircleDot, Armchair,
+  Copy, LayoutTemplate, Megaphone, List, Camera, Cookie, ListOrdered, Heading, Link2, Scale
 } from "lucide-react";
 // Brand images ship as separate files (cached by the browser, never inside the JS bundle).
 import LOGO_SRC from "./assets/logo.png";
@@ -2094,66 +2093,8 @@ function VideoPlayer({ title, poster, src }) {
       </div>
     );
   }
-  const DURATION = 138;
-  const [playing, setPlaying] = useState(false);
-  const [time, setTime] = useState(0);
-  const [muted, setMuted] = useState(false);
-  const [speed, setSpeed] = useState(1);
-  const [showSpeed, setShowSpeed] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (!playing) return;
-    const id = setInterval(() => {
-      setTime((t) => (t >= DURATION ? (setPlaying(false), DURATION) : t + speed));
-    }, 1000);
-    return () => clearInterval(id);
-  }, [playing, speed]);
-
-  const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-  const scrub = (e) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const pct = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-    setTime(Math.round(pct * DURATION));
-  };
-
-  return (
-    <div className="video" ref={ref}>
-      <div className="video-stage">
-        {poster ? (
-          <>
-            <img src={poster} alt="" className="media-photo video-poster-img" />
-            <div className="video-poster-scrim" />
-          </>
-        ) : (
-          <>
-            <CreaseArc className="video-arc" opacity={0.35} />
-            <GoalieMark size={72} />
-          </>
-        )}
-        {!playing && <button className="video-play-big" onClick={() => setPlaying(true)} aria-label="Play"><Play size={26} fill="var(--bg)" /></button>}
-        <div className="video-overlay-title">{title}</div>
-      </div>
-      <div className="video-controls">
-        <button className="video-btn" onClick={() => setPlaying((p) => !p)} aria-label={playing ? "Pause" : "Play"}>{playing ? <Pause size={16} /> : <Play size={16} />}</button>
-        <span className="video-time">{fmt(time)}</span>
-        <div className="video-timeline" onClick={scrub}><div className="video-timeline-fill" style={{ width: `${(time / DURATION) * 100}%` }} /></div>
-        <span className="video-time">{fmt(DURATION)}</span>
-        <button className="video-btn" onClick={() => setMuted((m) => !m)} aria-label="Mute">{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button>
-        <div className="video-speed-wrap">
-          <button className="video-btn video-speed-btn" onClick={() => setShowSpeed((s) => !s)}><Gauge size={15} /> {speed}×</button>
-          {showSpeed && (
-            <div className="video-speed-menu">
-              {[0.5, 1, 1.25, 1.5, 2].map((s) => (
-                <button key={s} className={"video-speed-opt" + (s === speed ? " active" : "")} onClick={() => { setSpeed(s); setShowSpeed(false); }}>{s}×</button>
-              ))}
-            </div>
-          )}
-        </div>
-        <button className="video-btn" aria-label="Fullscreen" onClick={() => ref.current?.requestFullscreen?.()}><Maximize size={16} /></button>
-      </div>
-    </div>
-  );
+  // No video: callers show the cover photo instead, so there is nothing to render here.
+  return null;
 }
 
 /* ============================================================================
@@ -2163,18 +2104,32 @@ function VideoPlayer({ title, poster, src }) {
 // The written part of a drill (objective, steps, coaching points, common mistakes), shared by the
 // drill's own page and by the drill cards inside a practice focus.
 function DrillBody({ drill }) {
+  // Empty sections are left out rather than shown as a heading with nothing under it.
+  const sets = (drill.sets || "").trim();
+  const reps = (drill.reps || "").trim();
   return (
     <>
-        <section className="detail-block"><h2>Objective</h2><RichText value={drill.objective} /></section>
+        {richTextToPlain(drill.objective) && <section className="detail-block"><h2>Objective</h2><RichText value={drill.objective} /></section>}
         {drill.diagramUrl && <section className="detail-block"><img src={drill.diagramUrl} alt="Drill diagram" className="drill-diagram" /></section>}
+        {drill.steps.length > 0 && (
         <section className="detail-block">
           <h2>How to perform</h2>
           <ol className="steps">{drill.steps.map((s, i) => <li key={i}><span className="step-num">{i + 1}</span><span>{s}</span></li>)}</ol>
         </section>
+        )}
+        {(sets || reps) && (
+          <section className="detail-block drill-volume" aria-label="Sets and reps">
+            {sets && <div className="drill-volume-tile"><span className="drill-volume-label">Sets</span><span className="drill-volume-value">{sets}</span></div>}
+            {reps && <div className="drill-volume-tile"><span className="drill-volume-label">Reps</span><span className="drill-volume-value">{reps}</span></div>}
+          </section>
+        )}
+        {drill.coachingPoints.length > 0 && (
         <section className="detail-block">
           <h2>Coaching points</h2>
           <div className="chip-grid">{drill.coachingPoints.map((c, i) => <div className="cue-card" key={i}>{c}</div>)}</div>
         </section>
+        )}
+        {drill.mistakes.length > 0 && (
         <section className="detail-block">
           <h2>Common mistakes</h2>
           <div className="mistake-list">
@@ -2186,6 +2141,7 @@ function DrillBody({ drill }) {
             ))}
           </div>
         </section>
+        )}
     </>
   );
 }
@@ -2226,7 +2182,14 @@ function DrillDetailPage({ drill, branding, onBack, complete, onComplete }) {
   return (
     <div className="page detail">
       <button className="back-link" onClick={onBack}><ChevronLeft size={16} /> Today</button>
-      <VideoPlayer title={drill.title} poster={drillImg.src} src={drill.videoUrl} />
+      {drill.videoUrl ? (
+        <VideoPlayer title={drill.title} poster={drillImg.src} src={drill.videoUrl} />
+      ) : (
+        <div className="detail-banner">
+          <img src={drillImg.src} style={drillImg.style} alt="" className="media-photo" />
+          <div className="detail-banner-scrim" />
+        </div>
+      )}
       <div className="detail-header">
         <h1 className="detail-title">{drill.title}</h1>
         <MetaRow items={[drill.duration, drill.equipment]} />
@@ -3108,7 +3071,7 @@ function AdminDashboard({ content }) {
 
 const BLANK_DRILL = {
   title: "", category: "", duration: "", equipment: "",
-  description: "", objective: "", stepsText: "", coachingPointsText: "", mistakesText: "", published: false,
+  description: "", objective: "", stepsText: "", sets: "", reps: "", coachingPointsText: "", mistakesText: "", published: false,
   imageAssetId: null, imageUrl: "", videoAssetId: null, videoUrl: "", diagramUrl: "",
 };
 
@@ -3369,6 +3332,8 @@ function AdminDrills({ content, updateContent }) {
     title: d.title, category: d.category, duration: d.duration,
     equipment: d.equipment, description: d.description, objective: d.objective,
     steps: parseLines(d.stepsText),
+    sets: (d.sets || "").trim(),
+    reps: (d.reps || "").trim(),
     coachingPoints: parseLines(d.coachingPointsText),
     mistakes: parseLines(d.mistakesText).map((line) => {
       const [mistake, correction] = line.split("|").map((s) => (s || "").trim());
@@ -3476,6 +3441,8 @@ function AdminDrills({ content, updateContent }) {
               {diagram.error && <div className="auth-error" style={{ marginTop: 8 }}><AlertTriangle size={13} /> {diagram.error}</div>}
             </div>
             <label className="admin-form-span2">Steps (one per line)<textarea rows={4} value={draft.stepsText} onChange={(e) => setDraft({ ...draft, stepsText: e.target.value })} placeholder={"Start in your stance.\nMove to the post.\n..."} /></label>
+            <label>Sets<input value={draft.sets || ""} onChange={(e) => setDraft({ ...draft, sets: e.target.value })} placeholder="e.g. 3" maxLength={50} /></label>
+            <label>Reps<input value={draft.reps || ""} onChange={(e) => setDraft({ ...draft, reps: e.target.value })} placeholder="e.g. 10 each side" maxLength={50} /></label>
             <label className="admin-form-span2">Coaching points (one per line)<textarea rows={3} value={draft.coachingPointsText} onChange={(e) => setDraft({ ...draft, coachingPointsText: e.target.value })} /></label>
             <label className="admin-form-span2">Common mistakes — "mistake | correction" per line<textarea rows={3} value={draft.mistakesText} onChange={(e) => setDraft({ ...draft, mistakesText: e.target.value })} placeholder={"Collapsing early | Hold your seal longer"} /></label>
 
@@ -5616,9 +5583,14 @@ function PrintSheet({ content, date, assignment }) {
           {drill ? (
             <>
               <h2 className="print-card-title">{drill.title}</h2>
-              <div className="print-card-meta">{drill.duration} · {drill.equipment}</div>
-              <p className="print-card-text"><strong>How to perform:</strong> {drill.objective}</p>
-              <ol className="print-steps">{drill.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
+              {[drill.duration, drill.equipment].some((v) => (v || "").trim()) && (
+                <div className="print-card-meta">{[drill.duration, drill.equipment].map((v) => (v || "").trim()).filter(Boolean).join(" · ")}</div>
+              )}
+              {richTextToPlain(drill.objective) && <p className="print-card-text"><strong>Objective:</strong> {richTextToPlain(drill.objective)}</p>}
+              {drill.steps.length > 0 && <ol className="print-steps">{drill.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>}
+              {((drill.sets || "").trim() || (drill.reps || "").trim()) && (
+                <p className="print-card-text">{[(drill.sets || "").trim() && `Sets: ${drill.sets.trim()}`, (drill.reps || "").trim() && `Reps: ${drill.reps.trim()}`].filter(Boolean).join(" · ")}</p>
+              )}
             </>
           ) : <p className="print-card-text print-card-text--muted">Not assigned</p>}
         </div>
@@ -7118,6 +7090,10 @@ button:focus {
 .plan-note p { margin: 0 0 6px; }
 .plan-note p:last-child { margin-bottom: 0; }
 .plan-note ul, .plan-note ol { margin: 0; padding-left: 18px; }
+.drill-volume { display: flex; flex-wrap: wrap; gap: 10px; }
+.drill-volume-tile { display: flex; flex-direction: column; gap: 4px; min-width: 110px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.drill-volume-label { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); }
+.drill-volume-value { font-family: 'Archivo'; font-size: 20px; font-weight: 700; color: var(--text); }
 .legal-checks { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 2px; }
 .legal-check { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; color: var(--text-dim); text-align: left; cursor: pointer; }
 .legal-check input { width: 16px; height: 16px; margin: 2px 0 0; flex: none; accent-color: var(--accent); cursor: pointer; }
