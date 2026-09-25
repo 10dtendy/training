@@ -2257,8 +2257,8 @@ function FocusDetailPage({ focus, branding, drills = [], onBack, complete, onCom
         <h1 className="focus-hero-title">{focus.title}</h1>
         <div className="focus-hero-glow" />
       </section>
-      <section className="detail-block"><h2>Why it matters</h2><RichText value={focus.explanation} /></section>
-      <section className="detail-block"><h2>Today's cue</h2><div className="cue-highlight">{focus.cue}</div></section>
+      {(focus.cue || "").trim() && <section className="detail-block"><h2>Today's cue</h2><div className="cue-highlight">{focus.cue}</div></section>}
+      {richTextToPlain(focus.explanation) && <section className="detail-block"><h2>Execution</h2><RichText value={focus.explanation} /></section>}
       {(focus.blocks || []).map((b) => (
         b.type === "image" ? (b.imageUrl && <img key={b.id} src={b.imageUrl} alt="" className="focus-block-image" />)
         : b.type === "video" ? (b.videoUrl && <VideoPlayer key={b.id} title={focus.title} src={b.videoUrl} />)
@@ -3943,8 +3943,8 @@ function AdminFocusPoints({ content, updateContent }) {
                 {categoriesOfType(content, "focus").map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
               </select>
             </label>
-            <div className="admin-form-span2 rich-field-wrap"><span className="rich-field-label">Why it matters</span><RichTextEditor rows={3} value={draft.explanation} onChange={(v) => setDraft({ ...draft, explanation: v })} /></div>
             <label className="admin-form-span2">Today's cue<input value={draft.cue} onChange={(e) => setDraft({ ...draft, cue: e.target.value })} /></label>
+            <div className="admin-form-span2 rich-field-wrap"><span className="rich-field-label">Execution</span><RichTextEditor rows={3} value={draft.explanation} onChange={(v) => setDraft({ ...draft, explanation: v })} /></div>
 
             <MediaFields draft={draft} media={media} />
 
@@ -5631,8 +5631,8 @@ function PrintSheet({ content, date, assignment }) {
           {focus ? (
             <>
               <h2 className="print-card-title">"{focus.title}"</h2>
-              <p className="print-card-text"><strong>Cue:</strong> {focus.cue}</p>
-              <p className="print-card-text">{focus.explanation}</p>
+              {(focus.cue || "").trim() && <p className="print-card-text"><strong>Cue:</strong> {focus.cue}</p>}
+              {richTextToPlain(focus.explanation) && <p className="print-card-text">{richTextToPlain(focus.explanation)}</p>}
             </>
           ) : <p className="print-card-text print-card-text--muted">Not assigned</p>}
         </div>
