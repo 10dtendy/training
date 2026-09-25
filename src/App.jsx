@@ -2315,7 +2315,12 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
         <section className="detail-block">
           <h2>Workout</h2>
           {planSegments.map((seg) => (seg.note ? (
-            <RichText key={seg.note.id} className="plan-note" value={seg.note.text} />
+            <div key={seg.note.id} className="plan-note">
+              {(seg.note.intensity || "").trim() && (
+                <div className="plan-note-intensity"><span>Intensity</span>{seg.note.intensity.trim()}</div>
+              )}
+              {planNoteHasText(seg.note) && <RichText value={seg.note.text} />}
+            </div>
           ) : (
             <div className="plan-table-wrap" key={seg.rows[0].id}>
               <table className="plan-table">
@@ -3995,9 +4000,11 @@ const BLANK_OFFICE = {
 };
 const blankPlanRow = () => ({ id: uid("row"), exercise: "", sets: "", reps: "", rest: "" });
 // A set description sits in the same list as the exercise rows (anywhere: before, between or after them).
-const blankPlanNote = () => ({ id: uid("note"), type: "note", text: "" });
+const blankPlanNote = () => ({ id: uid("note"), type: "note", text: "", intensity: "" });
 function isPlanNote(item) { return item?.type === "note"; }
 function planNoteHasText(item) { return !!String(item?.text || "").replace(/<[^>]*>/g, "").trim(); }
+// A set description counts as filled in if it has text or an intensity.
+function planNoteHasContent(item) { return planNoteHasText(item) || !!String(item?.intensity || "").trim(); }
 
 // Uploads/removes photo or video for one exercise inside draft.exercises, keyed by the
 // exercise's own id so state stays correct even after rows are added, removed, or reordered.
@@ -4150,6 +4157,13 @@ function WorkoutPlanEditor({ items, setDraft }) {
                 <span className="rich-field-label">Set description</span>
                 {actions(item, i, "set description")}
               </div>
+              <label className="plan-note-intensity-field">
+                <span>Intensity</span>
+                <input
+                  value={item.intensity || ""} onChange={(e) => updateField(item.id, "intensity", e.target.value)}
+                  placeholder="e.g. 80%, RPE 7 or Moderate" maxLength={40} list="plan-intensity-options"
+                />
+              </label>
               <RichTextEditor
                 rows={2} value={item.text} onChange={(v) => updateField(item.id, "text", v)}
                 placeholder="e.g. Do each exercise once, then repeat for 2 more rounds (3 rounds total). Rest 90 sec between rounds."
@@ -4166,6 +4180,9 @@ function WorkoutPlanEditor({ items, setDraft }) {
           )))}
         </div>
       )}
+      <datalist id="plan-intensity-options">
+        <option value="Low" /><option value="Moderate" /><option value="High" /><option value="Max effort" />
+      </datalist>
       <div className="plan-add-buttons">
         <button type="button" className="btn btn--ghost btn--small" onClick={() => setItems((list) => [...list, blankPlanRow()])}><Plus size={13} /> Add exercise</button>
         <button type="button" className="btn btn--ghost btn--small" onClick={() => setItems((list) => [...list, blankPlanNote()])}><Plus size={13} /> Add set description</button>
@@ -4201,7 +4218,7 @@ function AdminOffIce({ content, updateContent }) {
       imageAssetId: ex.imageAssetId || null, imageUrl: ex.imageUrl || "", videoAssetId: ex.videoAssetId || null, videoUrl: ex.videoUrl || "",
     })),
     planRows: (o.planRows || []).map((r) => (isPlanNote(r)
-      ? { id: r.id || uid("note"), type: "note", text: r.text || "" }
+      ? { id: r.id || uid("note"), type: "note", text: r.text || "", intensity: r.intensity || "" }
       : { id: r.id || uid("row"), exercise: r.exercise || "", sets: r.sets || "", reps: r.reps || "", rest: r.rest || "" })),
   });
   const startEdit = (o) => { setEditingId(o.id); setDraft(toDraft(o)); setCreating(false); media.clearError(); };
@@ -4215,8 +4232,10 @@ function AdminOffIce({ content, updateContent }) {
       .map((ex) => ({ ...ex, name: ex.name.trim() || "Untitled exercise" })),
     // Empty rows and empty descriptions (an editor left with only "<br>") are dropped on save.
     planRows: (d.planRows || [])
-      .filter((r) => (isPlanNote(r) ? planNoteHasText(r) : r.exercise.trim() || r.sets.trim() || r.reps.trim() || r.rest.trim()))
-      .map((r) => (isPlanNote(r) ? r : { ...r, exercise: r.exercise.trim() })),
+      .filter((r) => (isPlanNote(r) ? planNoteHasContent(r) : r.exercise.trim() || r.sets.trim() || r.reps.trim() || r.rest.trim()))
+      .map((r) => (isPlanNote(r)
+        ? { ...r, intensity: (r.intensity || "").trim(), text: planNoteHasText(r) ? r.text : "" }
+        : { ...r, exercise: r.exercise.trim() })),
     imageAssetId: d.imageAssetId || null, imageUrl: d.imageUrl || "", videoAssetId: d.videoAssetId || null, videoUrl: d.videoUrl || "",
   });
 
@@ -6979,6 +6998,11 @@ button:focus {
 .plan-note-item { padding: 10px 12px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; background: var(--surface); }
 .plan-note-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 .plan-add-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.admin-form-grid .plan-note-intensity-field { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; margin-bottom: 8px; font-size: 12px; color: var(--text-dim); }
+.admin-form-grid .plan-note-intensity-field input { flex: 1; width: auto; max-width: 260px; min-width: 0; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; color: var(--text); font-size: 13px; font-family: inherit; }
+.plan-note-intensity { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 4px 10px; border-radius: 999px; background: var(--accent-dim); color: var(--text); font-size: 13px; font-weight: 600; }
+.plan-note-intensity span { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.plan-note .plan-note-intensity:last-child { margin-bottom: 0; }
 .plan-note + .plan-table-wrap, .plan-table-wrap + .plan-note, .plan-table-wrap + .plan-table-wrap { margin-top: 14px; }
 .plan-table-row input { min-width: 0; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text); font-size: 13px; font-family: inherit; }
 .plan-table-row--head { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; padding: 0 10px; }
