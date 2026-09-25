@@ -3135,7 +3135,11 @@ function useDiagramUpload(setDraft) {
       setUploading(false);
     }
   };
-  return { uploading, error, inputRef, onPick, remove: () => setDraft((d) => ({ ...d, diagramUrl: "" })), clearError: () => setError("") };
+  return {
+    uploading, error, inputRef, onPick,
+    pickFromLibrary: (file) => setDraft((d) => ({ ...d, diagramUrl: file.url })),
+    remove: () => setDraft((d) => ({ ...d, diagramUrl: "" })), clearError: () => setError(""),
+  };
 }
 
 function useMediaFields(setDraft) {
@@ -3159,6 +3163,7 @@ function useMediaFields(setDraft) {
   return {
     uploading, mediaError, imageInputRef,
     onPickImage: (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) uploadImage(f); },
+    pickFromLibrary: (file) => setDraft((d) => ({ ...d, imageAssetId: file.path, imageUrl: file.url })),
     removeImage: () => setDraft((d) => ({ ...d, imageAssetId: null, imageUrl: "" })),
     setVideoUrl: (url) => setDraft((d) => ({ ...d, videoAssetId: null, videoUrl: url })),
     clearError: () => setMediaError(""),
@@ -3234,10 +3239,13 @@ function MediaFields({ draft, media, imageLabel = "Photo" }) {
             <button type="button" className="btn btn--ghost btn--small" onClick={media.removeImage}>Remove</button>
           </div>
         ) : (
-          <UploadDropzone small getInput={() => media.imageInputRef.current} disabled={media.uploading}>
-            <UploadCloud size={18} />
-            <span>{media.uploading ? "Uploading…" : `Click or drop a ${imageLabel === "Photo" ? "photo" : imageLabel.toLowerCase()} here`}</span>
-          </UploadDropzone>
+          <div className="upload-or-library">
+            <UploadDropzone small getInput={() => media.imageInputRef.current} disabled={media.uploading}>
+              <UploadCloud size={18} />
+              <span>{media.uploading ? "Uploading…" : `Click or drop a ${imageLabel === "Photo" ? "photo" : imageLabel.toLowerCase()} here`}</span>
+            </UploadDropzone>
+            <LibraryPickButton onPick={media.pickFromLibrary} disabled={media.uploading} />
+          </div>
         )}
         <input ref={media.imageInputRef} type="file" accept="image/*" onChange={media.onPickImage} style={{ display: "none" }} />
       </div>
@@ -3455,10 +3463,13 @@ function AdminDrills({ content, updateContent }) {
                   <button type="button" className="btn btn--ghost btn--small" onClick={diagram.remove}>Remove</button>
                 </div>
               ) : (
-                <UploadDropzone small getInput={() => diagram.inputRef.current} disabled={diagram.uploading}>
-                  <UploadCloud size={18} />
-                  <span>{diagram.uploading ? "Uploading…" : "Click or drop a diagram here"}</span>
-                </UploadDropzone>
+                <div className="upload-or-library">
+                  <UploadDropzone small getInput={() => diagram.inputRef.current} disabled={diagram.uploading}>
+                    <UploadCloud size={18} />
+                    <span>{diagram.uploading ? "Uploading…" : "Click or drop a diagram here"}</span>
+                  </UploadDropzone>
+                  <LibraryPickButton onPick={diagram.pickFromLibrary} disabled={diagram.uploading} />
+                </div>
               )}
               <input ref={diagram.inputRef} type="file" accept="image/*" onChange={diagram.onPick} style={{ display: "none" }} />
               {diagram.error && <div className="auth-error" style={{ marginTop: 8 }}><AlertTriangle size={13} /> {diagram.error}</div>}
@@ -3747,6 +3758,7 @@ function useBlockMedia(setDraft) {
   return {
     uploading, errors, getRef,
     onPick: (blockId) => (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) upload(blockId, f); },
+    pickFromLibrary: (blockId) => (file) => patchBlock(blockId, { imageAssetId: file.path, imageUrl: file.url }),
     removeImage: (blockId) => patchBlock(blockId, { imageAssetId: null, imageUrl: "" }),
     setVideoUrl: (blockId, url) => patchBlock(blockId, { videoAssetId: null, videoUrl: url }),
     clearError: (blockId) => setErrors((e) => ({ ...e, [blockId]: "" })),
@@ -3818,10 +3830,13 @@ function FocusBlocksEditor({ blocks, setDraft, blockMedia, drills = [], drillCat
                     <button type="button" className="btn btn--ghost btn--small" onClick={() => blockMedia.removeImage(b.id)}>Remove</button>
                   </div>
                 ) : (
-                  <UploadDropzone small getInput={() => blockMedia.getRef(b.id).current} disabled={blockMedia.uploading[b.id]}>
-                    <UploadCloud size={16} />
-                    <span>{blockMedia.uploading[b.id] ? "Uploading…" : "Click or drop a photo here"}</span>
-                  </UploadDropzone>
+                  <div className="upload-or-library">
+                    <UploadDropzone small getInput={() => blockMedia.getRef(b.id).current} disabled={blockMedia.uploading[b.id]}>
+                      <UploadCloud size={16} />
+                      <span>{blockMedia.uploading[b.id] ? "Uploading…" : "Click or drop a photo here"}</span>
+                    </UploadDropzone>
+                    <LibraryPickButton onPick={blockMedia.pickFromLibrary(b.id)} disabled={blockMedia.uploading[b.id]} />
+                  </div>
                 )}
                 <input ref={blockMedia.getRef(b.id)} type="file" accept="image/*" onChange={blockMedia.onPick(b.id)} style={{ display: "none" }} />
                 {blockMedia.errors[b.id] && <div className="auth-error"><AlertTriangle size={13} /> {blockMedia.errors[b.id]}</div>}
@@ -4056,6 +4071,7 @@ function useExerciseMedia(setDraft) {
   return {
     uploading, errors, getRef,
     onPick: (exId) => (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) upload(exId, f); },
+    pickFromLibrary: (exId) => (file) => patchExercise(exId, { imageAssetId: file.path, imageUrl: file.url }),
     removeImage: (exId) => patchExercise(exId, { imageAssetId: null, imageUrl: "" }),
     setVideoUrl: (exId, url) => patchExercise(exId, { videoAssetId: null, videoUrl: url }),
     clearError: (exId) => setErrors((e) => ({ ...e, [exId]: "" })),
@@ -4110,10 +4126,13 @@ function ExerciseEditor({ exercises, setDraft, exMedia }) {
                     <button type="button" className="btn btn--ghost btn--small" onClick={() => exMedia.removeImage(ex.id)}>Remove</button>
                   </div>
                 ) : (
-                  <UploadDropzone small getInput={() => exMedia.getRef(ex.id).current} disabled={exMedia.uploading[ex.id]}>
-                    <UploadCloud size={16} />
-                    <span>{exMedia.uploading[ex.id] ? "Uploading…" : "Add a photo (click or drop)"}</span>
-                  </UploadDropzone>
+                  <div className="upload-or-library">
+                    <UploadDropzone small getInput={() => exMedia.getRef(ex.id).current} disabled={exMedia.uploading[ex.id]}>
+                      <UploadCloud size={16} />
+                      <span>{exMedia.uploading[ex.id] ? "Uploading…" : "Add a photo (click or drop)"}</span>
+                    </UploadDropzone>
+                    <LibraryPickButton onPick={exMedia.pickFromLibrary(ex.id)} disabled={exMedia.uploading[ex.id]} />
+                  </div>
                 )}
                 <input ref={exMedia.getRef(ex.id)} type="file" accept="image/*" onChange={exMedia.onPick(ex.id)} style={{ display: "none" }} />
               </div>
@@ -5316,6 +5335,7 @@ function AdminFrontPage({ content, updateContent }) {
                   <label htmlFor={"front-page-upload-" + s.key} className="btn btn--ghost btn--small">
                     {uploading[s.key] ? "Uploading…" : entry?.url ? "Replace image" : "Upload image"}
                   </label>
+                  <LibraryPickButton asButton onPick={(file) => setEntry(s.key, { assetId: file.path, url: file.url })} disabled={!!uploading[s.key]} />
                   {entry?.url && <button type="button" className="btn btn--ghost btn--small" onClick={() => resetToDefault(s.key)}>Reset to default</button>}
                 </div>
                 <span className="brand-image-hint">Focal point — drag on the photo, or type exact percentages</span>
@@ -5631,6 +5651,68 @@ function AdminLegal() {
   );
 }
 
+// ---- Choosing an existing image from the media library ------------------------------------
+// Lets an image that's already uploaded be reused (e.g. the same exercise photo in two workouts)
+// instead of uploading a duplicate. The admin's current content is shared through this context
+// so the picker can show where each image is already used.
+const AdminContentContext = React.createContext(null);
+
+function LibraryPickButton({ onPick, disabled, asButton }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button" className={asButton ? "btn btn--ghost btn--small" : "library-pick-link"}
+        onClick={() => setOpen(true)} disabled={disabled}
+      >
+        <ImageIcon size={13} /> Choose from library
+      </button>
+      {open && <MediaPickerDialog onClose={() => setOpen(false)} onPick={(file) => { setOpen(false); onPick(file); }} />}
+    </>
+  );
+}
+
+function MediaPickerDialog({ onPick, onClose }) {
+  const content = useContext(AdminContentContext);
+  const [files, setFiles] = useState(undefined);
+  const [query, setQuery] = useState("");
+  useEffect(() => { listMediaLibrary().then(setFiles); }, []);
+  const items = (files || [])
+    .filter((f) => (f.contentType || "image/").startsWith("image/"))
+    .map((f) => {
+      const uses = content ? mediaUsages(content, f.path) : [];
+      return { ...f, uses, label: f.name || BUILTIN_MEDIA[f.path] || `Image from ${formatCreated(f.createdAt)}` };
+    });
+  const q = query.trim().toLowerCase();
+  const shown = items.filter((f) => !q || f.label.toLowerCase().includes(q) || f.uses.some((u) => u.toLowerCase().includes(q)));
+  return (
+    <PreviewModal label="Choose from media library" onClose={onClose}>
+      <div className="media-picker">
+        <input
+          className="media-search" value={query} onChange={(e) => setQuery(e.target.value)} autoFocus
+          placeholder="Search by name or where it's used…" aria-label="Search media"
+        />
+        {files === undefined ? <div className="skeleton-hero" style={{ height: 120 }} />
+          : files === null ? <div className="auth-error"><AlertTriangle size={13} /> Couldn't load the media library. Try again.</div>
+          : shown.length === 0 ? <div className="empty-state"><p>{items.length ? "No images match." : "The media library is empty — upload the image instead."}</p></div>
+          : (
+            <div className="media-grid media-picker-grid">
+              {shown.map((f) => (
+                <button type="button" className="media-tile media-tile--file media-picker-tile" key={f.path} onClick={() => onPick(f)}>
+                  <img src={f.url} alt="" className="media-thumb" loading="lazy" />
+                  <span className="media-name" title={f.label}>{f.label}</span>
+                  {f.uses.length > 0
+                    ? <span className="media-uses-line" title={f.uses.join("\n")}>{f.uses[0]}{f.uses.length > 1 ? ` +${f.uses.length - 1}` : ""}</span>
+                    : <span className="media-uses-line">Not used yet</span>}
+                </button>
+              ))}
+            </div>
+          )}
+      </div>
+    </PreviewModal>
+  );
+}
+
 // ---- Drag-and-drop uploads ----------------------------------------------------------------
 // Every upload spot keeps its own hidden <input type="file">. Dropping files onto a drop target
 // hands them to that same input (as if picked in the file dialog), so dropped files go through
@@ -5736,6 +5818,7 @@ function AdminApp({ content, updateContent, saveContent }) {
     { key: "settings", label: "Settings", icon: SettingsIcon },
   ];
   return (
+    <AdminContentContext.Provider value={content}>
     <div className="admin-shell">
       <aside className="admin-sidebar">
         {nav.map((n) => (
@@ -5762,6 +5845,7 @@ function AdminApp({ content, updateContent, saveContent }) {
         {section === "settings" && <AdminSettings content={content} updateContent={updateContent} />}
       </div>
     </div>
+    </AdminContentContext.Provider>
   );
 }
 
@@ -7157,6 +7241,16 @@ button:focus {
 .media-search { flex: 1; min-width: 180px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text); font-size: 13px; font-family: inherit; }
 .media-total { font-size: 12px; color: var(--text-dim); }
 .media-thumb-link { display: block; width: 100%; }
+.upload-or-library { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%; }
+.upload-or-library .upload-dropzone { width: 100%; }
+.library-pick-link { display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; font-size: 12px; color: var(--text-dim); text-decoration: underline; text-underline-offset: 2px; }
+.library-pick-link:hover:not(:disabled) { color: var(--text); }
+.library-pick-link:disabled { opacity: 0.5; cursor: default; }
+.media-picker { display: flex; flex-direction: column; gap: 14px; }
+.media-picker .media-search { flex: none; width: 100%; }
+.media-picker-tile { cursor: pointer; text-align: center; color: var(--text); transition: border-color .15s ease; }
+.media-picker-tile:hover, .media-picker-tile:focus-visible { border-color: var(--accent); }
+.media-uses-line { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; color: var(--text-dim); }
 .media-uses { list-style: none; margin: 0; padding: 0; width: 100%; font-size: 10.5px; line-height: 1.4; color: var(--text-dim); text-align: center; }
 .media-uses li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .media-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
