@@ -3216,10 +3216,10 @@ function MediaFields({ draft, media, imageLabel = "Photo" }) {
             <button type="button" className="btn btn--ghost btn--small" onClick={media.removeImage}>Remove</button>
           </div>
         ) : (
-          <button type="button" className="upload-dropzone upload-dropzone--small" onClick={() => media.imageInputRef.current?.click()} disabled={media.uploading}>
+          <UploadDropzone small getInput={() => media.imageInputRef.current} disabled={media.uploading}>
             <UploadCloud size={18} />
-            <span>{media.uploading ? "Uploading…" : `Click to upload a ${imageLabel === "Photo" ? "photo" : imageLabel.toLowerCase()}`}</span>
-          </button>
+            <span>{media.uploading ? "Uploading…" : `Click or drop a ${imageLabel === "Photo" ? "photo" : imageLabel.toLowerCase()} here`}</span>
+          </UploadDropzone>
         )}
         <input ref={media.imageInputRef} type="file" accept="image/*" onChange={media.onPickImage} style={{ display: "none" }} />
       </div>
@@ -3437,10 +3437,10 @@ function AdminDrills({ content, updateContent }) {
                   <button type="button" className="btn btn--ghost btn--small" onClick={diagram.remove}>Remove</button>
                 </div>
               ) : (
-                <button type="button" className="upload-dropzone upload-dropzone--small" onClick={() => diagram.inputRef.current?.click()} disabled={diagram.uploading}>
+                <UploadDropzone small getInput={() => diagram.inputRef.current} disabled={diagram.uploading}>
                   <UploadCloud size={18} />
-                  <span>{diagram.uploading ? "Uploading…" : "Click to upload a diagram"}</span>
-                </button>
+                  <span>{diagram.uploading ? "Uploading…" : "Click or drop a diagram here"}</span>
+                </UploadDropzone>
               )}
               <input ref={diagram.inputRef} type="file" accept="image/*" onChange={diagram.onPick} style={{ display: "none" }} />
               {diagram.error && <div className="auth-error" style={{ marginTop: 8 }}><AlertTriangle size={13} /> {diagram.error}</div>}
@@ -3800,10 +3800,10 @@ function FocusBlocksEditor({ blocks, setDraft, blockMedia, drills = [], drillCat
                     <button type="button" className="btn btn--ghost btn--small" onClick={() => blockMedia.removeImage(b.id)}>Remove</button>
                   </div>
                 ) : (
-                  <button type="button" className="upload-dropzone upload-dropzone--small" onClick={() => blockMedia.getRef(b.id).current?.click()} disabled={blockMedia.uploading[b.id]}>
+                  <UploadDropzone small getInput={() => blockMedia.getRef(b.id).current} disabled={blockMedia.uploading[b.id]}>
                     <UploadCloud size={16} />
-                    <span>{blockMedia.uploading[b.id] ? "Uploading…" : "Click to upload a photo"}</span>
-                  </button>
+                    <span>{blockMedia.uploading[b.id] ? "Uploading…" : "Click or drop a photo here"}</span>
+                  </UploadDropzone>
                 )}
                 <input ref={blockMedia.getRef(b.id)} type="file" accept="image/*" onChange={blockMedia.onPick(b.id)} style={{ display: "none" }} />
                 {blockMedia.errors[b.id] && <div className="auth-error"><AlertTriangle size={13} /> {blockMedia.errors[b.id]}</div>}
@@ -4092,10 +4092,10 @@ function ExerciseEditor({ exercises, setDraft, exMedia }) {
                     <button type="button" className="btn btn--ghost btn--small" onClick={() => exMedia.removeImage(ex.id)}>Remove</button>
                   </div>
                 ) : (
-                  <button type="button" className="upload-dropzone upload-dropzone--small" onClick={() => exMedia.getRef(ex.id).current?.click()} disabled={exMedia.uploading[ex.id]}>
+                  <UploadDropzone small getInput={() => exMedia.getRef(ex.id).current} disabled={exMedia.uploading[ex.id]}>
                     <UploadCloud size={16} />
-                    <span>{exMedia.uploading[ex.id] ? "Uploading…" : "Add a photo"}</span>
-                  </button>
+                    <span>{exMedia.uploading[ex.id] ? "Uploading…" : "Add a photo (click or drop)"}</span>
+                  </UploadDropzone>
                 )}
                 <input ref={exMedia.getRef(ex.id)} type="file" accept="image/*" onChange={exMedia.onPick(ex.id)} style={{ display: "none" }} />
               </div>
@@ -4980,11 +4980,11 @@ function AdminMedia({ content, updateContent }) {
       {error && <div className="auth-error" style={{ marginBottom: 16 }}><AlertTriangle size={13} /> {error}</div>}
 
       <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={onPick} style={{ display: "none" }} disabled={uploading} />
-      <button className="upload-dropzone" onClick={() => inputRef.current?.click()} disabled={uploading}>
+      <UploadDropzone getInput={() => inputRef.current} disabled={uploading} dropLabel="Drop to upload these images">
         <UploadCloud size={22} />
-        <span>{uploading ? "Uploading…" : "Click to upload images"}</span>
+        <span>{uploading ? "Uploading…" : "Click to upload images, or drag them here"}</span>
         <span className="upload-dropzone-hint">JPEG, PNG, WEBP, GIF — add videos as YouTube links</span>
-      </button>
+      </UploadDropzone>
 
       {media.length === 0 ? (
         <div className="empty-state"><p>No media uploaded yet.</p></div>
@@ -5201,7 +5201,10 @@ function AdminFrontPage({ content, updateContent }) {
         const { x, y } = parseFocalPoint(focalPoint);
         const setPoint = (p) => setEntry(s.key, { focalPoint: `${p.x}% ${p.y}%` });
         return (
-          <div className="admin-panel front-page-panel" key={s.key}>
+          <FileDropArea
+            key={s.key} className="admin-panel front-page-panel"
+            getInput={() => document.getElementById("front-page-upload-" + s.key)} disabled={!!uploading[s.key]}
+          >
             <h3 className="front-page-panel-title">{s.label}</h3>
             <div className="front-page-panel-body">
               <FocalPointPicker src={previewSrc} value={focalPoint} onChange={setPoint} />
@@ -5218,9 +5221,10 @@ function AdminFrontPage({ content, updateContent }) {
                   <label>X <input type="number" min={0} max={100} value={Math.round(x)} onChange={(e) => setPoint({ x: Math.max(0, Math.min(100, Number(e.target.value) || 0)), y })} />%</label>
                   <label>Y <input type="number" min={0} max={100} value={Math.round(y)} onChange={(e) => setPoint({ x, y: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })} />%</label>
                 </div>
+                <span className="brand-image-hint">Or drag an image onto this panel to replace it.</span>
               </div>
             </div>
-          </div>
+          </FileDropArea>
         );
       })}
     </div>
@@ -5525,8 +5529,93 @@ function AdminLegal() {
   );
 }
 
+// ---- Drag-and-drop uploads ----------------------------------------------------------------
+// Every upload spot keeps its own hidden <input type="file">. Dropping files onto a drop target
+// hands them to that same input (as if picked in the file dialog), so dropped files go through
+// exactly the same checks, compression and upload as clicked ones.
+function fileMatchesAccept(file, accept) {
+  const rules = String(accept || "").split(",").map((r) => r.trim().toLowerCase()).filter(Boolean);
+  if (!rules.length) return true;
+  const type = (file.type || "").toLowerCase();
+  const name = (file.name || "").toLowerCase();
+  return rules.some((r) => (r.startsWith(".") ? name.endsWith(r) : r.endsWith("/*") ? type.startsWith(r.slice(0, -1)) : type === r));
+}
+const dragHasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+
+function useFileDrop(getInput, disabled) {
+  const [dragging, setDragging] = useState(false);
+  const depth = useRef(0);
+  const dropProps = {
+    onDragEnter: (e) => {
+      if (!dragHasFiles(e) || disabled) return;
+      e.preventDefault();
+      depth.current += 1;
+      setDragging(true);
+    },
+    onDragOver: (e) => {
+      if (!dragHasFiles(e) || disabled) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    },
+    onDragLeave: (e) => {
+      if (!dragHasFiles(e)) return;
+      depth.current = Math.max(0, depth.current - 1);
+      if (!depth.current) setDragging(false);
+    },
+    onDrop: (e) => {
+      if (!dragHasFiles(e)) return;
+      e.preventDefault();
+      depth.current = 0;
+      setDragging(false);
+      const input = getInput();
+      if (disabled || !input) return;
+      let files = [...e.dataTransfer.files].filter((f) => fileMatchesAccept(f, input.accept));
+      if (!input.multiple) files = files.slice(0, 1);
+      if (!files.length) return;
+      const list = new DataTransfer();
+      files.forEach((f) => list.items.add(f));
+      input.files = list.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    },
+  };
+  return { dragging, dropProps };
+}
+
+// An upload box you can click or drop files onto.
+function UploadDropzone({ getInput, disabled, small, dropLabel = "Drop to upload", children }) {
+  const { dragging, dropProps } = useFileDrop(getInput, disabled);
+  return (
+    <button
+      type="button" disabled={disabled} onClick={() => getInput()?.click()} {...dropProps}
+      className={"upload-dropzone" + (small ? " upload-dropzone--small" : "") + (dragging ? " upload-dropzone--dragging" : "")}
+    >
+      {dragging ? <><UploadCloud size={small ? 18 : 22} /><span>{dropLabel}</span></> : children}
+    </button>
+  );
+}
+
+// A whole area (e.g. a Front Page image panel) that accepts dropped files.
+function FileDropArea({ getInput, disabled, className = "", children }) {
+  const { dragging, dropProps } = useFileDrop(getInput, disabled);
+  return (
+    <div className={className + " file-drop-area" + (dragging ? " file-drop-area--dragging" : "")} {...dropProps}>
+      {children}
+      {dragging && <div className="file-drop-overlay"><UploadCloud size={22} /><span>Drop to upload</span></div>}
+    </div>
+  );
+}
+
 function AdminApp({ content, updateContent, saveContent }) {
   const [section, setSection] = useState("dashboard");
+  // A file dropped next to an upload box would otherwise make the browser open it, leaving the
+  // page and losing unsaved edits. Drop targets handle their own drops before this runs.
+  useEffect(() => {
+    const onDragOver = (e) => { if (dragHasFiles(e) && !e.defaultPrevented) { e.preventDefault(); e.dataTransfer.dropEffect = "none"; } };
+    const onDrop = (e) => { if (dragHasFiles(e) && !e.defaultPrevented) e.preventDefault(); };
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("drop", onDrop);
+    return () => { window.removeEventListener("dragover", onDragOver); window.removeEventListener("drop", onDrop); };
+  }, []);
   const nav = [
     { key: "dashboard", label: "Dashboard", icon: LayoutGrid },
     { key: "calendar", label: "Training Blocks", icon: CalendarIcon, red: true },
@@ -6957,6 +7046,10 @@ button:focus {
 .upload-dropzone:disabled { opacity: 0.6; pointer-events: none; }
 .upload-dropzone:hover { border-color: var(--accent); color: var(--text); }
 .upload-dropzone-hint { font-size: 11px; color: var(--text-faint); }
+.upload-dropzone > * { pointer-events: none; }
+.upload-dropzone--dragging, .upload-dropzone--dragging:hover { border-style: solid; border-color: var(--accent); background: var(--accent-dim); color: var(--text); }
+.file-drop-area { position: relative; }
+.file-drop-overlay { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border: 2px solid var(--accent); border-radius: var(--radius); background: rgba(10,10,12,0.82); color: var(--text); font-size: 14px; font-weight: 600; pointer-events: none; }
 .media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px; }
 .media-tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px 14px; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; color: var(--text-dim); font-size: 11px; word-break: break-all; position: relative; }
 .media-tile--file { padding: 10px; }
