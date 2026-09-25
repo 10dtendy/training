@@ -436,6 +436,8 @@ function sanitizeRichHtml(html, legal = false) {
       if (RICH_TEXT_ALLOWED_STRUCT[tag]) {
         const el = document.createElement(RICH_TEXT_ALLOWED_STRUCT[tag]);
         el.append(...children);
+        // A bullet with nothing in it (the editor leaves one after the last item) isn't shown.
+        if (tag === "LI" && !el.textContent.trim()) return;
         out.push(el);
       } else if (legal && RICH_TEXT_HEADINGS[tag]) {
         const el = document.createElement("h3");
@@ -5861,6 +5863,25 @@ function AdminApp({ content, updateContent, saveContent }) {
    PRINT SHEET
    ============================================================================ */
 
+function PrintCard({ label, image, canBreak, children }) {
+  return (
+    <section className={"print-card" + (canBreak ? " print-card--can-break" : "")}>
+      {image && <img src={image.src} style={image.style} alt="" className="print-card-img" />}
+      <div className="print-card-body">
+        <div className="print-card-top">
+          <span className="print-card-label">{label}</span>
+          <span className="print-check"><span className="print-check-box" />Done</span>
+        </div>
+        {children}
+      </div>
+    </section>
+  );
+}
+function PrintHeading({ children }) { return <h3 className="print-section-heading">{children}</h3>; }
+
+// The "Download Training PDF" sheet: hidden on screen, the only thing printed (see @media print).
+// One clean page per training day — header, day title, and a card each for the drill, practice
+// focus and off-ice workout, with a "Done" box to tick on paper.
 function PrintSheet({ content, date, assignment }) {
   const printDate = date || TODAY_DATE;
   const drill = assignment && content.drills.find((d) => d.id === assignment.drillId && d.published);
@@ -5869,77 +5890,86 @@ function PrintSheet({ content, date, assignment }) {
   const drillImg = drill ? brandImage(drill.imageUrl, content.branding?.drill, DRILL_IMG) : null;
   const focusImg = focus ? brandImage(focus.imageUrl, content.branding?.focus, FOCUS_IMG) : null;
   const officeImg = office ? brandImage(office.imageUrl, content.branding?.office, OFFICE_IMG) : null;
+  const title = assignment?.title || (assignment ? trainingBlockName(assignment.block) : (dateKey(printDate) === dateKey(TODAY_DATE) ? "Today's Training" : "Training Day"));
+  const subtitle = (assignment?.subtitle || "").trim();
+
+  const meta = (...values) => values.map((v) => (v || "").trim()).filter(Boolean);
 
   return (
     <div className="print-sheet">
-      <div className="print-header">
-        <div className="print-logo"><img src={LOGO_PRINT_SRC} alt="10DTendy" className="brand-logo brand-logo--print" /></div>
-        <div className="print-date">{WEEKDAY_NAMES[printDate.getDay()]}, {printDate.getDate()} {MONTH_NAMES[printDate.getMonth()]} {printDate.getFullYear()}</div>
-      </div>
-      <h1 className="print-title">{assignment?.title || (assignment ? trainingBlockName(assignment.block) : (dateKey(printDate) === dateKey(TODAY_DATE) ? "Today's Training" : "Training Day"))}</h1>
-
-      <div className="print-card">
-        {drill && <img src={drillImg.src} style={drillImg.style} alt="" className="print-card-img" />}
-        <div className="print-card-body">
-          <div className="print-card-label">Drill of the Day</div>
-          {drill ? (
-            <>
-              <h2 className="print-card-title">{drill.title}</h2>
-              {[drill.duration, drill.equipment].some((v) => (v || "").trim()) && (
-                <div className="print-card-meta">{[drill.duration, drill.equipment].map((v) => (v || "").trim()).filter(Boolean).join(" · ")}</div>
-              )}
-              {richTextToPlain(drill.objective) && <p className="print-card-text"><strong>Objective:</strong> {richTextToPlain(drill.objective)}</p>}
-              {drill.steps.length > 0 && <ol className="print-steps">{drill.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>}
-              {((drill.sets || "").trim() || (drill.reps || "").trim()) && (
-                <p className="print-card-text">{[(drill.sets || "").trim() && `Sets: ${drill.sets.trim()}`, (drill.reps || "").trim() && `Reps: ${drill.reps.trim()}`].filter(Boolean).join(" · ")}</p>
-              )}
-            </>
-          ) : <p className="print-card-text print-card-text--muted">Not assigned</p>}
+      <header className="print-header">
+        <img src={LOGO_PRINT_SRC} alt="10DTendy" className="print-logo" />
+        <div className="print-header-meta">
+          <span className="print-kicker">Training day</span>
+          <span className="print-date">{WEEKDAY_NAMES[printDate.getDay()]}, {printDate.getDate()} {MONTH_NAMES[printDate.getMonth()]} {printDate.getFullYear()}</span>
         </div>
-      </div>
+      </header>
+      <h1 className="print-title">{title}</h1>
+      {subtitle && <p className="print-subtitle">{subtitle}</p>}
 
-      <div className="print-card">
-        {focus && <img src={focusImg.src} style={focusImg.style} alt="" className="print-card-img" />}
-        <div className="print-card-body">
-          <div className="print-card-label">Practice Focus</div>
-          {focus ? (
-            <>
-              <h2 className="print-card-title">"{focus.title}"</h2>
-              {(focus.cue || "").trim() && <p className="print-card-text"><strong>Cue:</strong> {focus.cue}</p>}
-              {richTextToPlain(focus.explanation) && <p className="print-card-text">{richTextToPlain(focus.explanation)}</p>}
-            </>
-          ) : <p className="print-card-text print-card-text--muted">Not assigned</p>}
-        </div>
-      </div>
+      <PrintCard label="Drill of the day" image={drillImg}>
+        {drill ? (
+          <>
+            <h2 className="print-card-title">{drill.title}</h2>
+            {meta(drill.duration, drill.equipment).length > 0 && (
+              <div className="print-meta">{meta(drill.duration, drill.equipment).map((m) => <span key={m}>{m}</span>)}</div>
+            )}
+            {richTextToPlain(drill.objective) && <><PrintHeading>Objective</PrintHeading><RichText className="print-rich" value={drill.objective} /></>}
+            {drill.steps.length > 0 && (
+              <>
+                <PrintHeading>How to perform</PrintHeading>
+                <ol className="print-steps">{drill.steps.map((st, i) => <li key={i}><span className="print-step-num">{i + 1}</span><span>{st}</span></li>)}</ol>
+              </>
+            )}
+            {meta(drill.sets, drill.reps).length > 0 && (
+              <div className="print-pills">
+                {(drill.sets || "").trim() && <span className="print-pill"><small>Sets</small>{drill.sets.trim()}</span>}
+                {(drill.reps || "").trim() && <span className="print-pill"><small>Reps</small>{drill.reps.trim()}</span>}
+              </div>
+            )}
+          </>
+        ) : <p className="print-muted">Not assigned</p>}
+      </PrintCard>
 
-      <div className="print-card">
-        {office && <img src={officeImg.src} style={officeImg.style} alt="" className="print-card-img" />}
-        <div className="print-card-body">
-          <div className="print-card-label">Off-Ice</div>
-          {office ? (
-            <>
-              {/* Off-Ice on paper: cover image, objective and the Workout (set descriptions + table). */}
-              <h2 className="print-card-title">{office.title}</h2>
-              {richTextToPlain(office.objective) && <p className="print-card-text"><strong>Objective:</strong> {richTextToPlain(office.objective)}</p>}
-              {workoutPlanSegments(office).map((seg) => (seg.note ? (
-                <p className="print-card-text print-plan-note" key={seg.note.id}>
-                  {(seg.note.intensity || "").trim() && <strong>Intensity: {seg.note.intensity.trim()}{planNoteHasText(seg.note) ? ". " : ""}</strong>}
-                  {richTextToPlain(seg.note.text)}
-                </p>
-              ) : (
-                <table className="print-plan-table" key={seg.rows[0].id}>
-                  <thead><tr>{workoutPlanColumns(office).map((c) => <th key={c.key}>{c.label}</th>)}</tr></thead>
-                  <tbody>
-                    {seg.rows.map((r) => <tr key={r.id}>{workoutPlanColumns(office).map((c) => <td key={c.key}>{r[c.key]}</td>)}</tr>)}
-                  </tbody>
-                </table>
-              )))}
-            </>
-          ) : <p className="print-card-text print-card-text--muted">Not assigned</p>}
-        </div>
-      </div>
+      <PrintCard label="Practice focus" image={focusImg}>
+        {focus ? (
+          <>
+            <h2 className="print-card-title">{focus.title}</h2>
+            {(focus.cue || "").trim() && (
+              <div className="print-cue"><small>Today's cue</small>{focus.cue.trim()}</div>
+            )}
+            {richTextToPlain(focus.explanation) && <><PrintHeading>Execution</PrintHeading><RichText className="print-rich" value={focus.explanation} /></>}
+          </>
+        ) : <p className="print-muted">Not assigned</p>}
+      </PrintCard>
 
-      <div className="print-footer">10DTENDY — Elite Goalie Development</div>
+      <PrintCard label="Off-ice" image={officeImg} canBreak>
+        {office ? (
+          <>
+            <h2 className="print-card-title">{office.title}</h2>
+            {richTextToPlain(office.objective) && <><PrintHeading>Objective</PrintHeading><RichText className="print-rich" value={office.objective} /></>}
+            {workoutPlanSegments(office).length > 0 && <PrintHeading>Workout</PrintHeading>}
+            {workoutPlanSegments(office).map((seg) => (seg.note ? (
+              <div className="print-plan-note" key={seg.note.id}>
+                {(seg.note.intensity || "").trim() && <span className="print-intensity">{seg.note.intensity.trim()}</span>}
+                {planNoteHasText(seg.note) && <RichText className="print-rich" value={seg.note.text} />}
+              </div>
+            ) : (
+              <table className="print-plan-table" key={seg.rows[0].id}>
+                <thead><tr>{workoutPlanColumns(office).map((c) => <th key={c.key}>{c.label}</th>)}</tr></thead>
+                <tbody>
+                  {seg.rows.map((r) => <tr key={r.id}>{workoutPlanColumns(office).map((c) => <td key={c.key}>{r[c.key]}</td>)}</tr>)}
+                </tbody>
+              </table>
+            )))}
+          </>
+        ) : <p className="print-muted">Not assigned</p>}
+      </PrintCard>
+
+      <footer className="print-footer">
+        <span>10DTENDY · Elite Goalie Development</span>
+        <span>app.10dtendy.com</span>
+      </footer>
     </div>
   );
 }
@@ -7517,27 +7547,64 @@ button:focus {
 /* ---------------- PRINT ---------------- */
 .print-sheet { display: none; }
 @media print {
-  @page { size: A4; margin: 10mm; }
-  .no-print { display: none !important; }
-  .print-sheet { display: block; position: static; width: auto; margin: 0; padding: 0; color: #111; font-family: 'Inter', sans-serif; background: #fff; }
-  .print-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #111; padding-bottom: 8px; margin-bottom: 10px; }
-  .print-logo { font-family: 'Archivo'; font-weight: 900; font-size: 14px; display: flex; align-items: center; gap: 6px; }
-  .print-date { font-size: 11px; color: #555; }
-  .print-title { font-size: 22px; font-weight: 900; margin-bottom: 14px; }
-  .print-card { display: flex; gap: 14px; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; padding: 12px; margin-bottom: 12px; page-break-inside: avoid; }
-  .print-card-img { width: 38mm; height: 38mm; flex-shrink: 0; object-fit: cover; border-radius: 6px; background: #eee; }
+  @page { size: A4; margin: 10mm 11mm; }
+  html, body { background: #fff !important; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  /* Only the sheet prints — not the app's header, pages, menus, banners or dialogs. */
+  .no-print, .cookie-root, .dialog-host { display: none !important; }
+  .app { background: #fff !important; min-height: 0 !important; }
+  .app > :not(.print-sheet) { display: none !important; }
+  .print-sheet { display: block; color: #16161a; font-family: 'Inter', sans-serif; font-size: 10px; line-height: 1.42; background: #fff; }
+
+  .print-header { display: flex; justify-content: space-between; align-items: flex-end; padding-bottom: 8px; border-bottom: 2.5px solid #BE202E; }
+  .print-logo { height: 22px; width: auto; display: block; }
+  .print-header-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+  .print-kicker { font-size: 8px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #BE202E; }
+  .print-date { font-size: 10.5px; font-weight: 600; color: #333; }
+  .print-title { font-family: 'Archivo'; font-size: 22px; font-weight: 900; letter-spacing: -0.01em; margin: 10px 0 1px; color: #111; }
+  .print-subtitle { font-size: 11px; color: #666; margin: 0 0 4px; }
+
+  .print-card { display: flex; gap: 12px; margin-top: 9px; padding: 10px 11px; border: 1px solid #e5e5e8; border-left: 3px solid #BE202E; border-radius: 8px; background: #fff; break-inside: avoid; page-break-inside: avoid; }
+  .print-card--can-break { break-inside: auto; page-break-inside: auto; }
+  .print-section-heading, .print-plan-note { break-after: avoid; page-break-after: avoid; }
+  .print-plan-table, .print-plan-table tr, .print-steps li { break-inside: avoid; page-break-inside: avoid; }
+  .print-card-img { width: 29mm; height: 29mm; flex-shrink: 0; object-fit: cover; border-radius: 6px; background: #eee; }
   .print-card-body { flex: 1; min-width: 0; }
-  .print-card-label { font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #888; margin-bottom: 3px; }
-  .print-card-title { font-size: 15px; font-weight: 800; margin-bottom: 4px; }
-  .print-card-meta { font-size: 10.5px; color: #666; margin-bottom: 6px; }
-  .print-card-text { font-size: 10.5px; line-height: 1.45; color: #222; margin-bottom: 4px; }
-  .print-card-text--muted { color: #999; font-style: italic; }
-  .print-steps { margin: 4px 0 0 16px; font-size: 10.5px; line-height: 1.45; padding: 0; }
-  .print-plan-note { margin: 6px 0 4px; padding-left: 8px; border-left: 2px solid #BE202E; }
-  .print-plan-table { width: 100%; border-collapse: collapse; margin: 4px 0 6px; font-size: 10px; }
-  .print-plan-table th, .print-plan-table td { text-align: left; padding: 3px 6px; border-bottom: 1px solid #e2e2e2; }
-  .print-plan-table th { font-size: 8.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #777; }
-  .print-footer { margin-top: 16px; text-align: center; font-size: 9px; color: #999; letter-spacing: 0.08em; }
+  .print-card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
+  .print-card-label { font-size: 8px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #BE202E; }
+  .print-check { display: inline-flex; align-items: center; gap: 5px; font-size: 8px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #999; }
+  .print-check-box { width: 10px; height: 10px; border: 1.3px solid #aaa; border-radius: 2px; }
+  .print-card-title { font-family: 'Archivo'; font-size: 14px; font-weight: 800; margin: 0 0 3px; color: #111; }
+  .print-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+  .print-meta span { font-size: 9px; color: #555; background: #f2f2f4; border-radius: 999px; padding: 2px 8px; }
+  .print-section-heading { font-size: 7.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #888; margin: 6px 0 2px; }
+  .print-muted { color: #999; font-style: italic; margin: 4px 0 0; }
+
+  .print-rich p { margin: 0 0 4px; }
+  .print-rich p:last-child { margin-bottom: 0; }
+  .print-rich ul, .print-rich ol { margin: 2px 0 4px; padding-left: 16px; }
+  .print-rich li { margin-bottom: 1px; }
+
+  .print-steps { list-style: none; margin: 0; padding: 0; }
+  .print-steps li { display: flex; align-items: flex-start; gap: 7px; margin-bottom: 2px; }
+  .print-step-num { flex: none; width: 14px; height: 14px; border-radius: 50%; background: #BE202E; color: #fff; font-size: 8.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; margin-top: 0.5px; }
+  .print-pills { display: flex; gap: 6px; margin-top: 7px; }
+  .print-pill { display: inline-flex; align-items: baseline; gap: 5px; padding: 3px 9px; border-radius: 6px; background: #f2f2f4; font-weight: 700; font-size: 10.5px; }
+  .print-pill small { font-size: 7.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #888; font-weight: 700; }
+
+  .print-cue { margin: 3px 0 1px; padding: 5px 9px; border-radius: 6px; background: #fbecee; border: 1px solid #f1c9ce; font-size: 11.5px; font-weight: 600; color: #111; }
+  .print-cue small { display: block; font-size: 7.5px; letter-spacing: 0.12em; text-transform: uppercase; color: #BE202E; font-weight: 700; margin-bottom: 1px; }
+
+  .print-plan-note { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; margin: 5px 0 3px; }
+  .print-intensity { flex: none; font-size: 8px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #fff; background: #BE202E; border-radius: 999px; padding: 2px 7px; }
+  .print-plan-note .print-rich { flex: 1; min-width: 50%; font-weight: 600; }
+  .print-plan-table { width: 100%; border-collapse: collapse; margin: 1px 0 3px; font-size: 9px; }
+  .print-plan-table th { text-align: left; padding: 3px 7px; background: #f2f2f4; font-size: 7.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #666; }
+  .print-plan-table td { padding: 2px 7px; border-bottom: 1px solid #ededf0; }
+  .print-plan-table tbody tr:nth-child(even) td { background: #fafafb; }
+  .print-plan-table td:first-child { font-weight: 600; }
+
+  .print-footer { display: flex; justify-content: space-between; margin-top: 10px; padding-top: 6px; border-top: 1px solid #e5e5e8; font-size: 8px; letter-spacing: 0.08em; color: #999; }
 }
 
 /* ---------------- RESPONSIVE ---------------- */
