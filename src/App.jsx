@@ -1479,20 +1479,22 @@ function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoFo
   if (!assignment || !drill || !focus || !office) {
     return (
       <div className="page">
-        <section className="hero">
-          <div className="hero-left">
-            {eyebrowRow}
-            <h1 className="hero-title">{dayTitle}</h1>
-          </div>
-        </section>
-        <section className="ticket ticket--empty">
-          <div className="ticket-right">
-            <div className="ticket-calendar-group">
-              <h4>Games &amp; Rest</h4>
-              <button className="icon-btn eyebrow-calendar-btn" onClick={() => setCalendarOpen(true)} aria-label="Game days & rest days calendar"><CalendarIcon size={15} /></button>
+        <div className="today-top">
+          <section className="hero">
+            <div className="hero-left">
+              {eyebrowRow}
+              <h1 className="hero-title">{dayTitle}</h1>
             </div>
-          </div>
-        </section>
+          </section>
+          <section className="ticket ticket--empty">
+            <div className="ticket-right">
+              <div className="ticket-calendar-group">
+                <h4>Games &amp; Rest</h4>
+                <button className="icon-btn eyebrow-calendar-btn" onClick={() => setCalendarOpen(true)} aria-label="Game days & rest days calendar"><CalendarIcon size={15} /></button>
+              </div>
+            </div>
+          </section>
+        </div>
         <div className="empty-state empty-state--hero">
           <p>{isToday ? "Your coach hasn't assigned today's training yet." : "Your coach hadn't assigned training for this day."}</p>
         </div>
@@ -1503,6 +1505,8 @@ function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoFo
 
   return (
     <div className="page">
+      {/* On desktop the title sits on the left and the training-day bar on the right. */}
+      <div className="today-top">
       <section className="hero">
         <div className="hero-left">
           {eyebrowRow}
@@ -1534,9 +1538,10 @@ function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoFo
             <button className="icon-btn eyebrow-calendar-btn" onClick={() => setCalendarOpen(true)} aria-label="Game days & rest days calendar"><CalendarIcon size={15} /></button>
           </div>
           {onMakeRest && <button className="btn btn--ghost btn--small" onClick={onMakeRest}>Make today a rest day again</button>}
-          <button className="btn btn--primary ticket-download-btn" onClick={onDownloadPDF}><Download size={15} /> Download Training PDF</button>
+          <button className="btn btn--primary ticket-download-btn" onClick={onDownloadPDF}><Download size={15} /> <span>Download<span className="ticket-pdf-word"> Training</span> PDF</span></button>
         </div>
       </section>
+      </div>
 
       {/* Left column: Practice Focus on top, a compact Drill of the Day below.
           Right column: the Off-Ice workout as the big feature card spanning both. */}
@@ -6935,6 +6940,20 @@ button:focus {
 /* ---------------- TICKET ---------------- */
 .ticket { display: flex; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 30px; gap: 30px; margin-bottom: 20px; }
 .ticket--empty { padding: 12px 16px; }
+/* Desktop: title left, training-day bar right (a long title pushes the bar underneath). */
+@media (min-width: 1180px) {
+  .today-top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 18px 28px; margin-bottom: 20px; }
+  .today-top > .hero { flex: 1 1 360px; min-width: 0; margin-bottom: 0; }
+  .today-top > .ticket { flex: 0 1 auto; margin-bottom: 0; padding: 16px 22px; gap: 22px; }
+  .today-top > .ticket--empty { padding: 12px 16px; }
+  .today-top .ticket-list { gap: 14px; }
+  .today-top .ticket-left h4, .today-top .ticket-right h4 { margin-bottom: 10px; }
+  .today-top .ticket-right { gap: 20px; }
+  .today-top .ticket-pdf-word { display: none; }
+}
+@media (min-width: 1180px) and (max-width: 1379px) {
+  .today-top .hero-title { font-size: 38px; }
+}
 .ticket-left h4, .ticket-right h4 { font-size: 13px; letter-spacing: 0.06em; color: var(--text-dim); font-weight: 600; margin-bottom: 12px; text-transform: uppercase; }
 .ticket-list { list-style: none; padding: 0; margin: 0; display: flex; gap: 20px; }
 .ticket-list li { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text-faint); }
