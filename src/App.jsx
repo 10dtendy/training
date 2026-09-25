@@ -2275,7 +2275,8 @@ function FocusDetailPage({ focus, branding, drills = [], onBack, complete, onCom
 function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
   const [open, setOpen] = useState(null);
   const officeImg = brandImage(office.imageUrl, branding?.office, OFFICE_IMG);
-  // Training Table columns left blank in every row aren't shown at all.
+  const hasPlanNote = !!(office.planNote || "").replace(/<[^>]*>/g, "").trim();
+  // Workout table columns left blank in every row aren't shown at all.
   const planColumns = [["exercise", "Exercise"], ["sets", "Sets"], ["reps", "Reps"], ["rest", "Rest"]]
     .filter(([key]) => key === "exercise" || (office.planRows || []).some((r) => String(r[key] || "").trim()))
     .map(([key, label]) => ({ key, label }));
@@ -2339,9 +2340,11 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
         </div>
       </section>
       )}
-      {office.planRows?.length > 0 && (
+      {(office.planRows?.length > 0 || hasPlanNote) && (
         <section className="detail-block">
-          <h2>Training Table</h2>
+          <h2>Workout</h2>
+          {hasPlanNote && <RichText className="plan-note" value={office.planNote} />}
+          {office.planRows?.length > 0 && (
           <div className="plan-table-wrap">
             <table className="plan-table">
               <thead><tr>{planColumns.map((c) => <th key={c.key}>{c.label}</th>)}</tr></thead>
@@ -2352,6 +2355,7 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
               </tbody>
             </table>
           </div>
+          )}
         </section>
       )}
       <button className={"btn btn--complete" + (complete ? " btn--complete-done" : "")} onClick={onComplete}>
@@ -4010,7 +4014,7 @@ const blankExercise = () => ({
 });
 
 const BLANK_OFFICE = {
-  title: "", duration: "", equipment: "", description: "", objective: "", exercises: [], planRows: [], category: "", published: false,
+  title: "", duration: "", equipment: "", description: "", objective: "", exercises: [], planRows: [], planNote: "", category: "", published: false,
   imageAssetId: null, imageUrl: "", videoAssetId: null, videoUrl: "",
 };
 const blankPlanRow = () => ({ id: uid("row"), exercise: "", sets: "", reps: "", rest: "" });
@@ -4119,10 +4123,11 @@ function ExerciseEditor({ exercises, setDraft, exMedia }) {
   );
 }
 
-// A plain reps/sets/rest table for the workout as a whole — no photos or video, just rows a
-// coach can lay out like a written training plan. Separate from the exercise cards above, which
-// carry media and instructions for demonstrating each individual movement.
-function TrainingTableEditor({ rows, setDraft }) {
+// The "Workout" section: an optional set description (how to run the sets — rounds, rest
+// between rounds) and a plain reps/sets/rest table for the workout as a whole — no photos or
+// video, just rows a coach can lay out like a written training plan. Separate from the exercise
+// cards above, which carry media and instructions for demonstrating each individual movement.
+function WorkoutPlanEditor({ rows, note, setDraft }) {
   const setRows = (updater) => setDraft((d) => ({ ...d, planRows: updater(d.planRows || []) }));
   const updateField = (id, field, value) => setRows((list) => list.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
   const removeRow = (id) => setRows((list) => list.filter((r) => r.id !== id));
@@ -4130,8 +4135,15 @@ function TrainingTableEditor({ rows, setDraft }) {
 
   return (
     <div className="admin-form-span2 plan-table-editor">
-      <span className="media-field-label">Training table</span>
+      <span className="media-field-label">Workout</span>
       <p className="planner-hint" style={{ marginTop: 0 }}>A plain table of reps, sets and rest for the workout — no photos, just the numbers goalies follow.</p>
+      <div className="rich-field-wrap plan-note-field">
+        <span className="rich-field-label">Set description</span>
+        <RichTextEditor
+          rows={2} value={note} onChange={(v) => setDraft((d) => ({ ...d, planNote: v }))}
+          placeholder="How to do the sets, e.g. Do each exercise once, then repeat for 2 more rounds (3 rounds total). Rest 90 sec between rounds."
+        />
+      </div>
       {rows.length === 0 ? (
         <p className="exercise-editor-empty">No rows yet — add the first one below.</p>
       ) : (
@@ -4184,6 +4196,7 @@ function AdminOffIce({ content, updateContent }) {
     planRows: (o.planRows || []).map((r) => ({
       id: r.id || uid("row"), exercise: r.exercise || "", sets: r.sets || "", reps: r.reps || "", rest: r.rest || "",
     })),
+    planNote: o.planNote || "",
   });
   const startEdit = (o) => { setEditingId(o.id); setDraft(toDraft(o)); setCreating(false); media.clearError(); };
   const startCreate = () => { setCreating(true); setEditingId(null); setDraft(BLANK_OFFICE); media.clearError(); };
@@ -4197,6 +4210,8 @@ function AdminOffIce({ content, updateContent }) {
     planRows: (d.planRows || [])
       .filter((r) => r.exercise.trim() || r.sets.trim() || r.reps.trim() || r.rest.trim())
       .map((r) => ({ ...r, exercise: r.exercise.trim() })),
+    // An editor left with only empty markup (e.g. "<br>") counts as no description.
+    planNote: (d.planNote || "").replace(/<[^>]*>/g, "").trim() ? d.planNote : "",
     imageAssetId: d.imageAssetId || null, imageUrl: d.imageUrl || "", videoAssetId: d.videoAssetId || null, videoUrl: d.videoUrl || "",
   });
 
@@ -4261,7 +4276,7 @@ function AdminOffIce({ content, updateContent }) {
 
             <ExerciseEditor exercises={draft.exercises} setDraft={setDraft} exMedia={exMedia} />
 
-            <TrainingTableEditor rows={draft.planRows || []} setDraft={setDraft} />
+            <WorkoutPlanEditor rows={draft.planRows || []} note={draft.planNote || ""} setDraft={setDraft} />
 
             <span className="admin-form-span2 media-section-label">Workout cover photo/video</span>
             <MediaFields draft={draft} media={media} />
@@ -7056,6 +7071,11 @@ button:focus {
 .btn--danger { background: #D63B3B; color: #fff; }
 .btn--danger:hover { filter: brightness(1.08); }
 .content-preview-panel:focus, .welcome-panel:focus { outline: none; }
+.plan-note { margin-bottom: 14px; padding: 12px 14px; border-left: 3px solid var(--accent); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 14px; line-height: 1.55; }
+.plan-note p { margin: 0 0 6px; }
+.plan-note p:last-child { margin-bottom: 0; }
+.plan-note ul, .plan-note ol { margin: 0; padding-left: 18px; }
+.plan-note-field { margin: 4px 0 12px; }
 .legal-checks { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 2px; }
 .legal-check { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; color: var(--text-dim); text-align: left; cursor: pointer; }
 .legal-check input { width: 16px; height: 16px; margin: 2px 0 0; flex: none; accent-color: var(--accent); cursor: pointer; }
