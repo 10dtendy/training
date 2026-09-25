@@ -2147,12 +2147,43 @@ function DrillBody({ drill }) {
 }
 
 // A drill attached to a practice focus: a card that expands to show the whole drill.
+// After an exercise or drill card opens, scroll so its title sits at the top of the screen
+// (just under the header) with its video right below.
+function scrollOpenedIntoView(el) {
+  if (!el) return;
+  const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  requestAnimationFrame(() => el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" }));
+}
+// Same, for an accordion row: opening one collapses the one that was open, which moves
+// everything below it — so wait until the open/close animation has actually finished (its
+// transitionend) before measuring. The timer only covers browsers that don't animate it at all.
+function scrollOpenedAccordionIntoView(row) {
+  const panel = row?.querySelector(".t-acc-panel");
+  if (!panel || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) { scrollOpenedIntoView(row); return; }
+  let done = false;
+  const go = () => {
+    if (done) return;
+    done = true;
+    panel.removeEventListener("transitionend", onEnd);
+    scrollOpenedIntoView(row);
+  };
+  const onEnd = (e) => { if (e.target === panel && e.propertyName === "grid-template-rows") go(); };
+  panel.addEventListener("transitionend", onEnd);
+  setTimeout(() => { if (!panel.getAnimations?.().length) go(); }, 450);
+}
+
 function FocusDrillCard({ drill, branding }) {
   const [open, setOpen] = useState(false);
+  const cardRef = useRef(null);
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next) scrollOpenedIntoView(cardRef.current);
+  };
   const img = brandImage(drill.imageUrl, branding?.drill, DRILL_IMG);
   return (
-    <section className="focus-drill-card">
-      <button type="button" className="focus-drill-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+    <section className="focus-drill-card" ref={cardRef}>
+      <button type="button" className="focus-drill-head" onClick={toggle} aria-expanded={open}>
         <img src={img.src} style={img.style} alt="" className="focus-drill-thumb" />
         <span className="focus-drill-info">
           <span className="label">DRILL</span>
@@ -2237,6 +2268,12 @@ function FocusDetailPage({ focus, branding, drills = [], onBack, complete, onCom
 
 function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
   const [open, setOpen] = useState(null);
+  const exerciseRefs = useRef({});
+  const toggleExercise = (i) => {
+    const next = open === i ? null : i;
+    setOpen(next);
+    if (next !== null) scrollOpenedAccordionIntoView(exerciseRefs.current[i]);
+  };
   const officeImg = brandImage(office.imageUrl, branding?.office, OFFICE_IMG);
   // The Workout section is a list of exercise rows and set descriptions, in the coach's order:
   // each run of exercise rows becomes a table, each description a highlighted note between them.
@@ -2273,8 +2310,8 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
         <h2>Exercises</h2>
         <div className="exercise-list">
           {office.exercises.map((ex, i) => (
-            <div className="exercise-row t-acc" data-open={open === i ? "true" : "false"} key={ex.id || ex.name + i}>
-              <button className="exercise-head t-acc-head" aria-expanded={open === i} onClick={() => setOpen(open === i ? null : i)}>
+            <div className="exercise-row t-acc" data-open={open === i ? "true" : "false"} key={ex.id || ex.name + i} ref={(el) => { exerciseRefs.current[i] = el; }}>
+              <button className="exercise-head t-acc-head" aria-expanded={open === i} onClick={() => toggleExercise(i)}>
                 <div className="exercise-thumb">
                   <CircleDot size={16} />
                 </div>
@@ -6763,6 +6800,9 @@ button:focus {
 .focus-hero-glow { height: 2px; width: 70px; background: var(--accent); box-shadow: 0 0 18px 2px var(--accent); margin-top: 22px; border-radius: 2px; }
 .exercise-list { display: flex; flex-direction: column; gap: 10px; }
 .exercise-row { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+/* Room for the sticky header when an opened exercise / drill card is scrolled to the top. */
+.exercise-row, .focus-drill-card { scroll-margin-top: 84px; }
+.content-preview-panel .exercise-row, .content-preview-panel .focus-drill-card { scroll-margin-top: 64px; }
 .exercise-head { width: 100%; display: flex; align-items: center; gap: 14px; padding: 16px; text-align: left; }
 /* .exercise-row clips (overflow:hidden, rounded corners) so the accordion panel below can
    collapse to nothing — the site-wide button:focus glow (button:focus, ~line 5314) spills
