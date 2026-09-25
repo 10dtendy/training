@@ -1537,7 +1537,7 @@ function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoFo
             <h4>Games &amp; Rest</h4>
             <button className="icon-btn eyebrow-calendar-btn" onClick={() => setCalendarOpen(true)} aria-label="Game days & rest days calendar"><CalendarIcon size={15} /></button>
           </div>
-          {onMakeRest && <button className="btn btn--ghost btn--small" onClick={onMakeRest}>Make today a rest day again</button>}
+          {onMakeRest && <button className="btn btn--ghost btn--small ticket-rest-btn" onClick={onMakeRest}>Make today a rest day again</button>}
           <button className="btn btn--primary ticket-download-btn" onClick={onDownloadPDF}><Download size={15} /> <span>Download<span className="ticket-pdf-word"> Training</span> PDF</span></button>
         </div>
       </section>
@@ -7683,18 +7683,25 @@ button:focus {
   .daytype-eyebrow-sep { display: none; }
   .hero { flex-direction: column; align-items: flex-start; gap: 20px; }
   .hero-title { font-size: 32px; }
+  /* Phones: the ring beside "Your training day", then Games & Rest beside the PDF button. */
   .ticket {
-    display: grid; grid-template-columns: auto minmax(0, 1fr);
-    grid-template-areas: "ring pdf" "checklist checklist" "gamesrest gamesrest";
-    align-items: center; gap: 16px; padding: 20px;
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "ring checklist checklist" "gamesrest gamesrest pdf";
+    align-items: center; gap: 16px 12px; padding: 16px;
   }
   .ticket-ring-wrap { grid-area: ring; }
   .ticket-left { grid-area: checklist; min-width: 0; }
+  .ticket-left h4 { margin-bottom: 8px; }
+  .ticket-list { flex-wrap: wrap; gap: 4px 10px; }
+  .ticket-list li { font-size: 13px; gap: 4px; }
   .ticket-divider { display: none; }
   .ticket-right { display: contents; }
-  .ticket-download-btn { grid-area: pdf; margin-left: 0; font-size: 13px; padding: 12px 10px; white-space: normal; text-align: center; justify-content: center; }
-  .ticket-calendar-group { grid-area: gamesrest; flex-direction: column; align-items: flex-start; gap: 10px; }
-  .ticket-calendar-group h4 { margin-bottom: 0; }
+  .ticket-download-btn { grid-area: pdf; margin-left: 0; font-size: 13px; padding: 11px 14px; white-space: nowrap; justify-content: center; }
+  .ticket-calendar-group { grid-area: gamesrest; flex-direction: row; align-items: center; gap: 8px; min-width: 0; }
+  .ticket-calendar-group h4 { margin-bottom: 0; white-space: nowrap; }
+  .ticket-pdf-word { display: none; }
+  .ticket-rest-btn { grid-column: 1 / -1; justify-self: start; }
+  .ticket--empty { grid-template-areas: "gamesrest gamesrest gamesrest"; }
   .eyebrow-calendar-btn { width: 36px; height: 36px; }
   .eyebrow-calendar-btn svg { width: 20px; height: 20px; }
   .mistake-row { grid-template-columns: 1fr; }
