@@ -1538,24 +1538,9 @@ function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoFo
         </div>
       </section>
 
+      {/* Left column: Practice Focus on top, a compact Drill of the Day below.
+          Right column: the Off-Ice workout as the big feature card spanning both. */}
       <section className="bento">
-        <button className="card card--drill" onClick={openDrill}>
-          <img src={BADGE_LOGO_SRC} alt="" className="card-badge" />
-          <div className="card-top">
-            <span className="label">DRILL OF THE DAY</span>
-            {progress.drill && <span className="chip chip--done"><Check size={12} /> Done</span>}
-          </div>
-          <div className="card-visual card-visual--drill">
-            <img src={drillImg.src} style={drillImg.style} alt={drill.title} className="media-photo" />
-          </div>
-          <div className="card-body">
-            <h3 className="card-title">{drill.title}</h3>
-            <p className="card-desc">{drill.description}</p>
-            <div className="meta-row"><span>{drill.duration}</span></div>
-            <span className="card-cta">View Drill →</span>
-          </div>
-        </button>
-
         <button className="card card--focus" onClick={openFocus}>
           <img src={focusImg.src} style={focusImg.style} alt="" className="media-photo card-photo-bg" />
           <div className="card-photo-scrim" />
@@ -1568,18 +1553,35 @@ function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoFo
           <span className="card-cta card-cta--light">Read more →</span>
         </button>
 
-        <button className="card card--office" onClick={openOffice}>
+        <button className="card card--drill card--compact" onClick={openDrill}>
+          <div className="card-top">
+            <span className="label">DRILL OF THE DAY</span>
+            {progress.drill && <span className="chip chip--done"><Check size={12} /> Done</span>}
+          </div>
+          <div className="card-visual card-visual--compact">
+            <img src={drillImg.src} style={drillImg.style} alt={drill.title} className="media-photo" />
+          </div>
+          <h3 className="card-title">{drill.title}</h3>
+          {drill.description && <p className="card-desc">{drill.description}</p>}
+          {(drill.duration || "").trim() && <div className="meta-row"><span>{drill.duration}</span></div>}
+          <span className="card-cta">View Drill →</span>
+        </button>
+
+        <button className="card card--office card--feature" onClick={openOffice}>
+          <img src={BADGE_LOGO_SRC} alt="" className="card-badge" />
           <div className="card-top">
             <span className="label">OFF-ICE</span>
             {progress.office && <span className="chip chip--done"><Check size={12} /> Done</span>}
           </div>
-          <div className="card-visual card-visual--office">
+          <div className="card-visual card-visual--feature">
             <img src={officeImg.src} style={officeImg.style} alt={office.title} className="media-photo" />
           </div>
-          <h3 className="card-title">{office.title}</h3>
-          {office.description && <p className="card-desc">{office.description}</p>}
-          <div className="meta-row"><span>{office.duration}</span></div>
-          <span className="card-cta">View Workout →</span>
+          <div className="card-body">
+            <h3 className="card-title">{office.title}</h3>
+            {office.description && <p className="card-desc">{office.description}</p>}
+            {(office.duration || "").trim() && <div className="meta-row"><span>{office.duration}</span></div>}
+            <span className="card-cta">View Workout →</span>
+          </div>
         </button>
       </section>
       {calendarModal}
@@ -6812,23 +6814,24 @@ button:focus {
 .hero--progress { margin-bottom: 48px; }
 
 /* ---------------- BENTO ---------------- */
-.bento { display: grid; grid-template-columns: 1.6fr 1fr; grid-template-rows: auto auto; gap: 18px; margin-bottom: 20px; }
+.bento { display: grid; grid-template-columns: 1fr 1.6fr; grid-template-rows: auto auto; gap: 18px; margin-bottom: 20px; }
 .card { text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; position: relative; overflow: hidden; transition: transform .22s ease, border-color .22s ease; }
 .card:hover { transform: translateY(-3px); border-color: #34343a; }
 .card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; position: relative; z-index: 1; }
-.card--drill {
-  grid-row: 1 / 3; display: flex; flex-direction: column;
+/* The big card on the right (today: the off-ice workout), spanning both rows. */
+.card--feature {
+  grid-column: 2; grid-row: 1 / 3; display: flex; flex-direction: column;
   background:
     radial-gradient(460px 320px at 100% 100%, rgba(190,32,46,0.16), transparent 62%),
     radial-gradient(280px 200px at 0% 0%, rgba(255,255,255,0.035), transparent 70%),
     linear-gradient(165deg, #17171b 0%, var(--surface) 55%, #0d0d0f 100%);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 24px 44px -24px rgba(0,0,0,0.55);
 }
-.card--drill:hover { box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 30px 54px -22px rgba(0,0,0,0.6); }
+.card--feature:hover { box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 30px 54px -22px rgba(0,0,0,0.6); }
 .card-badge { position: absolute; right: -46px; bottom: -34px; width: 240px; height: auto; z-index: 0; opacity: 0.18; transform: rotate(-14deg); pointer-events: none; }
 .card-visual { height: 180px; border-radius: 10px; background: linear-gradient(160deg, var(--surface-2), #0d0d0f); display: flex; align-items: center; justify-content: center; margin-bottom: 18px; position: relative; z-index: 1; overflow: hidden; }
-.card-visual--drill { color: var(--text-faint); }
-.card-visual--office { height: 120px; margin-bottom: 12px; }
+.card-visual--feature { color: var(--text-faint); height: auto; min-height: 200px; flex: 1 1 200px; }
+.card-visual--compact { height: 120px; margin-bottom: 12px; }
 .media-photo { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card-body { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 8px; flex: 1; }
 .card-title { font-size: 20px; font-weight: 700; }
@@ -6838,7 +6841,7 @@ button:focus {
 .card-cta { margin-top: auto; font-size: 14px; font-weight: 600; color: var(--accent); padding-top: 8px; position: relative; z-index: 1; }
 .card-cta--light { color: var(--text); }
 .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 4px 8px; border-radius: 20px; background: var(--accent-dim); color: var(--accent); font-weight: 600; }
-.card--focus { display: flex; flex-direction: column; background: var(--surface); position: relative; }
+.card--focus { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; background: var(--surface); position: relative; }
 .card-photo-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
 .card-photo-scrim { position: absolute; inset: 0; z-index: 0; background: linear-gradient(200deg, rgba(10,10,12,0.55) 10%, rgba(10,10,12,0.94) 85%); }
 .focus-quote { font-family: 'Archivo'; font-size: 24px; font-weight: 700; line-height: 1.2; margin: 12px 0 auto; position: relative; z-index: 1; }
@@ -6927,7 +6930,7 @@ button:focus {
 .chart-empty { font-size: 13px; color: var(--text-faint); padding: 30px 0; text-align: center; }
 .gameperf-table-wrap { overflow-x: auto; }
 .focus-glow { height: 2px; width: 60px; background: var(--accent); border-radius: 2px; box-shadow: 0 0 16px 2px var(--accent); margin: 20px 0 14px; position: relative; z-index: 1; }
-.card--office { display: flex; flex-direction: column; gap: 4px; }
+.card--compact { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; gap: 4px; }
 
 /* ---------------- TICKET ---------------- */
 .ticket { display: flex; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 30px; gap: 30px; margin-bottom: 20px; }
@@ -7616,7 +7619,8 @@ button:focus {
   .nav-mobile-panel { display: flex; }
   .admin-topbar .nav-admin-toggle { display: flex; }
   .bento { grid-template-columns: 1fr; grid-template-rows: auto; }
-  .card--drill { grid-row: auto; }
+  .card--feature, .card--focus, .card--compact { grid-column: auto; grid-row: auto; }
+  .card-visual--feature { flex: none; height: 180px; min-height: 0; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .gameperf-charts-row { grid-template-columns: 1fr; }
   .admin-shell { flex-direction: column; }
