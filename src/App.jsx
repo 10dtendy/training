@@ -2275,10 +2275,18 @@ function FocusDetailPage({ focus, branding, drills = [], onBack, complete, onCom
 function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
   const [open, setOpen] = useState(null);
   const officeImg = brandImage(office.imageUrl, branding?.office, OFFICE_IMG);
-  const hasPlanNote = !!(office.planNote || "").replace(/<[^>]*>/g, "").trim();
-  // Workout table columns left blank in every row aren't shown at all.
+  // The Workout section is a list of exercise rows and set descriptions, in the coach's order:
+  // each run of exercise rows becomes a table, each description a highlighted note between them.
+  const planItems = office.planRows || [];
+  const planSegments = [];
+  for (const item of planItems) {
+    if (isPlanNote(item)) planSegments.push({ note: item });
+    else if (planSegments.length && planSegments[planSegments.length - 1].rows) planSegments[planSegments.length - 1].rows.push(item);
+    else planSegments.push({ rows: [item] });
+  }
+  // Workout table columns left blank in every exercise row aren't shown at all.
   const planColumns = [["exercise", "Exercise"], ["sets", "Sets"], ["reps", "Reps"], ["rest", "Rest"]]
-    .filter(([key]) => key === "exercise" || (office.planRows || []).some((r) => String(r[key] || "").trim()))
+    .filter(([key]) => key === "exercise" || planItems.some((r) => !isPlanNote(r) && String(r[key] || "").trim()))
     .map(([key, label]) => ({ key, label }));
   return (
     <div className="page detail">
@@ -2340,22 +2348,23 @@ function OffIceDetailPage({ office, branding, onBack, complete, onComplete }) {
         </div>
       </section>
       )}
-      {(office.planRows?.length > 0 || hasPlanNote) && (
+      {planSegments.length > 0 && (
         <section className="detail-block">
           <h2>Workout</h2>
-          {hasPlanNote && <RichText className="plan-note" value={office.planNote} />}
-          {office.planRows?.length > 0 && (
-          <div className="plan-table-wrap">
-            <table className="plan-table">
-              <thead><tr>{planColumns.map((c) => <th key={c.key}>{c.label}</th>)}</tr></thead>
-              <tbody>
-                {office.planRows.map((r) => (
-                  <tr key={r.id}>{planColumns.map((c) => <td key={c.key}>{r[c.key]}</td>)}</tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          )}
+          {planSegments.map((seg) => (seg.note ? (
+            <RichText key={seg.note.id} className="plan-note" value={seg.note.text} />
+          ) : (
+            <div className="plan-table-wrap" key={seg.rows[0].id}>
+              <table className="plan-table">
+                <thead><tr>{planColumns.map((c) => <th key={c.key}>{c.label}</th>)}</tr></thead>
+                <tbody>
+                  {seg.rows.map((r) => (
+                    <tr key={r.id}>{planColumns.map((c) => <td key={c.key}>{r[c.key]}</td>)}</tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )))}
         </section>
       )}
       <button className={"btn btn--complete" + (complete ? " btn--complete-done" : "")} onClick={onComplete}>
@@ -4014,10 +4023,14 @@ const blankExercise = () => ({
 });
 
 const BLANK_OFFICE = {
-  title: "", duration: "", equipment: "", description: "", objective: "", exercises: [], planRows: [], planNote: "", category: "", published: false,
+  title: "", duration: "", equipment: "", description: "", objective: "", exercises: [], planRows: [], category: "", published: false,
   imageAssetId: null, imageUrl: "", videoAssetId: null, videoUrl: "",
 };
 const blankPlanRow = () => ({ id: uid("row"), exercise: "", sets: "", reps: "", rest: "" });
+// A set description sits in the same list as the exercise rows (anywhere: before, between or after them).
+const blankPlanNote = () => ({ id: uid("note"), type: "note", text: "" });
+function isPlanNote(item) { return item?.type === "note"; }
+function planNoteHasText(item) { return !!String(item?.text || "").replace(/<[^>]*>/g, "").trim(); }
 
 // Uploads/removes photo or video for one exercise inside draft.exercises, keyed by the
 // exercise's own id so state stays correct even after rows are added, removed, or reordered.
@@ -4123,46 +4136,73 @@ function ExerciseEditor({ exercises, setDraft, exMedia }) {
   );
 }
 
-// The "Workout" section: an optional set description (how to run the sets — rounds, rest
-// between rounds) and a plain reps/sets/rest table for the workout as a whole — no photos or
-// video, just rows a coach can lay out like a written training plan. Separate from the exercise
-// cards above, which carry media and instructions for demonstrating each individual movement.
-function WorkoutPlanEditor({ rows, note, setDraft }) {
-  const setRows = (updater) => setDraft((d) => ({ ...d, planRows: updater(d.planRows || []) }));
-  const updateField = (id, field, value) => setRows((list) => list.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
-  const removeRow = (id) => setRows((list) => list.filter((r) => r.id !== id));
-  const addRow = () => setRows((list) => [...list, blankPlanRow()]);
+// The "Workout" section: a plain, ordered list of exercise rows (sets, reps, rest) and set
+// descriptions (how to run them — rounds, rest between rounds) that goalies follow like a written
+// training plan. No photos or video — that's what the exercise cards above are for.
+function WorkoutPlanEditor({ items, setDraft }) {
+  const setItems = (updater) => setDraft((d) => ({ ...d, planRows: updater(d.planRows || []) }));
+  const updateField = (id, field, value) => setItems((list) => list.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
+  const remove = (id) => setItems((list) => list.filter((r) => r.id !== id));
+  const move = (id, dir) => setItems((list) => {
+    const i = list.findIndex((r) => r.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= list.length) return list;
+    const next = [...list];
+    [next[i], next[j]] = [next[j], next[i]];
+    return next;
+  });
+  const hasRows = items.some((r) => !isPlanNote(r));
+
+  const actions = (item, i, what) => (
+    <div className="plan-item-actions">
+      <button type="button" className="icon-btn" onClick={() => move(item.id, -1)} disabled={i === 0} aria-label={`Move ${what} up`}><ChevronUp size={14} /></button>
+      <button type="button" className="icon-btn" onClick={() => move(item.id, 1)} disabled={i === items.length - 1} aria-label={`Move ${what} down`}><ChevronDown size={14} /></button>
+      <button type="button" className="icon-btn" onClick={() => remove(item.id)} aria-label={`Remove ${what}`}><Trash2 size={14} /></button>
+    </div>
+  );
 
   return (
     <div className="admin-form-span2 plan-table-editor">
       <span className="media-field-label">Workout</span>
-      <p className="planner-hint" style={{ marginTop: 0 }}>A plain table of reps, sets and rest for the workout — no photos, just the numbers goalies follow.</p>
-      <div className="rich-field-wrap plan-note-field">
-        <span className="rich-field-label">Set description</span>
-        <RichTextEditor
-          rows={2} value={note} onChange={(v) => setDraft((d) => ({ ...d, planNote: v }))}
-          placeholder="How to do the sets, e.g. Do each exercise once, then repeat for 2 more rounds (3 rounds total). Rest 90 sec between rounds."
-        />
-      </div>
-      {rows.length === 0 ? (
-        <p className="exercise-editor-empty">No rows yet — add the first one below.</p>
+      <p className="planner-hint" style={{ marginTop: 0 }}>
+        The exercises goalies follow, with their sets, reps and rest. Add a set description wherever you need to explain how to do them —
+        for example rounds, or rest between rounds — and move it above, between or below the exercises.
+      </p>
+      {items.length === 0 ? (
+        <p className="exercise-editor-empty">Nothing yet — add an exercise or a set description below.</p>
       ) : (
         <div className="plan-table-rows">
-          <div className="plan-table-row plan-table-row--head">
-            <span>Exercise</span><span>Sets</span><span>Reps</span><span>Rest</span><span />
-          </div>
-          {rows.map((r) => (
-            <div className="plan-table-row" key={r.id}>
-              <input value={r.exercise} onChange={(e) => updateField(r.id, "exercise", e.target.value)} placeholder="e.g. Box jumps" />
-              <input value={r.sets} onChange={(e) => updateField(r.id, "sets", e.target.value)} placeholder="3" />
-              <input value={r.reps} onChange={(e) => updateField(r.id, "reps", e.target.value)} placeholder="10" />
-              <input value={r.rest} onChange={(e) => updateField(r.id, "rest", e.target.value)} placeholder="45 sec" />
-              <button type="button" className="icon-btn" onClick={() => removeRow(r.id)} aria-label="Remove row"><Trash2 size={14} /></button>
+          {hasRows && (
+            <div className="plan-table-row plan-table-row--head">
+              <span>Exercise</span><span>Sets</span><span>Reps</span><span>Rest</span><span />
             </div>
-          ))}
+          )}
+          {items.map((item, i) => (isPlanNote(item) ? (
+            <div className="plan-note-item" key={item.id}>
+              <div className="plan-note-item-head">
+                <span className="rich-field-label">Set description</span>
+                {actions(item, i, "set description")}
+              </div>
+              <RichTextEditor
+                rows={2} value={item.text} onChange={(v) => updateField(item.id, "text", v)}
+                placeholder="e.g. Do each exercise once, then repeat for 2 more rounds (3 rounds total). Rest 90 sec between rounds."
+              />
+            </div>
+          ) : (
+            <div className="plan-table-row" key={item.id}>
+              <input value={item.exercise} onChange={(e) => updateField(item.id, "exercise", e.target.value)} placeholder="e.g. Box jumps" aria-label="Exercise" />
+              <input value={item.sets} onChange={(e) => updateField(item.id, "sets", e.target.value)} placeholder="3" aria-label="Sets" />
+              <input value={item.reps} onChange={(e) => updateField(item.id, "reps", e.target.value)} placeholder="10" aria-label="Reps" />
+              <input value={item.rest} onChange={(e) => updateField(item.id, "rest", e.target.value)} placeholder="45 sec" aria-label="Rest" />
+              {actions(item, i, "row")}
+            </div>
+          )))}
         </div>
       )}
-      <button type="button" className="btn btn--ghost btn--small" onClick={addRow}><Plus size={13} /> Add row</button>
+      <div className="plan-add-buttons">
+        <button type="button" className="btn btn--ghost btn--small" onClick={() => setItems((list) => [...list, blankPlanRow()])}><Plus size={13} /> Add exercise</button>
+        <button type="button" className="btn btn--ghost btn--small" onClick={() => setItems((list) => [...list, blankPlanNote()])}><Plus size={13} /> Add set description</button>
+      </div>
     </div>
   );
 }
@@ -4193,10 +4233,9 @@ function AdminOffIce({ content, updateContent }) {
       id: ex.id || uid("ex"), name: ex.name || "", sets: ex.sets || "", rest: ex.rest || "", instructions: ex.instructions || "",
       imageAssetId: ex.imageAssetId || null, imageUrl: ex.imageUrl || "", videoAssetId: ex.videoAssetId || null, videoUrl: ex.videoUrl || "",
     })),
-    planRows: (o.planRows || []).map((r) => ({
-      id: r.id || uid("row"), exercise: r.exercise || "", sets: r.sets || "", reps: r.reps || "", rest: r.rest || "",
-    })),
-    planNote: o.planNote || "",
+    planRows: (o.planRows || []).map((r) => (isPlanNote(r)
+      ? { id: r.id || uid("note"), type: "note", text: r.text || "" }
+      : { id: r.id || uid("row"), exercise: r.exercise || "", sets: r.sets || "", reps: r.reps || "", rest: r.rest || "" })),
   });
   const startEdit = (o) => { setEditingId(o.id); setDraft(toDraft(o)); setCreating(false); media.clearError(); };
   const startCreate = () => { setCreating(true); setEditingId(null); setDraft(BLANK_OFFICE); media.clearError(); };
@@ -4207,11 +4246,10 @@ function AdminOffIce({ content, updateContent }) {
     exercises: (d.exercises || [])
       .filter((ex) => ex.name.trim() || ex.instructions.trim() || ex.imageUrl || ex.videoUrl)
       .map((ex) => ({ ...ex, name: ex.name.trim() || "Untitled exercise" })),
+    // Empty rows and empty descriptions (an editor left with only "<br>") are dropped on save.
     planRows: (d.planRows || [])
-      .filter((r) => r.exercise.trim() || r.sets.trim() || r.reps.trim() || r.rest.trim())
-      .map((r) => ({ ...r, exercise: r.exercise.trim() })),
-    // An editor left with only empty markup (e.g. "<br>") counts as no description.
-    planNote: (d.planNote || "").replace(/<[^>]*>/g, "").trim() ? d.planNote : "",
+      .filter((r) => (isPlanNote(r) ? planNoteHasText(r) : r.exercise.trim() || r.sets.trim() || r.reps.trim() || r.rest.trim()))
+      .map((r) => (isPlanNote(r) ? r : { ...r, exercise: r.exercise.trim() })),
     imageAssetId: d.imageAssetId || null, imageUrl: d.imageUrl || "", videoAssetId: d.videoAssetId || null, videoUrl: d.videoUrl || "",
   });
 
@@ -4276,7 +4314,7 @@ function AdminOffIce({ content, updateContent }) {
 
             <ExerciseEditor exercises={draft.exercises} setDraft={setDraft} exMedia={exMedia} />
 
-            <WorkoutPlanEditor rows={draft.planRows || []} note={draft.planNote || ""} setDraft={setDraft} />
+            <WorkoutPlanEditor items={draft.planRows || []} setDraft={setDraft} />
 
             <span className="admin-form-span2 media-section-label">Workout cover photo/video</span>
             <MediaFields draft={draft} media={media} />
@@ -6965,9 +7003,14 @@ button:focus {
 .plan-table-editor { display: flex; flex-direction: column; gap: 10px; }
 .plan-table-rows { display: flex; flex-direction: column; gap: 6px; }
 .plan-table-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 8px; align-items: center; }
+.plan-item-actions { display: flex; gap: 2px; }
+.plan-note-item { padding: 10px 12px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; background: var(--surface); }
+.plan-note-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.plan-add-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.plan-note + .plan-table-wrap, .plan-table-wrap + .plan-note, .plan-table-wrap + .plan-table-wrap { margin-top: 14px; }
 .plan-table-row input { min-width: 0; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text); font-size: 13px; font-family: inherit; }
 .plan-table-row--head { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; padding: 0 10px; }
-.plan-table-row--head span:last-child { width: 30px; }
+.plan-table-row--head span:last-child { width: 88px; }
 .plan-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .plan-table { width: 100%; min-width: 420px; border-collapse: collapse; font-size: 14px; }
 .plan-table th, .plan-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
@@ -7075,7 +7118,6 @@ button:focus {
 .plan-note p { margin: 0 0 6px; }
 .plan-note p:last-child { margin-bottom: 0; }
 .plan-note ul, .plan-note ol { margin: 0; padding-left: 18px; }
-.plan-note-field { margin: 4px 0 12px; }
 .legal-checks { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 2px; }
 .legal-check { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; color: var(--text-dim); text-align: left; cursor: pointer; }
 .legal-check input { width: 16px; height: 16px; margin: 2px 0 0; flex: none; accent-color: var(--accent); cursor: pointer; }
@@ -7208,7 +7250,7 @@ button:focus {
   .plan-table-row input:nth-child(2) { grid-area: sets; }
   .plan-table-row input:nth-child(3) { grid-area: reps; }
   .plan-table-row input:nth-child(4) { grid-area: rest; }
-  .plan-table-row button { grid-area: remove; justify-self: end; }
+  .plan-table-row .plan-item-actions { grid-area: remove; justify-self: end; }
   .plan-table-row--head { display: none; }
   .planner-grid { grid-template-columns: minmax(0, 1fr); }
   .dashboard-health-grid { grid-template-columns: minmax(0, 1fr); }
