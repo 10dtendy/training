@@ -1921,25 +1921,18 @@ function loadYouTubeApi() {
   return youtubeApiPromise;
 }
 
-// YouTube shows its own start-of-playback interface (title, buttons, logo) on phones for about
-// 4 seconds, and it comes back every time playback starts. The video plays behind the thumbnail
-// until BOTH this much real time and this much of the video itself have passed, so a slow
-// connection can't reveal it early and a fast one doesn't wait longer than it has to.
-const YOUTUBE_OVERLAY_MS = 4200;
-const YOUTUBE_OVERLAY_SECONDS = 3.6;
-
 // A YouTube video that looks and behaves like part of this app rather than YouTube:
-//  - it shows only the video's thumbnail with our own play button until it's clicked;
-//  - the real player is driven through the iframe API with YouTube's controls, title and logo
-//    switched off, and it's never clickable (a transparent layer covers it and the iframe
-//    ignores the mouse), so there's no way to open YouTube or its menus; right-click is blocked;
-//  - YouTube still flashes its interface for a few seconds when playback starts (mostly on
-//    phones), so the video plays behind the thumbnail until that has faded, then is revealed
-//    with nothing on it;
-//  - the hidden player is prepared as soon as the video scrolls into view, so the click on the
-//    thumbnail can start playback directly (browsers only allow that inside the click itself);
-//  - a click only ever starts the video. If YouTube pauses it, or it ends, we go back to the
-//    thumbnail so YouTube's paused/ended screens are never shown.
+//  - it shows only the video's thumbnail with our own play button until it's tapped;
+//  - the real player is driven through the iframe API with YouTube's controls switched off, and
+//    it's never clickable itself (a transparent layer covers it and the iframe ignores the
+//    mouse), so there's no way to open YouTube or its menus; right-click is blocked;
+//  - the iframe is taller than the box it sits in (see .youtube-frame iframe): the video is
+//    letterboxed into exactly the visible area, while YouTube's own title bar and logo land in
+//    the cropped-off strips above and below — so the video can show the moment it starts;
+//  - the hidden player is prepared as soon as the video scrolls into view, so the tap on the
+//    thumbnail can start playback directly (browsers only allow that inside the tap itself);
+//  - tapping the playing video pauses it (our play button over the paused frame); tapping again
+//    continues from there. When it ends, it goes back to the thumbnail.
 function YouTubeEmbed({ url, title, size }) {
   const id = youtubeVideoId(url);
   const allowed = !!useConsent()?.youtube;
@@ -1949,10 +1942,10 @@ function YouTubeEmbed({ url, title, size }) {
   const readyRef = useRef(false);
   const creatingRef = useRef(false);
   const wantPlayRef = useRef(false);
-  const revealTimerRef = useRef(null);
-  const [status, setStatus] = useState("idle"); // idle | loading | covered | playing
+  const [status, setStatus] = useState("idle"); // idle | loading | playing | paused
   const [thumbTier, setThumbTier] = useState(0);
   const thumbs = ["maxresdefault", "mqdefault"];
+  const small = size === "sm";
 
   const ensurePlayer = async () => {
     if (playerRef.current || creatingRef.current || !id) return;
@@ -1981,21 +1974,11 @@ function YouTubeEmbed({ url, title, size }) {
           const State = YT.PlayerState;
           if (e.data === State.PLAYING) {
             wantPlayRef.current = false;
-            if (!revealTimerRef.current) {
-              setStatus((cur) => (cur === "playing" ? cur : "covered"));
-              const startedAt = performance.now();
-              revealTimerRef.current = setInterval(() => {
-                const pl = playerRef.current;
-                const seconds = pl && pl.getCurrentTime ? pl.getCurrentTime() : 0;
-                if (performance.now() - startedAt >= YOUTUBE_OVERLAY_MS && seconds >= YOUTUBE_OVERLAY_SECONDS) {
-                  clearInterval(revealTimerRef.current); revealTimerRef.current = null;
-                  setStatus("playing");
-                }
-              }, 100);
-            }
-          } else if (e.data === State.ENDED || e.data === State.PAUSED) {
-            if (revealTimerRef.current) { clearInterval(revealTimerRef.current); revealTimerRef.current = null; }
-            if (e.data === State.ENDED) e.target.stopVideo();
+            setStatus("playing");
+          } else if (e.data === State.PAUSED) {
+            setStatus((cur) => (cur === "idle" ? cur : "paused"));
+          } else if (e.data === State.ENDED) {
+            e.target.stopVideo();
             setStatus("idle");
           }
         },
@@ -2021,7 +2004,6 @@ function YouTubeEmbed({ url, title, size }) {
     }
     return () => {
       if (observer) observer.disconnect();
-      if (revealTimerRef.current) { clearInterval(revealTimerRef.current); revealTimerRef.current = null; }
       if (playerRef.current && playerRef.current.destroy) { try { playerRef.current.destroy(); } catch { /* already gone */ } }
       playerRef.current = null; readyRef.current = false; creatingRef.current = false;
     };
@@ -2031,7 +2013,6 @@ function YouTubeEmbed({ url, title, size }) {
   if (!id) return null;
 
   if (!allowed) {
-    const small = size === "sm";
     return (
       <div className={"youtube-stage youtube-blocked" + (small ? " youtube-blocked--sm" : "")}>
         <VideoIcon size={small ? 18 : 26} />
@@ -2042,33 +2023,45 @@ function YouTubeEmbed({ url, title, size }) {
     );
   }
 
-  // Runs synchronously inside the click so the browser lets playback begin.
+  // Both run synchronously inside the tap so the browser lets playback begin.
   const start = () => {
     setStatus("loading");
     if (playerRef.current && readyRef.current) { playerRef.current.playVideo(); return; }
     wantPlayRef.current = true;
     ensurePlayer();
   };
-  const playing = status === "playing";
+  const pause = () => {
+    setStatus("paused");
+    playerRef.current?.pauseVideo?.();
+  };
+  const resume = () => {
+    setStatus("playing");
+    playerRef.current?.playVideo?.();
+  };
+
+  const playIcon = (
+    <span className={"youtube-play-btn" + (small ? " youtube-play-btn--sm" : "")}>
+      <Play size={small ? 16 : 26} fill="var(--bg)" />
+    </span>
+  );
+  const showVideo = status === "playing" || status === "paused";
   return (
     <div ref={stageRef} className="youtube-stage" onContextMenu={(e) => e.preventDefault()} onDragStart={(e) => e.preventDefault()}>
-      <div ref={hostRef} className={"youtube-frame" + (playing ? "" : " youtube-frame--hidden")} />
-      {playing ? (
-        <div className="youtube-shield" onContextMenu={(e) => e.preventDefault()} />
-      ) : (
-        <button type="button" className="youtube-thumb" onClick={start} onContextMenu={(e) => e.preventDefault()} aria-label="Play video" disabled={status === "covered"}>
+      <div ref={hostRef} className={"youtube-frame" + (showVideo ? "" : " youtube-frame--hidden")} />
+      {status === "playing" && (
+        <button type="button" className="youtube-shield" onClick={pause} aria-label="Pause video" />
+      )}
+      {status === "paused" && (
+        <button type="button" className="youtube-paused" onClick={resume} aria-label="Play video">{playIcon}</button>
+      )}
+      {!showVideo && (
+        <button type="button" className="youtube-thumb" onClick={start} aria-label="Play video" disabled={status === "loading"}>
           <img
             src={`https://img.youtube.com/vi/${id}/${thumbs[thumbTier]}.jpg`} alt="" draggable={false} className="youtube-thumb-img"
             onLoad={(e) => { if (e.target.naturalWidth < 200 && thumbTier < thumbs.length - 1) setThumbTier(thumbTier + 1); }}
             onError={() => { if (thumbTier < thumbs.length - 1) setThumbTier(thumbTier + 1); }}
           />
-          {status === "covered" ? (
-            <span className={"youtube-spinner" + (size === "sm" ? " youtube-spinner--sm" : "")} />
-          ) : (
-            <span className={"youtube-play-btn" + (size === "sm" ? " youtube-play-btn--sm" : "") + (status === "loading" ? " youtube-play-btn--loading" : "")}>
-              <Play size={size === "sm" ? 16 : 26} fill="var(--bg)" />
-            </span>
-          )}
+          {status === "loading" ? <span className={"youtube-spinner" + (small ? " youtube-spinner--sm" : "")} /> : playIcon}
         </button>
       )}
     </div>
@@ -7108,14 +7101,17 @@ button:focus {
 .youtube-stage { position: absolute; inset: 0; background: #000; overflow: hidden; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .youtube-frame { position: absolute; inset: 0; }
 .youtube-frame--hidden { visibility: hidden; }
-.youtube-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; pointer-events: none; }
+/* The player is 120px taller than the box: YouTube letterboxes the video into exactly the visible
+   area and puts its title bar and logo in the 60px strips above and below, which are cropped off. */
+.youtube-frame iframe { position: absolute; left: 0; top: -60px; width: 100%; height: calc(100% + 120px); border: none; pointer-events: none; }
 .youtube-shield { position: absolute; inset: 0; z-index: 2; padding: 0; border: none; background: transparent; cursor: pointer; }
+.youtube-paused { position: absolute; inset: 0; z-index: 2; padding: 0; border: none; background: rgba(0,0,0,0.45); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.youtube-paused:hover .youtube-play-btn { transform: scale(1.06); }
 .youtube-thumb { position: absolute; inset: 0; padding: 0; border: none; background: var(--surface-2); cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .youtube-thumb-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; }
 .youtube-play-btn { position: relative; z-index: 1; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; transition: transform .18s ease; }
 .youtube-thumb:hover .youtube-play-btn { transform: scale(1.06); }
 .youtube-play-btn--sm { width: 32px; height: 32px; }
-.youtube-play-btn--loading { opacity: 0.6; }
 .youtube-thumb:disabled { cursor: default; }
 .youtube-spinner { position: relative; z-index: 1; width: 44px; height: 44px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.35); border-top-color: #fff; animation: youtube-spin 0.9s linear infinite; }
 .youtube-spinner--sm { width: 26px; height: 26px; border-width: 2px; }
