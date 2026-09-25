@@ -152,14 +152,13 @@ const LEVELS = ["Youth", "Junior", "Pro"];
 export async function getContent() {
   const [
     { data: drills }, { data: focusPoints }, { data: offIceWorkouts },
-    { data: categories }, { data: trainingDays }, { data: media }, { data: settings },
+    { data: categories }, { data: trainingDays }, { data: settings },
   ] = await Promise.all([
     supabase.from("drills").select("*").order("created_at"),
     supabase.from("focus_points").select("*").order("created_at"),
     supabase.from("off_ice_workouts").select("*").order("created_at"),
     supabase.from("categories").select("*"),
     supabase.from("training_days").select("*").order("position"),
-    supabase.from("media").select("*").order("uploaded_at", { ascending: false }),
     supabase.from("app_settings").select("*"),
   ]);
 
@@ -210,10 +209,6 @@ export async function getContent() {
     welcome: settingsByKey.welcome,
     announcement: settingsByKey.announcement,
     confirmationEmail: settingsByKey.confirmation_email || undefined,
-    media: (media || []).map((m) => ({
-      id: m.id, url: m.url, contentType: m.content_type, sizeBytes: m.size_bytes,
-      name: m.name, uploadedAt: m.uploaded_at, storagePath: m.storage_path,
-    })),
   };
 }
 
@@ -303,12 +298,6 @@ export async function updateContentFields(patch, prev = {}) {
       trainingDaysWriteChain = run.catch(() => {});
       ok.push(await run);
     }
-    if (patch.media) {
-      ok.push(await reconcileTable("media", patch.media, (m) => ({
-        id: m.id, url: m.url, content_type: m.contentType, size_bytes: m.sizeBytes,
-        name: m.name, storage_path: m.storagePath || null,
-      })));
-    }
     for (const [patchKey, settingsKey] of [["gameDay", "game_day"], ["restDay", "rest_day"], ["branding", "branding"], ["welcome", "welcome"], ["announcement", "announcement"], ["accentColor", "accent_color"], ["confirmationEmail", "confirmation_email"]]) {
       if (patch[patchKey] !== undefined) {
         const { error } = await supabase.from("app_settings").upsert({ key: settingsKey, value: patch[patchKey] });
@@ -324,13 +313,57 @@ export async function updateContentFields(patch, prev = {}) {
 // Uploads an image to the shared "media" bucket. pathPrefix scopes where it's
 // stored (e.g. "profile/<userId>" for a self-service profile photo, "content"
 // for anything a coach uploads) — see the bucket's storage RLS policies.
-export async function uploadImage(file, pathPrefix = "content") {
+// Every coach upload is also recorded in the media library (with its original file name), so it
+// shows up on the Media page — the only place a file is ever deleted from.
+export async function uploadImage(file, pathPrefix = "content", originalName = file.name) {
   const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
   const path = `${pathPrefix}/${crypto.randomUUID()}.${ext}`;
   const { error } = await supabase.storage.from("media").upload(path, file, { contentType: file.type });
   if (error) throw error;
   const { data } = supabase.storage.from("media").getPublicUrl(path);
+  if (pathPrefix === "content") {
+    // Not fatal if this fails: the Media page also lists files straight from storage.
+    await supabase.from("media").insert({
+      url: data.publicUrl, content_type: file.type, size_bytes: file.size, name: originalName || file.name, storage_path: path,
+    });
+  }
   return { id: path, url: data.publicUrl, path, contentType: file.type, sizeBytes: file.size };
+}
+
+// Everything in the content folder of storage, newest first — the source of truth for the Media
+// page — with the original file name from the media library where there is one.
+export async function listMediaLibrary() {
+  const files = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await supabase.storage.from("media").list("content", {
+      limit: 1000, offset, sortBy: { column: "created_at", order: "desc" },
+    });
+    if (error) return null;
+    files.push(...(data || []).filter((f) => f.id));
+    if (!data || data.length < 1000) break;
+  }
+  const { data: rows } = await supabase.from("media").select("storage_path, name");
+  const nameByPath = new Map((rows || []).map((r) => [r.storage_path, r.name]));
+  return files.map((f) => {
+    const path = `content/${f.name}`;
+    return {
+      path,
+      url: supabase.storage.from("media").getPublicUrl(path).data.publicUrl,
+      name: nameByPath.get(path) || null,
+      sizeBytes: Number(f.metadata?.size || 0),
+      contentType: f.metadata?.mimetype || "",
+      createdAt: f.created_at,
+    };
+  });
+}
+
+// Permanently deletes files from storage and the media library.
+export async function deleteMediaFiles(paths) {
+  if (!paths?.length) return true;
+  const { error } = await supabase.storage.from("media").remove(paths);
+  if (error) return false;
+  await supabase.from("media").delete().in("storage_path", paths);
+  return true;
 }
 
 const PUBLIC_MEDIA_MARKER = "/storage/v1/object/public/media/";
@@ -422,22 +455,6 @@ export async function deleteStorageObject(path) {
   if (!path) return true;
   const { error } = await supabase.storage.from("media").remove([path]);
   return !error;
-}
-
-// Deletes the given files, but only those the database confirms nothing refers to any more.
-export async function deleteUnusedFiles(paths) {
-  if (!paths?.length) return 0;
-  const { data, error } = await supabase.rpc("unreferenced_files", { p_paths: paths });
-  if (error || !data?.length) return 0;
-  const { error: removeError } = await supabase.storage.from("media").remove(data);
-  return removeError ? 0 : data.length;
-}
-
-// Files in storage that nothing refers to (older than a few minutes, so an upload in progress is never caught).
-export async function getUnusedFiles() {
-  const { data, error } = await supabase.rpc("unused_media_files");
-  if (error) return null;
-  return (data || []).map((f) => ({ name: f.name, size: Number(f.size), createdAt: f.created_at }));
 }
 
 // Pushes the confirmation-email template live via the update-confirmation-email

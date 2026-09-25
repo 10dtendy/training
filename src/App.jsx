@@ -20,7 +20,7 @@ import { supabase } from "./lib/supabase.js";
 import {
   fetchCurrentProfile, getUsersMap, getProfilesMap, updateUserFields, recordLoginDay, getContent, updateContentFields,
   uploadImage as uploadToStorage, deleteStorageObject, publishConfirmationEmail, getUsage,
-  storagePathFromUrl, storagePathsIn, deleteUnusedFiles, getUnusedFiles, deleteAccount,
+  storagePathFromUrl, listMediaLibrary, deleteMediaFiles, deleteAccount,
   getLegal, saveLegalDoc, publishLegalVersion, legalAcceptanceCount, getAppAccess, setAppAccess,
 } from "./lib/data.js";
 
@@ -2986,18 +2986,6 @@ function levelScheduleIsHealthy(content, level) {
   return trainingDayCount(content, level) >= SCHEDULE_HEALTH_WINDOW_DAYS;
 }
 
-// Files that were used by the changed content before and aren't any more. The database still
-// double-checks that nothing else uses them before anything is deleted.
-function filesDropped(prev, next, patch) {
-  const dropped = new Set();
-  for (const key of Object.keys(patch)) {
-    if (key === "trainingDays" || key === "categories" || key === "media") continue;
-    const after = storagePathsIn(next[key]);
-    for (const path of storagePathsIn(prev[key])) if (!after.has(path)) dropped.add(path);
-  }
-  return [...dropped];
-}
-
 // Supabase Free plan limits; update these if the project is upgraded.
 const DB_LIMIT_BYTES = 500 * 1024 * 1024;
 const STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;
@@ -4922,92 +4910,146 @@ function AdminUsers() {
    persist for every coach and survive reloads/redeploys)
    ============================================================================ */
 
-function UnusedFiles() {
-  const [files, setFiles] = useState(undefined);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const load = () => getUnusedFiles().then(setFiles);
-  useEffect(() => { load(); }, []);
+// Images the app itself shows (hard-coded), so they're listed but can't be deleted.
+const BUILTIN_MEDIA = {
+  "content/gameday-banner.jpg": "Game Day page banner",
+  "content/restday-banner.jpg": "Rest Day page banner",
+};
+const FRONT_PAGE_IMAGE_LABELS = { drill: "Drill card image", focus: "Practice Focus card image", office: "Off-Ice card image" };
+const MEDIA_SETTING_KEYS = [["gameDay", "Game Day page"], ["restDay", "Rest Day page"], ["welcome", "Welcome screen"], ["announcement", "Announcement"]];
 
-  const total = (files || []).reduce((n, f) => n + f.size, 0);
-  const clean = async () => {
-    if (!(await confirmDialog({ title: `Delete ${files.length} unused file${files.length === 1 ? "" : "s"} (${formatBytes(total)})?`, message: "Nothing in the app uses them. This can't be undone.", confirmLabel: "Delete", danger: true }))) return;
-    setBusy(true); setMessage("");
-    const names = files.map((f) => f.name);
-    const removed = await deleteUnusedFiles(names);
-    setBusy(false);
-    setMessage(removed === names.length ? `Deleted ${removed} file${removed === 1 ? "" : "s"}.` : `Deleted ${removed} of ${names.length} files. Try again for the rest.`);
-    load();
-  };
-
-  return (
-    <div className="admin-panel">
-      <h3>Unused files</h3>
-      {files === undefined ? <p className="planner-hint">Checking…</p>
-        : files === null ? <p className="planner-hint">Couldn't check right now.</p>
-        : files.length === 0 ? <p className="planner-hint">No unused files — everything stored is in use.</p>
-        : (
-          <>
-            <p className="planner-hint">{files.length} file{files.length === 1 ? "" : "s"} ({formatBytes(total)}) aren't used by any drill, practice focus, off-ice workout, setting or profile. They only take up space.</p>
-            <ul className="unused-files">
-              {files.map((f) => <li key={f.name}><span>{f.name.split("/").pop()}</span><span>{formatBytes(f.size)} · {formatCreated(f.createdAt)}</span></li>)}
-            </ul>
-            <button className="btn btn--primary btn--small" onClick={clean} disabled={busy}>{busy ? "Deleting…" : `Delete ${files.length} unused file${files.length === 1 ? "" : "s"}`}</button>
-          </>
-        )}
-      {message && <div className="email-status email-status--ok" style={{ marginTop: 12 }}>{message}</div>}
-    </div>
-  );
+// Where a stored file is used, as readable labels ("Drill "Butterfly" — cover", ...).
+function mediaUsages(content, path) {
+  const uses = [];
+  const has = (v) => typeof v === "string" && v.includes(path);
+  if (BUILTIN_MEDIA[path]) uses.push(`${BUILTIN_MEDIA[path]} (built into the app)`);
+  for (const d of content.drills || []) {
+    if (has(d.imageUrl)) uses.push(`Drill “${d.title}” — cover`);
+    if (has(d.diagramUrl)) uses.push(`Drill “${d.title}” — diagram`);
+  }
+  for (const f of content.focusPoints || []) {
+    if (has(f.imageUrl)) uses.push(`Practice Focus “${f.title}” — cover`);
+    if ((f.blocks || []).some((b) => has(b.imageUrl))) uses.push(`Practice Focus “${f.title}” — photo`);
+  }
+  for (const o of content.offIceWorkouts || []) {
+    if (has(o.imageUrl)) uses.push(`Off-Ice “${o.title}” — cover`);
+    for (const ex of o.exercises || []) if (has(ex.imageUrl)) uses.push(`Off-Ice “${o.title}” — exercise “${ex.name}”`);
+  }
+  for (const [key, entry] of Object.entries(content.branding || {})) if (has(entry?.url)) uses.push(`Front Page — ${FRONT_PAGE_IMAGE_LABELS[key] || key}`);
+  for (const [key, label] of MEDIA_SETTING_KEYS) if (JSON.stringify(content[key] ?? "").includes(path)) uses.push(label);
+  return uses;
 }
 
-function AdminMedia({ content, updateContent }) {
-  const media = content.media || [];
-  const inputRef = useRef(null);
+// A copy of a content value with every reference to the file blanked out, so nothing is left
+// pointing at an image that's about to be deleted.
+function withoutMedia(value, path) {
+  if (typeof value === "string") return value.includes(path) ? "" : value;
+  if (Array.isArray(value)) return value.map((v) => withoutMedia(v, path));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, withoutMedia(v, path)]));
+  return value;
+}
+
+// The media library: every image uploaded anywhere in the app. Removing an image from a drill,
+// focus or workout only unlinks it; this is the only place a file is deleted for good.
+function AdminMedia({ content, saveContent }) {
+  const [files, setFiles] = useState(undefined);
+  const [filter, setFilter] = useState("all"); // all | used | unused
+  const [query, setQuery] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [busyPath, setBusyPath] = useState(null);
   const [error, setError] = useState("");
-  const [removingId, setRemovingId] = useState(null);
+  const [message, setMessage] = useState("");
+  const inputRef = useRef(null);
+
+  const load = async () => setFiles(await listMediaLibrary());
+  useEffect(() => { load(); }, []);
+
+  const items = (files || []).map((f) => {
+    const uses = mediaUsages(content, f.path);
+    return { ...f, uses, builtin: !!BUILTIN_MEDIA[f.path], label: f.name || BUILTIN_MEDIA[f.path] || `Image from ${formatCreated(f.createdAt)}` };
+  });
+  const unused = items.filter((f) => !f.uses.length);
+  const q = query.trim().toLowerCase();
+  const shown = items
+    .filter((f) => filter === "all" || (filter === "used" ? f.uses.length > 0 : !f.uses.length))
+    .filter((f) => !q || f.label.toLowerCase().includes(q) || f.uses.some((u) => u.toLowerCase().includes(q)));
+  const totalBytes = items.reduce((n, f) => n + f.sizeBytes, 0);
 
   const onPick = async (e) => {
     const picked = Array.from(e.target.files || []);
     e.target.value = "";
     if (!picked.length) return;
-    setError("");
+    setError(""); setMessage("");
     setUploading(true);
     try {
-      const uploaded = [];
-      for (const f of picked) {
-        const res = await uploadToStorage(f.type.startsWith("image/") ? await compressImageFile(f) : f);
-        uploaded.push({ id: crypto.randomUUID(), url: res.url, contentType: res.contentType, sizeBytes: res.sizeBytes, name: f.name, uploadedAt: Date.now(), storagePath: res.path });
-      }
-      updateContent((c) => ({ ...c, media: [...uploaded, ...(c.media || [])] }));
+      for (const f of picked) await uploadToStorage(f.type.startsWith("image/") ? await compressImageFile(f) : f, "content", f.name);
+      setMessage(`Uploaded ${picked.length} image${picked.length === 1 ? "" : "s"}.`);
     } catch (err) {
       setError(err?.message || "Upload failed. Please try again.");
     } finally {
       setUploading(false);
+      load();
     }
   };
 
   const remove = async (item) => {
-    if (!(await confirmDialog({ title: `Remove "${item.name}"?`, message: "This can't be undone, and it'll break anything still using this file.", confirmLabel: "Remove", danger: true }))) return;
-    setRemovingId(item.id);
-    setError("");
+    const where = item.uses;
+    const ok = await confirmDialog({
+      title: `Delete “${item.label}” permanently?`,
+      message: where.length
+        ? `It's used in ${where.length} place${where.length === 1 ? "" : "s"}: ${where.join("; ")}. It will be removed from ${where.length === 1 ? "there" : "all of them"} too. This can't be undone.`
+        : "It isn't used anywhere in the app. This can't be undone.",
+      confirmLabel: "Delete permanently", danger: true,
+    });
+    if (!ok) return;
+    setBusyPath(item.path); setError(""); setMessage("");
     try {
-      const deleted = await deleteStorageObject(item.storagePath);
-      if (!deleted) { setError("Couldn't remove that file. Please try again."); return; }
-      updateContent((c) => ({ ...c, media: (c.media || []).filter((m) => m.id !== item.id) }));
-    } catch (err) {
-      setError(err?.message || "Couldn't remove that file. Please try again.");
+      if (where.length) {
+        // Unlink it everywhere first; only delete the file once that has saved.
+        const patch = {};
+        for (const key of ["drills", "focusPoints", "offIceWorkouts", "branding", ...MEDIA_SETTING_KEYS.map(([k]) => k)]) {
+          if (content[key] === undefined) continue;
+          const next = withoutMedia(content[key], item.path);
+          if (JSON.stringify(next) !== JSON.stringify(content[key])) patch[key] = next;
+        }
+        if (Object.keys(patch).length && !(await saveContent(patch))) {
+          setError("Couldn't remove it from the items that use it, so nothing was deleted. Please try again.");
+          return;
+        }
+      }
+      if (!(await deleteMediaFiles([item.path]))) { setError("Couldn't delete that file. Please try again."); return; }
+      setMessage(`Deleted “${item.label}”.`);
     } finally {
-      setRemovingId(null);
+      setBusyPath(null);
+      load();
     }
+  };
+
+  const removeUnused = async () => {
+    const bytes = unused.reduce((n, f) => n + f.sizeBytes, 0);
+    const ok = await confirmDialog({
+      title: `Delete ${unused.length} unused image${unused.length === 1 ? "" : "s"} (${formatBytes(bytes)})?`,
+      message: "Nothing in the app uses them. They'll be deleted permanently. This can't be undone.",
+      confirmLabel: "Delete permanently", danger: true,
+    });
+    if (!ok) return;
+    setBusyPath("*"); setError(""); setMessage("");
+    const done = await deleteMediaFiles(unused.map((f) => f.path));
+    setBusyPath(null);
+    if (done) setMessage(`Deleted ${unused.length} unused image${unused.length === 1 ? "" : "s"}.`);
+    else setError("Couldn't delete those files. Please try again.");
+    load();
   };
 
   return (
     <div className="admin-page">
       <div className="admin-header-row"><h1 className="admin-h1">Media</h1></div>
-      <p className="planner-hint">Files uploaded on this page. Photos you add to drills, practice focuses and off-ice workouts are stored with those items and are deleted from storage when you remove or replace them.</p>
-      <UnusedFiles />
+      <p className="planner-hint">
+        Every image uploaded anywhere in the app. Removing an image from a drill, practice focus or workout (or deleting that item)
+        only unlinks it — the file stays here. Delete it here to remove it for good.
+      </p>
       {error && <div className="auth-error" style={{ marginBottom: 16 }}><AlertTriangle size={13} /> {error}</div>}
+      {message && <div className="profile-password-success" style={{ marginBottom: 16 }}><Check size={13} /> {message}</div>}
 
       <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={onPick} style={{ display: "none" }} disabled={uploading} />
       <UploadDropzone getInput={() => inputRef.current} disabled={uploading} dropLabel="Drop to upload these images">
@@ -5016,21 +5058,51 @@ function AdminMedia({ content, updateContent }) {
         <span className="upload-dropzone-hint">JPEG, PNG, WEBP, GIF — add videos as YouTube links</span>
       </UploadDropzone>
 
-      {media.length === 0 ? (
-        <div className="empty-state"><p>No media uploaded yet.</p></div>
+      {files === undefined ? (
+        <div className="skeleton-hero" style={{ height: 140 }} />
+      ) : files === null ? (
+        <div className="auth-error"><AlertTriangle size={13} /> Couldn't load the media library — reload to try again.</div>
       ) : (
-        <div className="media-grid">
-          {media.map((f) => (
-            <div className="media-tile media-tile--file" key={f.id}>
-              {(f.contentType || "").startsWith("image/") ? <img src={f.url} alt={f.name} className="media-thumb" /> : (f.contentType || "").startsWith("video/") ? (
-                <video src={f.url} className="media-thumb" muted />
-              ) : <FileText size={20} />}
-              <span className="media-name">{f.name}</span>
-              <span className="media-type">{(f.contentType || "").startsWith("video/") ? <VideoIcon size={10} /> : <ImageIcon size={10} />} {((f.sizeBytes || 0) / 1024).toFixed(0)} KB</span>
-              <button className="media-remove" onClick={() => remove(f)} disabled={removingId === f.id} aria-label="Remove"><Trash2 size={12} /></button>
+        <>
+          <div className="media-toolbar">
+            <div className="level-tabs">
+              {[["all", `All (${items.length})`], ["used", `In use (${items.length - unused.length})`], ["unused", `Not used (${unused.length})`]].map(([key, label]) => (
+                <button key={key} type="button" className={"level-tab" + (filter === key ? " active" : "")} onClick={() => setFilter(key)}>{label}</button>
+              ))}
             </div>
-          ))}
-        </div>
+            <input className="media-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by name or where it's used…" aria-label="Search media" />
+            <span className="media-total">{formatBytes(totalBytes)} in total</span>
+            {unused.length > 0 && (
+              <button type="button" className="btn btn--ghost btn--small" onClick={removeUnused} disabled={!!busyPath}>
+                <Trash2 size={13} /> Delete all unused ({unused.length})
+              </button>
+            )}
+          </div>
+          {shown.length === 0 ? (
+            <div className="empty-state"><p>{items.length ? "No images match." : "No images uploaded yet."}</p></div>
+          ) : (
+            <div className="media-grid">
+              {shown.map((f) => (
+                <div className="media-tile media-tile--file" key={f.path}>
+                  <a href={f.url} target="_blank" rel="noopener noreferrer" className="media-thumb-link" aria-label={`Open ${f.label} full size`}>
+                    <img src={f.url} alt="" className="media-thumb" loading="lazy" />
+                  </a>
+                  <span className="media-name" title={f.label}>{f.label}</span>
+                  <span className="media-type"><ImageIcon size={10} /> {formatBytes(f.sizeBytes)}</span>
+                  {f.uses.length ? (
+                    <ul className="media-uses" title={f.uses.join("\n")}>
+                      {f.uses.slice(0, 2).map((u) => <li key={u}>{u}</li>)}
+                      {f.uses.length > 2 && <li>+{f.uses.length - 2} more</li>}
+                    </ul>
+                  ) : <span className="chip">Not used</span>}
+                  {!f.builtin && (
+                    <button className="media-remove" onClick={() => remove(f)} disabled={!!busyPath} aria-label={`Delete ${f.label} permanently`}><Trash2 size={12} /></button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -5686,7 +5758,7 @@ function AdminApp({ content, updateContent, saveContent }) {
         {section === "email" && <AdminConfirmationEmail content={content} updateContent={updateContent} />}
         {section === "legal" && <AdminLegal />}
         {section === "users" && <AdminUsers />}
-        {section === "media" && <AdminMedia content={content} updateContent={updateContent} />}
+        {section === "media" && <AdminMedia content={content} saveContent={saveContent} />}
         {section === "settings" && <AdminSettings content={content} updateContent={updateContent} />}
       </div>
     </div>
@@ -6176,13 +6248,10 @@ function AppInner() {
   // Unlike updateContent (fire-and-forget), this waits for the database and returns whether the
   // write succeeded, so a screen can show a real "saved" confirmation. The local copy is only
   // updated once the save has gone through.
+  // Removing an image from an item never deletes the file — files are only deleted from Media.
   const saveContent = async (patch) => {
-    const dropped = filesDropped(content, { ...content, ...patch }, patch);
     const ok = await updateContentFields(patch, content);
-    if (ok) {
-      setContent((prev) => ({ ...prev, ...patch }));
-      if (dropped.length) deleteUnusedFiles(dropped);
-    }
+    if (ok) setContent((prev) => ({ ...prev, ...patch }));
     return ok;
   };
 
@@ -6203,9 +6272,8 @@ function AppInner() {
           patch[key] = next[key];
         }
       }
-      const dropped = filesDropped(prev, next, patch);
       updateContentFields(patch, prev).then(async (ok) => {
-        if (ok) { if (dropped.length) deleteUnusedFiles(dropped); return; }
+        if (ok) return;
         setSaveFailed(true);
         setContent(await getContent());
       });
@@ -7083,7 +7151,15 @@ button:focus {
 .upload-dropzone--dragging, .upload-dropzone--dragging:hover { border-style: solid; border-color: var(--accent); background: var(--accent-dim); color: var(--text); }
 .file-drop-area { position: relative; }
 .file-drop-overlay { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border: 2px solid var(--accent); border-radius: var(--radius); background: rgba(10,10,12,0.82); color: var(--text); font-size: 14px; font-weight: 600; pointer-events: none; }
-.media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px; }
+.media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; }
+.media-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 16px; }
+.media-toolbar .level-tabs { display: inline-flex; }
+.media-search { flex: 1; min-width: 180px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text); font-size: 13px; font-family: inherit; }
+.media-total { font-size: 12px; color: var(--text-dim); }
+.media-thumb-link { display: block; width: 100%; }
+.media-uses { list-style: none; margin: 0; padding: 0; width: 100%; font-size: 10.5px; line-height: 1.4; color: var(--text-dim); text-align: center; }
+.media-uses li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .media-tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px 14px; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; color: var(--text-dim); font-size: 11px; word-break: break-all; position: relative; }
 .media-tile--file { padding: 10px; }
 .media-thumb { width: 100%; height: 80px; object-fit: cover; border-radius: 8px; background: var(--surface-2); }
