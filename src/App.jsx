@@ -1311,9 +1311,11 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
   const menuPanelId = useId();
   useDismissable(notifOpen, () => setNotifOpen(false), [notifWrapRef], notifButtonRef);
   useDismissable(mobileOpen, () => setMobileOpen(false), [menuPanelRef, menuButtonRef], menuButtonRef);
+  // "Today" always takes the goalie back to the present day, whichever day they're looking at.
+  // On a game or rest day there's no drill, focus or off-ice to link to.
   const items = dayType
     ? [
-        { key: "today", label: dayType === "game" ? "Game Day" : "Rest Day", view: "today" },
+        { key: "today", label: "Today", view: "today" },
         { key: "progress", label: "Progress", view: "progress" },
       ]
     : [
@@ -7857,7 +7859,7 @@ button:focus {
 
 /* ---------------- RESPONSIVE ---------------- */
 @media (max-width: 900px) {
-  .nav-links, .nav-admin-toggle, .nav-level-select, .nav-right > .nav-avatar, .nav-calendar-btn { display: none; }
+  .nav-links, .nav-admin-toggle, .nav-level-select, .nav-right > .nav-avatar { display: none; }
   .main { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
   .bottom-nav { display: flex; }
   .nav-mobile-toggle { display: flex; }
