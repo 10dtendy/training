@@ -7,7 +7,14 @@ import { supabase } from "./supabase.js";
    plan for the schema this reads from.
    ============================================================================ */
 
-function shapeUser(p, dayTypes, gameLogs, restNotes, loginDays) {
+// A goalie's ticked-off training per day: { "2026-09-26": { drill, focus, office } }.
+function progressByDate(rows) {
+  const out = {};
+  for (const r of rows || []) out[r.date] = { drill: !!r.drill, focus: !!r.focus, office: !!r.office };
+  return out;
+}
+
+function shapeUser(p, dayTypes, gameLogs, restNotes, loginDays, dayProgress) {
   return {
     id: p.id, email: p.email, name: p.name, role: p.role,
     position: p.position, experience: p.experience,
@@ -17,7 +24,7 @@ function shapeUser(p, dayTypes, gameLogs, restNotes, loginDays) {
     lastActive: p.last_active ? new Date(p.last_active).getTime() : null,
     removed: p.removed, createdAt: p.created_at ? new Date(p.created_at).getTime() : null,
     dayTypes: dayTypes || {}, gameLogs: gameLogs || {}, restNotes: restNotes || {},
-    loginDays: loginDays || {}, monthPlans: p.month_plans || {},
+    loginDays: loginDays || {}, dayProgress: dayProgress || {}, monthPlans: p.month_plans || {},
     termsVersion: p.terms_version || null,
   };
 }
@@ -27,12 +34,13 @@ function shapeUser(p, dayTypes, gameLogs, restNotes, loginDays) {
 export async function fetchCurrentProfile() {
   const { data: { user: authUser } } = await supabase.auth.getUser();
   if (!authUser) return null;
-  const [{ data: p }, { data: dt }, { data: gl }, { data: rn }, { data: ld }] = await Promise.all([
+  const [{ data: p }, { data: dt }, { data: gl }, { data: rn }, { data: ld }, { data: dp }] = await Promise.all([
     supabase.from("profiles").select("*").eq("id", authUser.id).single(),
     supabase.from("day_types").select("*").eq("user_id", authUser.id),
     supabase.from("game_logs").select("*").eq("user_id", authUser.id),
     supabase.from("rest_notes").select("*").eq("user_id", authUser.id),
     supabase.from("login_days").select("date").eq("user_id", authUser.id),
+    supabase.from("day_progress").select("date, drill, focus, office").eq("user_id", authUser.id),
   ]);
   if (!p) return null;
   const dayTypes = {}; for (const r of dt || []) dayTypes[r.date] = r.type;
@@ -46,7 +54,7 @@ export async function fetchCurrentProfile() {
   }
   const restNotes = {}; for (const r of rn || []) restNotes[r.date] = r.note;
   const loginDays = {}; for (const r of ld || []) loginDays[r.date] = true;
-  return shapeUser(p, dayTypes, gameLogs, restNotes, loginDays);
+  return shapeUser(p, dayTypes, gameLogs, restNotes, loginDays, progressByDate(dp));
 }
 
 // Just the accounts (no calendars, game stats or notes) — for pages that only list people,
@@ -59,11 +67,12 @@ export async function getProfilesMap() {
 }
 
 export async function getUsersMap() {
-  const [{ data: profiles }, { data: dayTypes }, { data: gameLogs }, { data: restNotes }] = await Promise.all([
+  const [{ data: profiles }, { data: dayTypes }, { data: gameLogs }, { data: restNotes }, { data: dayProgress }] = await Promise.all([
     supabase.from("profiles").select("*"),
     supabase.from("day_types").select("*"),
     supabase.from("game_logs").select("*"),
     supabase.from("rest_notes").select("*"),
+    supabase.from("day_progress").select("user_id, date, drill, focus, office"),
   ]);
   if (!profiles) return {};
 
@@ -80,15 +89,18 @@ export async function getUsersMap() {
   const restNotesByUser = {};
   for (const r of restNotes || []) (restNotesByUser[r.user_id] ||= {})[r.date] = r.note;
 
+  const progressRowsByUser = {};
+  for (const r of dayProgress || []) (progressRowsByUser[r.user_id] ||= []).push(r);
+
   const out = {};
   for (const p of profiles) {
-    out[p.email] = shapeUser(p, dayTypesByUser[p.id], gameLogsByUser[p.id], restNotesByUser[p.id]);
+    out[p.email] = shapeUser(p, dayTypesByUser[p.id], gameLogsByUser[p.id], restNotesByUser[p.id], undefined, progressByDate(progressRowsByUser[p.id]));
   }
   return out;
 }
 
-// Notes that the goalie opened the app on this calendar day (idempotent). The training
-// list pauses across 3+ days in a row with no such record — see trainingDayForDate.
+// Notes that the goalie opened the app on this calendar day (idempotent). A training block only
+// starts on a day with such a record — see trainingDayForDate.
 export async function recordLoginDay(userId, date) {
   const { error } = await supabase.from("login_days").upsert({ user_id: userId, date }, { onConflict: "user_id,date", ignoreDuplicates: true });
   return !error;
@@ -133,6 +145,12 @@ export async function updateUserFields(userId, patch) {
         minutes_played: log.minutesPlayed, periods: log.periods || [], dressed_only: !!log.dressedOnly,
       }));
       ops.push(supabase.from("game_logs").upsert(rows));
+    }
+    if (patch.dayProgress) {
+      const rows = Object.entries(patch.dayProgress).map(([date, p]) => ({
+        user_id: userId, date, drill: !!p.drill, focus: !!p.focus, office: !!p.office, updated_at: new Date().toISOString(),
+      }));
+      ops.push(supabase.from("day_progress").upsert(rows));
     }
     if (patch.restNotes) {
       const rows = Object.entries(patch.restNotes).map(([date, note]) => ({ user_id: userId, date, note }));

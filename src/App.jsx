@@ -288,9 +288,9 @@ function brandImage(itemUrl, entry, fallback) {
 // contexts) — without this, a hung call left the UI stuck on "Please wait…"
 // forever with no visible error, which is exactly what looked like "nothing
 // happened" when clicking Create account.
-// Personal, browser-local data only (today's checkbox progress) — the login
-// session itself is now managed by supabase-js, and shared data (accounts,
-// content) lives in real Supabase tables via src/lib/data.js.
+// Personal, browser-local data only (the cookie choice) — the login session itself is
+// managed by supabase-js, and everything else (accounts, content, ticked-off training)
+// lives in real Supabase tables via src/lib/data.js.
 function getLocal(key) {
   try {
     const raw = localStorage.getItem(key);
@@ -308,12 +308,13 @@ function setLocal(key, value) {
   }
 }
 
-async function loadDayProgress(key) {
-  return getLocal(key) || { drill: false, focus: false, office: false };
+const NO_PROGRESS = { drill: false, focus: false, office: false };
+// How many of a day's three parts (drill, practice focus, off-ice) were ticked off.
+function doneCount(p) {
+  return p ? [p.drill, p.focus, p.office].filter(Boolean).length : 0;
 }
 
-// Cookie consent. The app's own browser storage (the login, the day's checkboxes, and
-// this choice itself) is strictly necessary and needs no consent. YouTube is the only
+// Cookie consent. The app's own browser storage (the login and this choice itself) is strictly necessary and needs no consent. YouTube is the only
 // third party that can store identifiers, so no video content (player or thumbnails)
 // loads from it until the viewer allows it. The choice is per browser, like the login.
 const CONSENT_KEY = "cookie-consent";
@@ -2738,13 +2739,22 @@ function ProfileCalendar({ dayTypes, onSetDayType, onClose, gameLogs, restNotes,
 }
 
 /* ============================================================================
-   PROGRESS PAGE (illustrative aggregate stats; day completion is real)
+   PROGRESS PAGE
    ============================================================================ */
 
-// Consecutive-day streaks aren't tracked anywhere (daily completion only lives in this
-// browser's localStorage, per day, never synced to the account) — shown as 0 rather
-// than an invented number, same for every goalie until that exists.
-const STREAK_PLACEHOLDER = 0;
+// Days in a row with the whole day's training ticked off, counting back from today. Game and
+// rest days don't break the streak (or add to it), and today doesn't break it while it's
+// still unfinished.
+function trainingStreak(u, joinedKey) {
+  let streak = 0;
+  for (let i = 0; i < 1000; i++) {
+    const key = dateKey(addDays(TODAY_DATE, -i));
+    if (key < joinedKey) break;
+    if (doneCount(u.dayProgress?.[key]) === 3) streak++;
+    else if (!resolveDayType(u, key) && i > 0) break;
+  }
+  return streak;
+}
 
 // Save % (its own natural 0-100 scale) and goals against (scaled 0-to-its-own-max)
 // share one canvas so the two trends are visible together — each line reads against
@@ -2856,26 +2866,21 @@ function ProgressPage({ user, content }) {
   const activeUser = isCoach ? (clients || []).find((c) => c.email === clientEmail) : user;
   const level = activeUser && EXPERIENCE_LEVELS.includes(activeUser.experience) ? activeUser.experience : "Junior";
 
-  // Game/rest days are real (resolved the same way the Today page does). Ordinary
-  // training-day completion isn't tracked anywhere but this browser's local storage
-  // per day, so there's no real history to show for those — still illustrative, but
-  // never before the account existed (a new signup shouldn't see "completed" training
-  // from before they joined).
-  // Unknown join date (a corrupt/legacy record with no createdAt) defaults to "joined
-  // today" — hide the illustrative history rather than risk showing fake completed
-  // training for an account that may be brand new.
+  // Each day: game/rest as marked (resolved the same way the Today page does), otherwise how much
+  // of that day's training was ticked off. Days away from the app simply show as no training —
+  // the calendar keeps running even while their block list waits for them.
+  // Unknown join date (a legacy record with no createdAt) counts as "joined today".
   const joinedKey = dateKey(activeUser?.createdAt ? new Date(activeUser.createdAt) : TODAY_DATE);
   const cells = Array.from({ length: 35 }, (_, i) => {
     const dateStr = dateKey(addDays(TODAY_DATE, -(34 - i)));
+    if (dateStr < joinedKey) return "none";
     const dayType = activeUser ? resolveDayType(activeUser, dateStr) : null;
     if (dayType === "game") return "game";
     if (dayType === "rest") return "rest";
-    if (joinedKey && dateStr < joinedKey) return "none";
-    const r = (i * 47) % 100;
-    if (r > 78) return "none";
-    if (r > 55) return "partial";
-    return "full";
+    const done = doneCount(activeUser?.dayProgress?.[dateStr]);
+    return done === 3 ? "full" : done > 0 ? "partial" : "none";
   });
+  const streak = activeUser ? trainingStreak(activeUser, joinedKey) : 0;
 
   const games = Object.entries(activeUser?.gameLogs || {})
     .sort(([a], [b]) => a.localeCompare(b))
@@ -2933,8 +2938,8 @@ function ProgressPage({ user, content }) {
       <section className="hero hero--progress">
         <div className="hero-left">
           <div className="eyebrow">PROGRESS</div>
-          <h1 className="hero-title">{STREAK_PLACEHOLDER} day streak.</h1>
-          <p className="hero-sub">You're building consistency.</p>
+          <h1 className="hero-title">{streak} day streak.</h1>
+          <p className="hero-sub">{streak > 0 ? "You're building consistency." : "Finish a full day of training to start your streak."}</p>
         </div>
       </section>
       <section className="calendar-block progress-overview-row">
@@ -2950,7 +2955,7 @@ function ProgressPage({ user, content }) {
           </div>
         </div>
         <div className="stats-grid progress-stats-col">
-          <div className="stat-card"><span className="stat-num">{trainingDaysCount}</span><span className="stat-label">Training blocks</span></div>
+          <div className="stat-card"><span className="stat-num">{trainingDaysCount}</span><span className="stat-label">Complete days</span></div>
           <div className="stat-card"><span className="stat-num">{restDaysCount}</span><span className="stat-label">Rest days</span></div>
           <div className="stat-card"><span className="stat-num">{gamesLoggedCount}</span><span className="stat-label">Games logged</span></div>
           <div className="stat-card"><span className="stat-num">{partialDaysCount}</span><span className="stat-label">Partially complete days</span></div>
@@ -6368,7 +6373,6 @@ function AppInner() {
   const [navCalendarOpen, setNavCalendarOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const planPromptedRef = useRef(false);
-  const [progress, setProgress] = useState({ drill: false, focus: false, office: false });
 
   // Goalies can browse today plus the MAX_DAYS_BACK days before it — nothing older, nothing in the future.
   const [viewDate, setViewDate] = useState(TODAY_DATE);
@@ -6378,7 +6382,8 @@ function AppInner() {
   const goPrevDay = () => setViewDate((d) => (d.getTime() > minViewDate.getTime() ? addDays(d, -1) : d));
   const goNextDay = () => setViewDate((d) => (d.getTime() < TODAY_DATE.getTime() ? addDays(d, 1) : d));
 
-  const progressKey = "progress:" + dateKey(viewDate);
+  // What the goalie ticked off for the viewed day, saved to their account.
+  const progress = (user && user.dayProgress?.[dateKey(viewDate)]) || NO_PROGRESS;
 
   // Resolve session + content on load. Session persistence itself is handled by
   // supabase-js (its own token, refreshed automatically) — this just checks
@@ -6417,13 +6422,6 @@ function AppInner() {
       setAuthChecked(true);
     })();
   }, []);
-
-  // Reload the day's checkbox progress whenever the viewed date changes.
-  useEffect(() => {
-    if (!authChecked) return;
-    loadDayProgress(progressKey).then(setProgress);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authChecked, viewDate]);
 
   // "Online" is a heuristic, not a real presence system: while this account has the
   // app open, stamp lastActive every minute so the admin dashboard can count anyone
@@ -6532,12 +6530,15 @@ function AppInner() {
     });
   };
 
-  const toggleComplete = (field) => {
-    setProgress((prev) => {
-      const next = { ...prev, [field]: !prev[field] };
-      setLocal(progressKey, next);
-      return next;
-    });
+  // Saved straight away (shown at once, undone again if the save fails).
+  const toggleComplete = async (field) => {
+    const key = dateKey(viewDate);
+    const prev = progress;
+    const next = { ...prev, [field]: !prev[field] };
+    const setDay = (value) => setUser((u) => ({ ...u, dayProgress: { ...(u.dayProgress || {}), [key]: value } }));
+    setDay(next);
+    const ok = await updateUserFields(user.id, { dayProgress: { [key]: next } });
+    if (!ok) { setDay(prev); setSaveFailed(true); }
   };
 
   // Content tables are only readable once signed in, so the fetch at page load (before
