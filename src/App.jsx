@@ -1730,13 +1730,16 @@ function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, o
                 <span className={"gamelog-result-badge gamelog-result-badge--" + gameLog.result}>{gameLog.result}</span>
                 <span className="gamelog-opponent">{gameLog.homeAway === "home" ? "vs" : "@"} {gameLog.opponent}</span>
                 {gameLog.goalsFor != null && <span className="gamelog-score">{gameLog.goalsFor}–{gameLog.goalsAgainst}</span>}
+                {gameLog.dressedOnly && <span className="chip gamelog-dressed-chip">Dressed — didn't play</span>}
               </div>
+              {!gameLog.dressedOnly && (
               <div className="profile-grid gamelog-stats-row">
                 <div><span className="stat-label">Shots</span><span className="profile-value">{gameLog.shots}</span></div>
                 <div><span className="stat-label">Goals Against</span><span className="profile-value">{gameLog.goalsAgainst}</span></div>
                 <div><span className="stat-label">Save %</span><span className="profile-value">{savePct(gameLog) ?? "—"}%</span></div>
                 <div><span className="stat-label">Minutes</span><span className="profile-value">{gameLog.minutesPlayed}</span></div>
               </div>
+              )}
               {gameLog.periods && gameLog.periods.length > 0 && (
                 <div className="gamelog-periods-summary">
                   {gameLog.periods.map((p, i) => (
@@ -1801,6 +1804,8 @@ const BLANK_PERIOD = { shots: "", goalsAgainst: "" };
 const RESULT_LETTER = { win: "W", loss: "L", tie: "T" };
 
 function GameStatsForm({ initial, onSave, onCancel }) {
+  // Dressed only: the goalie was in uniform but didn't play, so there are no stats to enter.
+  const [dressedOnly, setDressedOnly] = useState(!!initial?.dressedOnly);
   const [opponent, setOpponent] = useState(initial?.opponent || "");
   const [homeAway, setHomeAway] = useState(initial?.homeAway || "home");
   const [result, setResult] = useState(initial?.result || "win");
@@ -1827,6 +1832,11 @@ function GameStatsForm({ initial, onSave, onCancel }) {
   const submit = (e) => {
     e.preventDefault();
     if (!opponent.trim()) { setError("Enter the opponent."); return; }
+    if (dressedOnly) {
+      setError("");
+      onSave({ dressedOnly: true, opponent: opponent.trim(), homeAway, result, shots: null, goalsAgainst: null, goalsFor: null, minutesPlayed: null, periods: [] });
+      return;
+    }
     const wholeInRange = (n) => Number.isInteger(n) && n >= 0 && n <= 999;
     const m = Number(minutesPlayed);
     if (!wholeInRange(m)) { setError("Minutes played must be a whole number from 0 to 999."); return; }
@@ -1840,11 +1850,20 @@ function GameStatsForm({ initial, onSave, onCancel }) {
     }
     if (parsed.some((p) => p.goalsAgainst > p.shots)) { setError("A period's goals against can't be more than its shots."); return; }
     setError("");
-    onSave({ opponent: opponent.trim(), homeAway, result, shots: periodTotals.shots, goalsAgainst: periodTotals.goalsAgainst, goalsFor: gf, minutesPlayed: m, periods: parsed });
+    onSave({ dressedOnly: false, opponent: opponent.trim(), homeAway, result, shots: periodTotals.shots, goalsAgainst: periodTotals.goalsAgainst, goalsFor: gf, minutesPlayed: m, periods: parsed });
   };
 
   return (
     <form className="gamelog-form" onSubmit={submit}>
+      <label className="gamelog-dressed">
+        <input type="checkbox" role="switch" checked={dressedOnly} onChange={(e) => { setDressedOnly(e.target.checked); setError(""); }} />
+        <span className="gamelog-dressed-track" aria-hidden="true" />
+        <span className="gamelog-dressed-text">
+          <strong>I didn't play — dressed only</strong>
+          <small>No shots, goals or minutes to log. It won't count toward your save % or record.</small>
+        </span>
+      </label>
+
       <label className="auth-field">
         <span>Opponent</span>
         <input value={opponent} onChange={(e) => setOpponent(e.target.value)} placeholder="e.g. Ice Wolves" maxLength={100} />
@@ -1861,6 +1880,7 @@ function GameStatsForm({ initial, onSave, onCancel }) {
         <button type="button" className={"gamelog-toggle" + (result === "tie" ? " active" : "")} onClick={() => setResult("tie")}>Tie</button>
       </div>
 
+      {!dressedOnly && (<>
       <div className="gamelog-periods">
         <div className="gamelog-periods-head">
           <span>Shots &amp; goals against by period</span>
@@ -1889,6 +1909,7 @@ function GameStatsForm({ initial, onSave, onCancel }) {
         <label>Minutes played<input type="number" min="0" value={minutesPlayed} onChange={(e) => setMinutesPlayed(e.target.value)} /></label>
         <label>Goals scored (your team)<input type="number" min="0" value={goalsFor} onChange={(e) => setGoalsFor(e.target.value)} /></label>
       </div>
+      </>)}
 
       {error && <div className="auth-error"><AlertTriangle size={13} /> {error}</div>}
 
@@ -2691,7 +2712,7 @@ function ProfileCalendar({ dayTypes, onSetDayType, onClose, gameLogs, restNotes,
               onClick={() => selectDate(key)}
             >
               <span className="calendar-cell-day">{day}</span>
-              {log && <span className="calendar-cell-caption calendar-cell-caption--game">{RESULT_LETTER[log.result]} {log.goalsFor ?? "?"}–{log.goalsAgainst}</span>}
+              {log && <span className="calendar-cell-caption calendar-cell-caption--game">{log.dressedOnly ? `${RESULT_LETTER[log.result]} · Dressed` : `${RESULT_LETTER[log.result]} ${log.goalsFor ?? "?"}–${log.goalsAgainst}`}</span>}
               {note && <span className="calendar-cell-caption calendar-cell-caption--rest">{note}</span>}
             </button>
           );
@@ -2879,15 +2900,17 @@ function ProgressPage({ user, content }) {
   const restDaysCount = cells.filter((c) => c === "rest").length;
   const fiveWeeksAgoKey = dateKey(addDays(TODAY_DATE, -34));
   const gamesLoggedCount = games.filter((g) => g.date >= fiveWeeksAgoKey).length;
-  const wins = games.filter((g) => g.result === "win").length;
-  const losses = games.filter((g) => g.result === "loss").length;
-  const ties = games.filter((g) => g.result === "tie").length;
-  const totalShots = games.reduce((sum, g) => sum + g.shots, 0);
-  const totalGA = games.reduce((sum, g) => sum + g.goalsAgainst, 0);
+  // Games they only dressed for are listed but left out of the record, save % and goals against.
+  const played = games.filter((g) => !g.dressedOnly);
+  const wins = played.filter((g) => g.result === "win").length;
+  const losses = played.filter((g) => g.result === "loss").length;
+  const ties = played.filter((g) => g.result === "tie").length;
+  const totalShots = played.reduce((sum, g) => sum + g.shots, 0);
+  const totalGA = played.reduce((sum, g) => sum + g.goalsAgainst, 0);
   const avgSavePct = totalShots > 0 ? (((totalShots - totalGA) / totalShots) * 100).toFixed(1) : "—";
-  const avgGA = games.length > 0 ? (totalGA / games.length).toFixed(2) : "—";
+  const avgGA = played.length > 0 ? (totalGA / played.length).toFixed(2) : "—";
   const periodStats = [];
-  games.forEach((g) => {
+  played.forEach((g) => {
     (g.periods || []).forEach((p, i) => {
       if (!periodStats[i]) periodStats[i] = { shots: 0, goalsAgainst: 0 };
       periodStats[i].shots += p.shots;
@@ -2955,7 +2978,7 @@ function ProgressPage({ user, content }) {
             <h3 className="gameperf-chart-title">Record</h3>
             <div className="gameperf-summary-row">
               <div className="gameperf-record"><span className="stat-num">{wins}-{losses}-{ties}</span><span className="stat-label">W-L-T</span></div>
-              {games.length > 0 && (
+              {played.length > 0 && (
                 <>
                   <SaveRing pct={Number(avgSavePct)} size={64} strokeWidth={7} />
                   <div className="gameperf-summary-gaa">
@@ -2968,7 +2991,7 @@ function ProgressPage({ user, content }) {
           </div>
           <div className="gameperf-chart">
             <h3 className="gameperf-chart-title">Save % &amp; goals against by game</h3>
-            <SavePctLineChart games={games} />
+            <SavePctLineChart games={played} />
           </div>
           <div className="gameperf-chart">
             <h3 className="gameperf-chart-title">Save % by period</h3>
@@ -2986,10 +3009,14 @@ function ProgressPage({ user, content }) {
                     <td>{g.date}</td>
                     <td>{g.homeAway === "home" ? "vs" : "@"} {g.opponent}</td>
                     <td><span className={"gamelog-result-badge gamelog-result-badge--" + g.result}>{g.result}</span></td>
-                    <td>{g.shots}</td>
-                    <td>{g.goalsAgainst}</td>
-                    <td>{savePct(g) ?? "—"}%</td>
-                    <td>{g.minutesPlayed}</td>
+                    {g.dressedOnly ? (
+                      <td colSpan={4} className="gameperf-dressed">Dressed — didn't play</td>
+                    ) : (<>
+                      <td>{g.shots}</td>
+                      <td>{g.goalsAgainst}</td>
+                      <td>{savePct(g) ?? "—"}%</td>
+                      <td>{g.minutesPlayed}</td>
+                    </>)}
                   </tr>
                 ))}
               </tbody>
@@ -6978,6 +7005,18 @@ button:focus {
 
 .gamelog-form { display: flex; flex-direction: column; gap: 16px; margin-top: 6px; }
 .gamelog-toggle-row { display: flex; gap: 8px; }
+.gamelog-dressed { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); cursor: pointer; }
+.gamelog-dressed input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.gamelog-dressed-track { flex-shrink: 0; position: relative; width: 38px; height: 22px; margin-top: 1px; border-radius: 11px; background: var(--border); transition: background 0.15s; }
+.gamelog-dressed-track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--text); transition: transform 0.15s; }
+.gamelog-dressed input:checked + .gamelog-dressed-track { background: var(--accent); }
+.gamelog-dressed input:checked + .gamelog-dressed-track::after { transform: translateX(16px); }
+.gamelog-dressed input:focus-visible + .gamelog-dressed-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+.gamelog-dressed-text { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.gamelog-dressed-text strong { font-weight: 600; color: var(--text); }
+.gamelog-dressed-text small { font-size: 12px; color: var(--text-dim); }
+.gamelog-dressed-chip { margin-left: auto; }
+.gameperf-dressed { color: var(--text-dim); font-style: italic; }
 .gamelog-toggle { flex: 1; padding: 9px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-dim); font-size: 13px; font-weight: 600; text-align: center; }
 .gamelog-toggle.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
 .gamelog-summary { display: flex; flex-direction: column; gap: 14px; margin-top: 6px; }

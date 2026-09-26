@@ -41,7 +41,7 @@ export async function fetchCurrentProfile() {
     gameLogs[r.date] = {
       opponent: r.opponent, homeAway: r.home_away, result: r.result,
       shots: r.shots, goalsAgainst: r.goals_against, goalsFor: r.goals_for,
-      minutesPlayed: r.minutes_played, periods: r.periods || [],
+      minutesPlayed: r.minutes_played, periods: r.periods || [], dressedOnly: !!r.dressed_only,
     };
   }
   const restNotes = {}; for (const r of rn || []) restNotes[r.date] = r.note;
@@ -74,7 +74,7 @@ export async function getUsersMap() {
     (gameLogsByUser[r.user_id] ||= {})[r.date] = {
       opponent: r.opponent, homeAway: r.home_away, result: r.result,
       shots: r.shots, goalsAgainst: r.goals_against, goalsFor: r.goals_for,
-      minutesPlayed: r.minutes_played, periods: r.periods || [],
+      minutesPlayed: r.minutes_played, periods: r.periods || [], dressedOnly: !!r.dressed_only,
     };
   }
   const restNotesByUser = {};
@@ -130,7 +130,7 @@ export async function updateUserFields(userId, patch) {
         user_id: userId, date,
         opponent: log.opponent, home_away: log.homeAway, result: log.result,
         shots: log.shots, goals_against: log.goalsAgainst, goals_for: log.goalsFor,
-        minutes_played: log.minutesPlayed, periods: log.periods || [],
+        minutes_played: log.minutesPlayed, periods: log.periods || [], dressed_only: !!log.dressedOnly,
       }));
       ops.push(supabase.from("game_logs").upsert(rows));
     }
