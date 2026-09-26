@@ -25,32 +25,12 @@ import {
 } from "./lib/data.js";
 
 /* ============================================================================
-   STORAGE KEYS
-   users_v1   — shared  — { [emailLower]: { name, email, password, position,
-                            experience, role, createdAt } }
-   session_v1 — personal — { email }  (keeps this browser/account signed in)
-   content_v1 — shared  — { drills, focusPoints, offIceWorkouts, trainingDays }
-
-   NOTE ON SECURITY: this is a UX prototype, not production auth. Passwords
-   are stored in plain text in the artifact's shared `db` capability, which
-   is readable by any signed-in member of the org this artifact is
-   published under. Do not reuse a real password here. A production
-   build should use a real auth provider (e.g. Supabase Auth) with hashed
-   credentials and server-side session tokens.
-
-   NOTE ON HOSTING: users_v1 and content_v1 are "shared" keys, which means
-   they live in claude.use("db") — this artifact MUST be published with
-   capabilities: { db: {}, assets: {} } or sign-up/sign-in and drill photo/
-   video uploads will silently do nothing (every read/write/upload no-ops).
-   Both capabilities are org-internal: they only work for viewers signed in
-   to the same Claude org that published the artifact, so this cannot power
-   public sign-ups or uploads from people outside that org. session_v1 and
-   the daily progress keys are "personal" keys — those just use the
-   browser's localStorage, so they never leave the viewer's device and
-   don't need any capability. Drill photos/videos an admin uploads go
-   through claude.use("assets") — the returned asset id is what's saved on
-   the drill in `db` (imageAssetId/videoAssetId); the returned url is used
-   directly as the <img>/<video> src.
+   DATA
+   Accounts, logins and all shared data (content, calendars, game logs, ticked-off
+   training) live in Supabase (src/lib/data.js), protected by row-level security:
+   each goalie can only reach their own data, coaches can read everyone's. The
+   browser only keeps the login session (managed by supabase-js) and the cookie
+   choice.
    ============================================================================ */
 
 const GAME_DAY_BANNER_SRC = "https://cylzjvrzikgakethelst.supabase.co/storage/v1/object/public/media/content/gameday-banner.jpg";
@@ -337,6 +317,11 @@ function setLocal(key, value) {
 }
 
 const NO_PROGRESS = { drill: false, focus: false, office: false };
+// Ticks used to be kept in the browser as "progress:<date>"; they're saved to the account now,
+// so clear out the old copies (the cookie policy no longer lists them).
+try {
+  for (const key of Object.keys(localStorage)) if (key.startsWith("progress:")) localStorage.removeItem(key);
+} catch { /* storage unavailable: nothing to clear */ }
 // How many of a day's three parts (drill, practice focus, off-ice) were ticked off.
 function doneCount(p) {
   return p ? [p.drill, p.focus, p.office].filter(Boolean).length : 0;
@@ -384,15 +369,6 @@ function CreaseRing({ progress, size = 104 }) {
       <circle cx="52" cy="52" r={r} fill="none" stroke="var(--accent)" strokeWidth="4" strokeLinecap="round"
         strokeDasharray={c} strokeDashoffset={c * (1 - progress)} transform="rotate(-90 52 52)"
         style={{ transition: "stroke-dashoffset 500ms cubic-bezier(.4,0,.2,1)" }} />
-    </svg>
-  );
-}
-function GoalieMark({ size = 22 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
-      <path d="M16 3 C22 3 27 8 27 15 C27 22 22 28 16 29 C10 28 5 22 5 15 C5 8 10 3 16 3 Z" stroke="var(--text)" strokeWidth="1.6" />
-      <path d="M9 14 H23 M9 18 H23" stroke="var(--text)" strokeWidth="1.6" strokeLinecap="round" />
-      <circle cx="16" cy="10.5" r="1.4" fill="var(--accent)" />
     </svg>
   );
 }
@@ -1659,7 +1635,7 @@ function MonthPlanPrompt({ monthName, current, onChoose, onOpenCalendar, onLater
   );
 }
 
-function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, onPrevDay, onNextDay, onClear, gameLog, onSaveGameLog, restNote, onSaveRestNote, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame, onSetRestNote, hideClear = false }) {
+function DayTypePage({ type, data, viewDate, canGoBack, canGoForward, onPrevDay, onNextDay, onClear, gameLog, onSaveGameLog, restNote, onSaveRestNote, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame, onSetRestNote, hideClear = false }) {
   const isGame = type === "game";
   const [logging, setLogging] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -2930,7 +2906,7 @@ function PeriodSaveRings({ periodStats }) {
   );
 }
 
-function ProgressPage({ user, content }) {
+function ProgressPage({ user }) {
   const isCoach = user.role === "coach";
   const [clients, setClients] = useState(null);
   const [clientEmail, setClientEmail] = useState(null);
@@ -2952,7 +2928,6 @@ function ProgressPage({ user, content }) {
   }, [isCoach]);
 
   const activeUser = isCoach ? (clients || []).find((c) => c.email === clientEmail) : user;
-  const level = activeUser && EXPERIENCE_LEVELS.includes(activeUser.experience) ? activeUser.experience : "Junior";
 
   // Each day: game/rest as marked (resolved the same way the Today page does), otherwise how much
   // of that day's training was ticked off. Days away from the app simply show as no training —
@@ -3118,9 +3093,6 @@ const ONLINE_THRESHOLD_MS = 3 * 60 * 1000;
 // Blocks left for the goalie furthest along a level: under this many (about a week) turns red.
 const BLOCKS_LEFT_WARNING = 3;
 
-function trainingDayCount(content, level) {
-  return (content.trainingDays?.[level] || []).length;
-}
 // Where each goalie of a level is in its list today, and how far ahead the furthest one is.
 function levelScheduleStatus(content, level, goalies) {
   const list = content.trainingDays?.[level] || [];
@@ -5072,7 +5044,7 @@ function AdminGameDay({ content, updateContent, saveContent }) {
 
       {previewOpen && (
         <PreviewModal label="Preview — how goalies will see Game Day (with your draft)" onClose={() => setPreviewOpen(false)}>
-          <DayTypePage hideClear type="game" data={{ ...gameDay, quote, note: gameDay.noteDraft ?? gameDay.note }} content={content} viewDate={TODAY_DATE} canGoBack={false} canGoForward={false} onPrevDay={() => {}} onNextDay={() => {}} onClear={() => true} gameLog={null} onSaveGameLog={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
+          <DayTypePage hideClear type="game" data={{ ...gameDay, quote, note: gameDay.noteDraft ?? gameDay.note }} viewDate={TODAY_DATE} canGoBack={false} canGoForward={false} onPrevDay={() => {}} onNextDay={() => {}} onClear={() => true} gameLog={null} onSaveGameLog={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
         </PreviewModal>
       )}
     </div>
@@ -5099,7 +5071,7 @@ function AdminRestDay({ content, updateContent, saveContent }) {
 
       {previewOpen && (
         <PreviewModal label="Preview — how goalies will see Rest Day (with your draft)" onClose={() => setPreviewOpen(false)}>
-          <DayTypePage hideClear type="rest" data={{ ...restDay, note: restDay.noteDraft ?? restDay.note }} content={content} viewDate={TODAY_DATE} canGoBack={false} canGoForward={false} onPrevDay={() => {}} onNextDay={() => {}} onClear={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
+          <DayTypePage hideClear type="rest" data={{ ...restDay, note: restDay.noteDraft ?? restDay.note }} viewDate={TODAY_DATE} canGoBack={false} canGoForward={false} onPrevDay={() => {}} onNextDay={() => {}} onClear={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
         </PreviewModal>
       )}
     </div>
@@ -6532,6 +6504,8 @@ function AppInner() {
   useEffect(() => {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
+      // The account and the content load side by side, so a signed-in goalie waits for one round trip, not two.
+      const contentLoad = getContent();
       if (session) {
         const profile = await fetchCurrentProfile();
         if (profile && !profile.removed) setUser(profile);
@@ -6543,18 +6517,19 @@ function AppInner() {
           if (error?.status === 401 || error?.status === 403) await supabase.auth.signOut({ scope: "local" });
         }
       }
-      const c = await getContent();
-      setContent(c);
+      setContent(await contentLoad);
       setAuthChecked(true);
     })();
   }, []);
 
   // "Online" is a heuristic, not a real presence system: while this account has the
-  // app open, stamp lastActive every minute so the admin dashboard can count anyone
-  // active in the last few minutes as online.
+  // app open and on screen, stamp lastActive every minute so the admin dashboard can count
+  // anyone active in the last few minutes as online. A phone with the app in the background
+  // doesn't keep writing.
   useEffect(() => {
     if (!user) return;
     const beat = async () => {
+      if (document.visibilityState !== "visible") return;
       await updateUserFields(user.id, { lastActive: Date.now() });
     };
     beat();
@@ -6702,7 +6677,7 @@ function AppInner() {
     return ok;
   };
   const setDayType = async (dateStr, type) => {
-    // "none" (not deletion) so this always overrides a coach-scheduled rest day for that date.
+    // "none" (not deletion) so clearing a Sunday turns its automatic rest day back into training.
     const value = type || "none";
     const ok = await updateUserFields(user.id, { dayTypes: { [dateStr]: value } });
     if (ok) setUser((prev) => ({ ...prev, dayTypes: { ...(prev.dayTypes || {}), [dateStr]: value } }));
@@ -6830,7 +6805,7 @@ function AppInner() {
               const dateStr = dateKey(viewDate);
               const todayPage = dayType ? (
                 <DayTypePage
-                  type={dayType} data={(dayType === "game" ? content.gameDay : content.restDay) || {}} content={content}
+                  type={dayType} data={(dayType === "game" ? content.gameDay : content.restDay) || {}}
                   viewDate={viewDate} canGoBack={canGoBack} canGoForward={canGoForward} onPrevDay={goPrevDay} onNextDay={goNextDay}
                   onClear={() => setDayType(dateStr, null)}
                   gameLog={(user.gameLogs || {})[dateStr]} onSaveGameLog={(log) => setGameLog(dateStr, log)}
@@ -6853,7 +6828,7 @@ function AppInner() {
               if (view === "drill") return drill ? <DrillDetailPage drill={drill} branding={content.branding} onBack={() => goTo("today")} complete={progress.drill} onComplete={() => toggleComplete("drill")} /> : todayPage;
               if (view === "focus") return focus ? <FocusDetailPage focus={focus} branding={content.branding} drills={content.drills} level={experience} onBack={() => goTo("today")} complete={progress.focus} onComplete={() => toggleComplete("focus")} /> : todayPage;
               if (view === "office") return office ? <OffIceDetailPage office={office} branding={content.branding} onBack={() => goTo("today")} complete={progress.office} onComplete={() => toggleComplete("office")} /> : todayPage;
-              if (view === "progress") return <ProgressPage user={user} content={content} />;
+              if (view === "progress") return <ProgressPage user={user} />;
               if (view === "profile") return <ProfilePage user={user} onLogout={onLogout} onChangePassword={changePassword} onUpdateProfile={updateProfile} onDeleteAccount={deleteMyAccount} />;
               return todayPage;
             })()}
@@ -7122,14 +7097,6 @@ button:focus {
 .daytype-banner { position: relative; border-radius: var(--radius); overflow: hidden; aspect-ratio: 3.5; margin-bottom: 28px; }
 .daytype-banner img { width: 100%; height: 100%; object-fit: cover; object-position: center bottom; display: block; }
 .daytype-card { padding: 28px; margin-bottom: 20px; }
-.daytype-focus-block { text-align: center; }
-.daytype-orb-wrap { display: flex; justify-content: center; margin-bottom: 20px; }
-.daytype-orb { width: 108px; height: 108px; border-radius: 50%; overflow: hidden; flex-shrink: 0; border: 3px solid var(--accent); box-shadow: 0 0 0 5px var(--accent-dim); }
-.daytype-orb--rest { border-color: #4cd7a3; box-shadow: 0 0 0 5px rgba(76,199,150,0.16); }
-.daytype-orb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.daytype-video-wrap { max-width: 320px; margin: 0 auto 20px; }
-.daytype-video-wrap .video { margin-bottom: 0; }
-.daytype-cue { color: var(--text-dim); font-size: 15px; margin-top: 10px; }
 .daytype-empty { color: var(--text-dim); font-size: 14px; margin: 0 0 14px; }
 .daytype-note { margin-top: 18px; font-size: 15px; font-weight: 500; white-space: pre-line; overflow-wrap: anywhere; }
 .note-history { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
@@ -7301,7 +7268,6 @@ button:focus {
    ring without anything escaping the button to get clipped. */
 .exercise-head:focus { box-shadow: inset 0 0 0 2px rgba(190,32,46,0.35); }
 .exercise-thumb { width: 38px; height: 38px; border-radius: 8px; background: var(--surface-2); display: flex; align-items: center; justify-content: center; color: var(--accent); flex-shrink: 0; overflow: hidden; }
-.exercise-thumb-img { width: 100%; height: 100%; object-fit: cover; }
 .exercise-info { display: flex; flex-direction: column; gap: 3px; flex: 1; }
 .exercise-name { font-size: 15px; font-weight: 600; }
 .exercise-sets { font-size: 13px; color: var(--text-dim); }
@@ -7359,9 +7325,6 @@ button:focus {
 .profile-avatar-wrap { position: relative; margin-bottom: 14px; }
 .profile-avatar { width: 64px; height: 64px; border-radius: 50%; background: var(--accent-dim); color: var(--accent); display: flex; align-items: center; justify-content: center; font-family: 'Archivo'; font-weight: 900; font-size: 22px; overflow: hidden; }
 .profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
-.profile-avatar-edit { position: absolute; bottom: -2px; right: -2px; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; border: 2px solid var(--surface); }
-.profile-avatar-edit:disabled { opacity: 0.5; }
-.profile-avatar-hint { font-size: 12px; color: var(--text-dim); margin: -8px 0 4px; }
 .profile-avatar-remove { margin: -2px 0 4px; }
 .profile-email { color: var(--text-dim); font-size: 14px; margin-bottom: 20px; }
 .profile-grid { display: flex; gap: 36px; margin-bottom: 28px; }
@@ -7373,25 +7336,7 @@ button:focus {
 /* ---------------- VIDEO ---------------- */
 .video { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 28px; }
 .video--youtube { position: relative; aspect-ratio: 16/9; }
-.video-stage { position: relative; aspect-ratio: 16/9; background: radial-gradient(ellipse at 50% 30%, #16201f, #0a0a0c 70%); display: flex; align-items: center; justify-content: center; color: var(--text-faint); overflow: hidden; }
-.video-poster-img { position: absolute; inset: 0; z-index: 0; }
-.video-poster-scrim { position: absolute; inset: 0; z-index: 0; background: linear-gradient(180deg, rgba(10,10,12,0.15), rgba(10,10,12,0.55) 75%); }
-.video-arc { position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); width: 300px; }
-.video-play-big { position: absolute; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; transition: transform .18s ease; z-index: 1; }
-.video-play-big:hover { transform: scale(1.06); }
-.video-overlay-title { position: absolute; bottom: 14px; left: 16px; font-size: 13px; font-weight: 600; background: rgba(0,0,0,0.5); padding: 6px 12px; border-radius: 20px; backdrop-filter: blur(4px); z-index: 1; }
 .video-native { width: 100%; aspect-ratio: 16/9; display: block; background: #000; }
-.video-controls { display: flex; align-items: center; gap: 10px; padding: 12px 16px; }
-.video-btn { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; color: var(--text-dim); border-radius: 6px; }
-.video-btn:hover { color: var(--text); }
-.video-time { font-size: 11px; color: var(--text-faint); width: 34px; text-align: center; }
-.video-timeline { flex: 1; height: 4px; background: var(--surface-2); border-radius: 2px; cursor: pointer; position: relative; }
-.video-timeline-fill { height: 100%; background: var(--accent); border-radius: 2px; }
-.video-speed-wrap { position: relative; }
-.video-speed-btn { display: flex; align-items: center; gap: 4px; width: auto; padding: 0 8px; font-size: 12px; }
-.video-speed-menu { position: absolute; bottom: 36px; right: 0; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; min-width: 60px; }
-.video-speed-opt { padding: 8px 12px; font-size: 12px; text-align: left; color: var(--text-dim); }
-.video-speed-opt:hover, .video-speed-opt.active { background: var(--accent-dim); color: var(--accent); }
 
 /* ---------------- PROGRESS ---------------- */
 .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 44px; }
@@ -7559,10 +7504,6 @@ button:focus {
 .dashboard-level-block { margin-bottom: 18px; }
 .dashboard-level-block:last-child { margin-bottom: 0; }
 .dashboard-level-title { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); margin-bottom: 4px; }
-.unused-files { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.unused-files li { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); }
-.unused-files li span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.unused-files li span:last-child { color: var(--text-dim); white-space: nowrap; }
 .usage-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
 .usage-row-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; font-size: 13px; }
 .usage-label { font-weight: 600; }
@@ -7810,11 +7751,6 @@ button:focus {
 .legal-doc a { color: var(--text); text-decoration: underline; }
 .legal-doc strong { color: var(--text); }
 .legal-updated { font-size: 12px; }
-.legal-table-wrap { overflow-x: auto; margin: 4px 0 8px; }
-.legal-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.legal-table th, .legal-table td { text-align: left; vertical-align: top; padding: 9px 10px; border-bottom: 1px solid var(--border); }
-.legal-table th { color: var(--text); font-weight: 600; }
-.legal-table code { font-size: 12px; color: var(--text); white-space: nowrap; }
 @media (max-width: 640px) {
   .cookie-banner { flex-direction: column; align-items: stretch; gap: 14px; padding: 16px; left: 12px; right: 12px; }
   .cookie-banner-actions > .cookie-btn { flex: 1; }

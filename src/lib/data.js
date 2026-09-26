@@ -401,17 +401,6 @@ export function storagePathFromUrl(url) {
   try { return decodeURIComponent(url.slice(i + PUBLIC_MEDIA_MARKER.length).split("?")[0]); } catch { return null; }
 }
 
-// Every file path inside a value (a drill, a list of items, settings...) — found by scanning its JSON.
-export function storagePathsIn(value) {
-  const out = new Set();
-  const text = JSON.stringify(value ?? null) || "";
-  for (const m of text.matchAll(/https?:[^"\\]*\/storage\/v1\/object\/public\/media\/[^"\\]+/g)) {
-    const path = storagePathFromUrl(m[0]);
-    if (path) out.add(path);
-  }
-  return out;
-}
-
 // Permanently deletes an account (their own, or a goalie's when called by a coach): first
 // any profile photo files, then the login and all of its data through delete_account.
 export async function deleteAccount(userId) {
