@@ -1620,6 +1620,12 @@ function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoFo
    GAME DAY / REST DAY (goalie-marked override of the Today page)
    ============================================================================ */
 
+// Rest day notes are short, calendar-sized notes (the database allows no more either).
+const REST_NOTE_MAX = 60;
+// Goals against average: goals against per full 60-minute game, so 2 goals in 30 minutes is a 4.00 GAA.
+function gaa(goalsAgainst, minutes) {
+  return minutes > 0 ? ((goalsAgainst * 60) / minutes).toFixed(2) : null;
+}
 function savePct(g) {
   return g && g.shots > 0 ? (((g.shots - g.goalsAgainst) / g.shots) * 100).toFixed(1) : null;
 }
@@ -1759,6 +1765,7 @@ function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, o
                 <div><span className="stat-label">Shots</span><span className="profile-value">{gameLog.shots}</span></div>
                 <div><span className="stat-label">Goals Against</span><span className="profile-value">{gameLog.goalsAgainst}</span></div>
                 <div><span className="stat-label">Save %</span><span className="profile-value">{savePct(gameLog) ?? "—"}%</span></div>
+                <div><span className="stat-label">GAA</span><span className="profile-value">{gaa(gameLog.goalsAgainst, gameLog.minutesPlayed) ?? "—"}</span></div>
                 <div><span className="stat-label">Minutes</span><span className="profile-value">{gameLog.minutesPlayed}</span></div>
               </div>
               )}
@@ -1787,12 +1794,12 @@ function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, o
             <>
               {restNoteError && <div className="auth-error"><AlertTriangle size={13} /> {restNoteError}</div>}
               <textarea
-                className="restnote-textarea" rows={3} value={restNoteDraft} maxLength={280}
+                className="restnote-textarea" rows={2} value={restNoteDraft} maxLength={REST_NOTE_MAX}
                 onChange={(e) => setRestNoteDraft(e.target.value)}
-                placeholder="What did you do today? e.g. light skate, gym, full recovery…"
+                placeholder="e.g. Light skate and stretching"
                 autoFocus
               />
-              <p className="planner-hint">Please don't include medical or injury details here.</p>
+              <p className="planner-hint restnote-hint"><span>Please don't include medical or injury details here.</span><span>{restNoteDraft.length}/{REST_NOTE_MAX}</span></p>
               <div className="admin-form-actions">
                 <button className="btn btn--ghost btn--small" onClick={() => { setRestNoteDraft(restNote || ""); setRestNoteError(""); setNotingRest(false); }} disabled={restNoteBusy}>Cancel</button>
                 <button className="btn btn--primary btn--small" onClick={handleSaveRestNote} disabled={restNoteBusy}>{restNoteBusy ? "Saving…" : "Save note"}</button>
@@ -1886,10 +1893,18 @@ function GameStatsForm({ initial, onSave, onCancel }) {
         </span>
       </label>
 
-      <label className="auth-field">
-        <span>Opponent</span>
-        <input value={opponent} onChange={(e) => setOpponent(e.target.value)} placeholder="e.g. Ice Wolves" maxLength={100} />
-      </label>
+      <div className={"gamelog-opponent-row" + (dressedOnly ? " gamelog-opponent-row--single" : "")}>
+        <label className="auth-field">
+          <span>Opponent</span>
+          <input value={opponent} onChange={(e) => setOpponent(e.target.value)} placeholder="e.g. Ice Wolves" maxLength={100} />
+        </label>
+        {!dressedOnly && (
+          <label className="auth-field">
+            <span>Goals scored (your team)</span>
+            <input type="number" min="0" inputMode="numeric" value={goalsFor} onChange={(e) => setGoalsFor(e.target.value)} />
+          </label>
+        )}
+      </div>
 
       <div className="gamelog-toggle-row">
         <button type="button" className={"gamelog-toggle" + (homeAway === "home" ? " active" : "")} onClick={() => setHomeAway("home")}>Home</button>
@@ -1928,8 +1943,7 @@ function GameStatsForm({ initial, onSave, onCancel }) {
       </div>
 
       <div className="admin-form-grid">
-        <label>Minutes played<input type="number" min="0" value={minutesPlayed} onChange={(e) => setMinutesPlayed(e.target.value)} /></label>
-        <label>Goals scored (your team)<input type="number" min="0" value={goalsFor} onChange={(e) => setGoalsFor(e.target.value)} /></label>
+        <label>Minutes played<input type="number" min="0" inputMode="numeric" value={minutesPlayed} onChange={(e) => setMinutesPlayed(e.target.value)} placeholder="60 for a full game" /></label>
       </div>
       </>)}
 
@@ -2793,12 +2807,12 @@ function ProfileCalendar({ dayTypes, onSetDayType, onClose, gameLogs, restNotes,
         <div className="profile-calendar-gamelog">
           {restNoteError && <div className="auth-error"><AlertTriangle size={13} /> {restNoteError}</div>}
           <textarea
-            className="restnote-textarea" rows={3} value={restNoteDraft} maxLength={280}
+            className="restnote-textarea" rows={2} value={restNoteDraft} maxLength={REST_NOTE_MAX}
             onChange={(e) => setRestNoteDraft(e.target.value)}
-            placeholder="What did you do this day? e.g. light skate, gym, full recovery…"
+            placeholder="e.g. Light skate and stretching"
             aria-label="Rest day note" autoFocus
           />
-          <p className="planner-hint">Please don't include medical or injury details here.</p>
+          <p className="planner-hint restnote-hint"><span>Please don't include medical or injury details here.</span><span>{restNoteDraft.length}/{REST_NOTE_MAX}</span></p>
           <div className="admin-form-actions">
             <button className="btn btn--ghost btn--small" onClick={() => { setRestNoteError(""); setNotingRest(false); }} disabled={restNoteBusy}>Cancel</button>
             <button className="btn btn--primary btn--small" onClick={handleSaveRestNote} disabled={restNoteBusy}>{restNoteBusy ? "Saving…" : "Save note"}</button>
@@ -2974,7 +2988,8 @@ function ProgressPage({ user, content }) {
   const totalShots = played.reduce((sum, g) => sum + g.shots, 0);
   const totalGA = played.reduce((sum, g) => sum + g.goalsAgainst, 0);
   const avgSavePct = totalShots > 0 ? (((totalShots - totalGA) / totalShots) * 100).toFixed(1) : "—";
-  const avgGA = played.length > 0 ? (totalGA / played.length).toFixed(2) : "—";
+  const totalMinutes = played.reduce((sum, g) => sum + (g.minutesPlayed || 0), 0);
+  const avgGA = gaa(totalGA, totalMinutes) ?? "—";
   const periodStats = [];
   played.forEach((g) => {
     (g.periods || []).forEach((p, i) => {
@@ -3068,7 +3083,7 @@ function ProgressPage({ user, content }) {
         {games.length > 0 && (
           <div className="gameperf-table-wrap">
             <table className="admin-table">
-              <thead><tr><th>Date</th><th>Opponent</th><th>Result</th><th>Shots</th><th>GA</th><th>Save %</th><th>Min</th></tr></thead>
+              <thead><tr><th>Date</th><th>Opponent</th><th>Result</th><th>Shots</th><th>GA</th><th>Save %</th><th>GAA</th><th>Min</th></tr></thead>
               <tbody>
                 {[...games].reverse().map((g) => (
                   <tr key={g.date}>
@@ -3076,11 +3091,12 @@ function ProgressPage({ user, content }) {
                     <td>{g.homeAway === "home" ? "vs" : "@"} {g.opponent}</td>
                     <td><span className={"gamelog-result-badge gamelog-result-badge--" + g.result}>{g.result}</span></td>
                     {g.dressedOnly ? (
-                      <td colSpan={4} className="gameperf-dressed">Dressed — didn't play</td>
+                      <td colSpan={5} className="gameperf-dressed">Dressed — didn't play</td>
                     ) : (<>
                       <td>{g.shots}</td>
                       <td>{g.goalsAgainst}</td>
                       <td>{savePct(g) ?? "—"}%</td>
+                      <td>{gaa(g.goalsAgainst, g.minutesPlayed) ?? "—"}</td>
                       <td>{g.minutesPlayed}</td>
                     </>)}
                   </tr>
@@ -7122,6 +7138,11 @@ button:focus {
 .note-history-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--text-faint); }
 .daytype-notes-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
 .daytype-clear { width: 100%; justify-content: center; }
+.restnote-hint { display: flex; justify-content: space-between; gap: 12px; }
+.restnote-hint span:last-child { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.gamelog-opponent-row { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px; align-items: end; }
+@media (min-width: 641px) { .gamelog-opponent-row { grid-template-columns: minmax(0, 1fr) 190px; } }
+.gamelog-opponent-row--single { grid-template-columns: minmax(0, 1fr); }
 .restnote-textarea { width: 100%; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; color: var(--text); font-size: 14px; font-family: inherit; resize: vertical; margin-top: 6px; }
 .restnote-text { font-size: 15px; line-height: 1.5; margin: 0; white-space: pre-wrap; }
 
