@@ -4,7 +4,7 @@ import {
   Trash2, Eye, EyeOff, Calendar as CalendarIcon, LayoutGrid, Users as UsersIcon,
   Image as ImageIcon, Settings as SettingsIcon, Download, LogOut, Mail, Lock, UploadCloud,
   FileText, Video as VideoIcon, AlertTriangle, Home, BarChart3, Tag, Search, CircleDot, Armchair,
-  Copy, LayoutTemplate, Megaphone, List, Camera, Cookie, ListOrdered, Heading, Link2, Scale
+  Copy, LayoutTemplate, Megaphone, List, Camera, Cookie, ListOrdered, Heading, Link2, Scale, Info
 } from "lucide-react";
 // Brand images ship as separate files (cached by the browser, never inside the JS bundle).
 import LOGO_SRC from "./assets/logo.png";
@@ -178,22 +178,27 @@ function resolveDayType(u, dateKeyStr) {
 // they're away the day a block should start, their list waits (nothing is skipped) and that
 // block starts on the next training day they're back. The first block is shown the first day
 // they open the app. Returns { ...trainingBlock, level, index, block, dayInBlock, blockDays } for
-// dateKeyStr, or null if that date is a game/rest day, a day their list was waiting, or past the
-// last block the coach has created.
+// dateKeyStr, or null if that date is a game/rest day, a day their list was waiting, or the coach
+// hasn't created any blocks yet.
 function trainingDayForDate(content, user, dateKeyStr, level) {
   if (resolveDayType(user, dateKeyStr)) return null;
-  const walk = walkTrainingBlocks(user, dateKeyStr);
-  const current = walk?.current;
+  const list = content.trainingDays?.[level] || [];
+  const current = walkTrainingBlocks(user, dateKeyStr, list)?.current;
   if (!current) return null;
-  const entry = (content.trainingDays?.[level] || [])[current.index];
+  const entry = list[current.index];
   return entry ? { ...entry, level, index: current.index, block: current.block, dayInBlock: current.dayInBlock, blockDays: current.blockDays } : null;
 }
 
-// Walks a goalie's weeks from their first day up to dateKeyStr (the rules above). Returns
-// { started, current }: how many blocks they had started by the end of that day, and the block
-// that day belongs to ({ index, block, dayInBlock, blockDays }, or null on a day off or a day
-// their list waited). Null if the date is before they started.
-function walkTrainingBlocks(user, dateKeyStr) {
+// Walks a goalie's weeks from their first day up to dateKeyStr (the rules above) through the
+// level's list. Each block that starts takes the next block in the list the goalie hasn't had
+// yet; a block only counts as there from the day the coach created it. Once they've had every
+// block, they repeat from Block 1 so they always have training, and as soon as the coach adds
+// new blocks they go on to those (and after those, back to Block 1 again).
+// Returns { reached, repeating, current }: how many blocks of the list they've reached, whether
+// they're repeating the list right now, and the block that day belongs to ({ index, block,
+// dayInBlock, blockDays }, or null on a day off or a day their list waited). Null if the date is
+// before they started.
+function walkTrainingBlocks(user, dateKeyStr, list) {
   // Being in the app right now counts as today's activity, even before the record is saved.
   const todayKey = dateKey(TODAY_DATE);
   const loginDays = { ...(user.loginDays || {}), [todayKey]: true };
@@ -210,7 +215,12 @@ function walkTrainingBlocks(user, dateKeyStr) {
     return key >= startKey && !personalDayType(user, key) && (date.getDay() !== 0 || sundayOk);
   };
 
-  let started = 0; // blocks started so far = list position of the next block
+  // When each block became available (legacy blocks without a date always were).
+  const createdKeys = list.map((b) => (b.createdAt ? dateKey(new Date(b.createdAt)) : ""));
+  const availableOn = (key) => createdKeys.filter((c) => c <= key).length;
+  let reached = 0;      // list position of the next block they haven't had yet
+  let repeatPos = 0;    // position in the list while repeating it
+  let repeating = false;
   let result = null;
   const targetMonday = dateKey(mondayOf(dateFromKey(dateKeyStr)));
   for (let monday = mondayOf(dateFromKey(startKey)); dateKey(monday) <= targetMonday; monday = addDays(monday, 7)) {
@@ -223,7 +233,14 @@ function walkTrainingBlocks(user, dateKeyStr) {
       if (!isTrainingDay(day, sundayOk)) continue;
       if (open) { open = false; current = { ...current, dayInBlock: 2 }; }
       else if (isAway(key)) { current = null; }
-      else { open = true; blockNo++; current = { index: started, block: blockNo, dayInBlock: 1 }; started++; }
+      else {
+        const available = availableOn(key);
+        let index = null;
+        if (reached < available) { index = reached++; repeatPos = 0; repeating = false; }
+        else if (available > 0) { index = repeatPos % available; repeatPos++; repeating = true; }
+        if (index === null) current = null;
+        else { open = true; blockNo++; current = { index, block: blockNo, dayInBlock: 1 }; }
+      }
       if (key !== dateKeyStr || !current) continue;
       let blockDays = 2;
       if (current.dayInBlock === 1) {
@@ -233,7 +250,7 @@ function walkTrainingBlocks(user, dateKeyStr) {
       result = { ...current, blockDays };
     }
   }
-  return { started, current: result };
+  return { reached, repeating, current: result };
 }
 
 // The notification bell's content — always computed fresh from the goalie's own calendar
@@ -3044,14 +3061,15 @@ function trainingDayCount(content, level) {
 }
 // Where each goalie of a level is in its list today, and how far ahead the furthest one is.
 function levelScheduleStatus(content, level, goalies) {
-  const total = trainingDayCount(content, level);
+  const list = content.trainingDays?.[level] || [];
+  const total = list.length;
   const today = dateKey(TODAY_DATE);
-  const positions = goalies.filter((g) => g.experience === level).map((g) => walkTrainingBlocks(g, today)?.started || 0);
-  const furthest = positions.length ? Math.max(...positions) : 0;
+  const walks = goalies.filter((g) => g.experience === level).map((g) => walkTrainingBlocks(g, today, list) || { reached: 0, repeating: false });
+  const furthest = walks.length ? Math.max(...walks.map((w) => w.reached)) : 0;
   return {
-    total, goalieCount: positions.length, furthest,
+    total, goalieCount: walks.length, furthest,
     left: total - furthest,
-    runOut: positions.filter((p) => p > total).length,
+    repeating: walks.filter((w) => w.repeating).length,
   };
 }
 
@@ -3133,8 +3151,8 @@ function AdminDashboard({ content }) {
             } else if (st && st.furthest === 0) {
               line = `${st.goalieCount} goalie${st.goalieCount === 1 ? "" : "s"}, none started yet · ${st.total} block${st.total === 1 ? "" : "s"} ready`;
             } else if (st) {
-              line = st.furthest > st.total ? `Furthest goalie has finished all ${st.total} block${st.total === 1 ? "" : "s"}` : `Furthest goalie is on Block ${st.furthest} of ${st.total}`;
-              sub = st.runOut > 0 ? `${st.runOut} goalie${st.runOut === 1 ? " has" : "s have"} run out of blocks — add more now.`
+              line = st.repeating > 0 ? `Furthest goalie has had all ${st.total} block${st.total === 1 ? "" : "s"}` : `Furthest goalie is on Block ${st.furthest} of ${st.total}`;
+              sub = st.repeating > 0 ? `${st.repeating} goalie${st.repeating === 1 ? " is" : "s are"} repeating from Block 1 — add more blocks.`
                 : st.left === 0 ? "They're on the last block — add more now."
                 : `${st.left} block${st.left === 1 ? "" : "s"} left after theirs, ${weeksLeft(st.left)}.`;
             }
@@ -4623,6 +4641,7 @@ function formatCreated(iso) {
 
 function AdminTrainingDays({ content, updateContent, saveContent }) {
   const [level, setLevel] = useState("Youth");
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [drillCat, setDrillCat] = useState("");
   const [focusCat, setFocusCat] = useState("");
   const [officeCat, setOfficeCat] = useState("");
@@ -4736,13 +4755,21 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
 
   return (
     <div className="admin-page">
-      <h1 className="admin-h1">Training blocks</h1>
-      <div className="admin-sub">
+      <div className="admin-header-row">
+        <h1 className="admin-h1">Training blocks</h1>
+        <button type="button" className="btn btn--ghost btn--small" aria-expanded={aboutOpen} aria-controls="training-blocks-about" onClick={() => setAboutOpen((v) => !v)}>
+          <Info size={14} /> About
+        </button>
+      </div>
+      {aboutOpen && (
+      <div className="admin-sub training-blocks-about" id="training-blocks-about">
         <p>Build the ordered list of training blocks for each level. A new block is added to Youth, Junior and Pro at once and what you fill in and save is copied to all three. If you select a level afterwards, you can switch its drills or titles.</p>
         <p>Moving, copying or deleting a block does the same in all three levels, so each block number always lines up.</p>
         <p>Each ideal week has 3 blocks of 2 days. With nothing marked for that week, block 1 runs Monday–Tuesday, block 2 Wednesday–Thursday, block 3 Friday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day within that week, Sunday opens up as a training day and the blocks shift along the days they have left (a game day Wednesday and a rest day Saturday means the blocks go Monday–Tuesday, Thursday–Friday, and Sunday alone as block 3). If there are two game days in a row followed by a rest day (for example game days Friday and Saturday and a rest day Sunday), there are only two blocks that week: Monday–Tuesday and Wednesday–Thursday.</p>
         <p>A new goalie starts at Block 1 the first day they open the app. If a goalie is away when the next block should start, their list pauses until they're back, so they don't miss any blocks.</p>
+        <p>When a goalie has had every block of their level, they start again from Block 1 so they always have training. As soon as you add new blocks, they go on to those next.</p>
       </div>
+      )}
 
       <div className="admin-panel">
         <div className="planner-header">
@@ -7741,6 +7768,9 @@ button:focus {
 
 .admin-sub { font-size: 13px; color: var(--text-dim); margin: -12px 0 20px; max-width: 620px; line-height: 1.5; }
 .admin-sub p + p { margin-top: 8px; }
+.training-blocks-about p { margin: 0; }
+.training-blocks-about p + p { margin-top: 8px; }
+.training-blocks-about { margin: 0 0 20px; max-width: 720px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .front-page-panel-title { font-size: 14px; margin-bottom: 14px; }
 .front-page-panel-body { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
 .brand-image-controls { display: flex; flex-direction: column; gap: 10px; min-width: 200px; }
