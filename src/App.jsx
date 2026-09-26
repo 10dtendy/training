@@ -1101,6 +1101,7 @@ function AuthScreen({ onAuthed }) {
   return (
     <div className="auth-screen">
       <div className="auth-side">
+        <img src={BADGE_LOGO_SRC} alt="" className="auth-badge" />
         <div className="auth-side-content">
           <div className="nav-logo"><img src={LOGO_SRC} alt="10DTendy" className="brand-logo brand-logo--auth" /></div>
           <h1 className="auth-headline">Be different, stand out. Protect This Crease.</h1>
@@ -7152,6 +7153,7 @@ button:focus {
 /* ---------------- AUTH ---------------- */
 .auth-screen { display: grid; grid-template-columns: 1fr 1fr; min-height: 100vh; }
 .auth-side { position: relative; background: linear-gradient(160deg, #10201d, #0A0A0C 65%); display: flex; align-items: center; padding: 60px; overflow: hidden; }
+.auth-badge { position: absolute; top: 50%; left: 50%; width: 560px; max-width: 70%; transform: translate(-50%, -50%) rotate(-8deg); opacity: 0.1; pointer-events: none; }
 .auth-side-content { position: relative; z-index: 1; max-width: 420px; }
 .auth-headline { font-size: 34px; font-weight: 900; line-height: 1.15; margin: 28px 0 14px; }
 .auth-sub { color: var(--text-dim); font-size: 15px; line-height: 1.5; }
@@ -8120,6 +8122,7 @@ button:focus {
   .auth-screen { grid-template-columns: 1fr; align-content: start; }
   .auth-side { padding: 48px 32px 36px; min-height: 0; }
   .auth-side-content { max-width: 100%; text-align: center; margin: 0 auto; }
+  .auth-badge { width: 300px; }
   .auth-side-content .nav-logo { justify-content: center; }
   .auth-headline { font-size: 27px; }
   .auth-form-wrap { padding: 32px 24px 48px; }
@@ -8165,6 +8168,7 @@ button:focus {
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .profile-grid { flex-wrap: wrap; gap: 20px; }
   .auth-side { padding: 36px 20px 28px; }
+  .auth-badge { width: 220px; }
   .auth-headline { font-size: 23px; margin: 18px 0 10px; }
   .auth-sub { font-size: 13.5px; }
   .auth-form-wrap { padding: 20px 16px 40px; }
