@@ -160,9 +160,19 @@ function resolveDayType(u, dateKeyStr) {
 // they open the app. Returns { ...trainingBlock, level, index, block, dayInBlock, blockDays } for
 // dateKeyStr, or null if that date is a game/rest day, a day their list was waiting, or the coach
 // hasn't created any blocks yet.
+// A block goalies get: it has a drill, a practice focus and an off-ice workout, all published.
+// Anything less is a draft that goalies skip until it's complete.
+function blockIsReady(content, block) {
+  const published = (items, id) => !!id && items.some((it) => it.id === id && it.published);
+  return published(content.drills, block.drillId) && published(content.focusPoints, block.focusId) && published(content.offIceWorkouts, block.workoutId);
+}
+function readyBlocks(content, level) {
+  return (content.trainingDays?.[level] || []).filter((b) => blockIsReady(content, b));
+}
+
 function trainingDayForDate(content, user, dateKeyStr, level) {
   if (resolveDayType(user, dateKeyStr)) return null;
-  const list = content.trainingDays?.[level] || [];
+  const list = readyBlocks(content, level);
   const current = walkTrainingBlocks(user, dateKeyStr, list)?.current;
   if (!current) return null;
   const entry = list[current.index];
@@ -3094,14 +3104,18 @@ const ONLINE_THRESHOLD_MS = 3 * 60 * 1000;
 const BLOCKS_LEFT_WARNING = 3;
 
 // Where each goalie of a level is in its list today, and how far ahead the furthest one is.
+// Only ready blocks count (drafts are skipped); block numbers are their place in the full list.
 function levelScheduleStatus(content, level, goalies) {
-  const list = content.trainingDays?.[level] || [];
+  const all = content.trainingDays?.[level] || [];
+  const list = readyBlocks(content, level);
   const total = list.length;
   const today = dateKey(TODAY_DATE);
   const walks = goalies.filter((g) => g.experience === level).map((g) => walkTrainingBlocks(g, today, list) || { reached: 0, repeating: false });
   const furthest = walks.length ? Math.max(...walks.map((w) => w.reached)) : 0;
   return {
     total, goalieCount: walks.length, furthest,
+    furthestBlock: furthest > 0 ? all.indexOf(list[furthest - 1]) + 1 : 0,
+    drafts: all.length - total,
     left: total - furthest,
     repeating: walks.filter((w) => w.repeating).length,
   };
@@ -3185,11 +3199,12 @@ function AdminDashboard({ content }) {
             } else if (st && st.furthest === 0) {
               line = `${st.goalieCount} goalie${st.goalieCount === 1 ? "" : "s"}, none started yet · ${st.total} block${st.total === 1 ? "" : "s"} ready`;
             } else if (st) {
-              line = st.repeating > 0 ? `Furthest goalie has had all ${st.total} block${st.total === 1 ? "" : "s"}` : `Furthest goalie is on Block ${st.furthest} of ${st.total}`;
+              line = st.repeating > 0 ? `Furthest goalie has had all ${st.total} ready block${st.total === 1 ? "" : "s"}` : `Furthest goalie is on Block ${st.furthestBlock}`;
               sub = st.repeating > 0 ? `${st.repeating} goalie${st.repeating === 1 ? " is" : "s are"} repeating from Block 1 — add more blocks.`
                 : st.left === 0 ? "They're on the last block — add more now."
-                : `${st.left} block${st.left === 1 ? "" : "s"} left after theirs, ${weeksLeft(st.left)}.`;
+                : `${st.left} ready block${st.left === 1 ? "" : "s"} left after theirs, ${weeksLeft(st.left)}.`;
             }
+            const draftNote = st?.drafts > 0 ? `${st.drafts} draft block${st.drafts === 1 ? "" : "s"} (missing a part or using a draft) skipped until complete.` : "";
             return (
               <div className="dashboard-health-card" key={lv}>
                 <div className="dashboard-health-head">
@@ -3198,6 +3213,7 @@ function AdminDashboard({ content }) {
                 </div>
                 <span className="dashboard-health-days">{line}</span>
                 {sub && <span className="dashboard-health-sub">{sub}</span>}
+                {draftNote && <span className="dashboard-health-sub">{draftNote}</span>}
               </div>
             );
           })}
@@ -3207,7 +3223,7 @@ function AdminDashboard({ content }) {
       <div className="admin-panel">
         <h3>What new signups see first — Day 1</h3>
         {EXPERIENCE_LEVELS.map((lv) => {
-          const assignment = content.trainingDays?.[lv]?.[0];
+          const assignment = readyBlocks(content, lv)[0];
           const drill = assignment && content.drills.find((d) => d.id === assignment.drillId);
           const focus = assignment && content.focusPoints.find((f) => f.id === assignment.focusId);
           const office = assignment && content.offIceWorkouts.find((o) => o.id === assignment.workoutId);
@@ -4786,6 +4802,8 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
   const matchCount = list.filter((d, i) => blockMatches({ ...d, ...drafts[d.id] }, i)).length;
 
   const dayIsEmpty = (d) => !d.drillId && !d.focusId && !d.workoutId;
+  // Saved blocks without all three parts published are drafts: goalies skip them.
+  const draftChip = (saved) => (dayIsEmpty(saved) ? "Empty" : blockIsReady(content, saved) ? null : "Draft — skipped by goalies");
 
   return (
     <div className="admin-page">
@@ -4801,6 +4819,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
         <p>Moving, copying or deleting a block does the same in all three levels, so each block number always lines up.</p>
         <p>Each ideal week has 3 blocks of 2 days. With nothing marked for that week, block 1 runs Monday–Tuesday, block 2 Wednesday–Thursday, block 3 Friday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day within that week, Sunday opens up as a training day and the blocks shift along the days they have left (a game day Wednesday and a rest day Saturday means the blocks go Monday–Tuesday, Thursday–Friday, and Sunday alone as block 3). If there are two game days in a row followed by a rest day (for example game days Friday and Saturday and a rest day Sunday), there are only two blocks that week: Monday–Tuesday and Wednesday–Thursday.</p>
         <p>A new goalie starts at Block 1 the first day they open the app. If a goalie is away when the next block should start, their list pauses until they're back, so they don't miss any blocks.</p>
+        <p>A block needs a drill, a practice focus and an off-ice workout, all published. Until then it's a draft: goalies skip it and get the next complete block.</p>
         <p>When a goalie has had every block of their level, they start again from Block 1 so they always have training. As soon as you add new blocks, they go on to those next.</p>
       </div>
       )}
@@ -4841,7 +4860,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
         <div className="admin-panel training-day-card" key={saved.id}>
           <div className="planner-header">
             <div className="training-block-head">
-              <h3>Block {i + 1}{day.title && <span className="training-block-title"> — {day.title}</span>}{dayIsEmpty(day) && <span className="chip" style={{ marginLeft: 8 }}>Empty</span>}</h3>
+              <h3>Block {i + 1}{day.title && <span className="training-block-title"> — {day.title}</span>}{draftChip(saved) && <span className="chip" style={{ marginLeft: 8 }}>{draftChip(saved)}</span>}</h3>
               <span className="training-block-date">Created {formatCreated(saved.createdAt)}{dirty && " · unsaved changes"}</span>
             </div>
             <div className="admin-row-actions">
