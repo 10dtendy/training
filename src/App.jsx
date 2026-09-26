@@ -235,7 +235,7 @@ function trainingDayForDate(content, user, dateKeyStr, level) {
   for (let i = 0; i < 7; i++) if (isAvailable(addDays(targetMonday, i), sundayOk)) availableThisWeek++;
   const blockDays = Math.min(2, availableThisWeek - blockIndex * 2);
   const entry = (content.trainingDays?.[level] || [])[index];
-  return entry ? { ...entry, index, block: blockIndex + 1, dayInBlock: (before % 2) + 1, blockDays } : null;
+  return entry ? { ...entry, level, index, block: blockIndex + 1, dayInBlock: (before % 2) + 1, blockDays } : null;
 }
 
 // The notification bell's content — always computed fresh from the goalie's own calendar
@@ -4026,7 +4026,7 @@ const blankExercise = () => ({
 });
 
 const BLANK_OFFICE = {
-  title: "", duration: "", equipment: "", description: "", objective: "", exercises: [], planRows: [], category: "", published: false,
+  title: "", duration: "", equipment: "", description: "", objective: "", exercises: [], planRows: [], levelPlans: {}, category: "", published: false,
   imageAssetId: null, imageUrl: "", videoAssetId: null, videoUrl: "",
 };
 const blankPlanRow = () => ({ id: uid("row"), exercise: "", sets: "", reps: "", rest: "" });
@@ -4036,6 +4036,13 @@ function isPlanNote(item) { return item?.type === "note"; }
 function planNoteHasText(item) { return !!String(item?.text || "").replace(/<[^>]*>/g, "").trim(); }
 // A set description counts as filled in if it has text or an intensity.
 function planNoteHasContent(item) { return planNoteHasText(item) || !!String(item?.intensity || "").trim(); }
+
+// The plan (Workout) can differ per level: levelPlans[level] is that level's own adjusted version,
+// and a level without one follows the shared planRows. Returns the workout as a goalie at `level` sees it.
+function workoutForLevel(office, level) {
+  const own = office && level ? office.levelPlans?.[level] : null;
+  return own ? { ...office, planRows: own } : office;
+}
 
 // A workout's plan as goalies follow it, in the coach's order: each run of exercise rows becomes
 // one table, each set description a note between them. Shared by the Off-Ice page and the PDF.
@@ -4167,8 +4174,7 @@ function ExerciseEditor({ exercises, setDraft, exMedia }) {
 // The "Workout" section: a plain, ordered list of exercise rows (sets, reps, rest) and set
 // descriptions (how to run them — rounds, rest between rounds) that goalies follow like a written
 // training plan. No photos or video — that's what the exercise cards above are for.
-function WorkoutPlanEditor({ items, setDraft }) {
-  const setItems = (updater) => setDraft((d) => ({ ...d, planRows: updater(d.planRows || []) }));
+function WorkoutPlanEditor({ items, setItems, toolbar }) {
   const updateField = (id, field, value) => setItems((list) => list.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
   const remove = (id) => setItems((list) => list.filter((r) => r.id !== id));
   const move = (id, dir) => setItems((list) => {
@@ -4196,6 +4202,7 @@ function WorkoutPlanEditor({ items, setDraft }) {
         The exercises goalies follow, with their sets, reps and rest. Add a set description wherever you need to explain how to do them —
         for example rounds, or rest between rounds — and move it above, between or below the exercises.
       </p>
+      {toolbar}
       {items.length === 0 ? (
         <p className="exercise-editor-empty">Nothing yet — add an exercise or a set description below.</p>
       ) : (
@@ -4245,7 +4252,67 @@ function WorkoutPlanEditor({ items, setDraft }) {
   );
 }
 
+// Workout rows and set descriptions, tidied for the editor (older rows may lack ids or fields).
+function normalizePlanItems(list) {
+  return (list || []).map((r) => (isPlanNote(r)
+    ? { id: r.id || uid("note"), type: "note", text: r.text || "", intensity: r.intensity || "" }
+    : { id: r.id || uid("row"), exercise: r.exercise || "", sets: r.sets || "", reps: r.reps || "", rest: r.rest || "" }));
+}
+// Empty rows and empty descriptions (an editor left with only "<br>") are dropped on save.
+function cleanPlanItems(list) {
+  return (list || [])
+    .filter((r) => (isPlanNote(r) ? planNoteHasContent(r) : r.exercise.trim() || r.sets.trim() || r.reps.trim() || r.rest.trim()))
+    .map((r) => (isPlanNote(r)
+      ? { ...r, intensity: (r.intensity || "").trim(), text: planNoteHasText(r) ? r.text : "" }
+      : { ...r, exercise: r.exercise.trim() }));
+}
+
+// The Workout with a Youth / Junior / Pro toggle. What's filled in is shared by all three levels;
+// "Adjust for <level>" gives that level its own copy to change (structure, reps…) without touching
+// the others, and "Use the shared workout" drops the copy again.
+function WorkoutLevelPlans({ draft, setDraft, level, setLevel }) {
+  const own = draft.levelPlans?.[level];
+  const items = own || draft.planRows || [];
+  const setItems = (updater) => setDraft((d) => (d.levelPlans?.[level]
+    ? { ...d, levelPlans: { ...d.levelPlans, [level]: updater(d.levelPlans[level]) } }
+    : { ...d, planRows: updater(d.planRows || []) }));
+  const sharedLevels = EXPERIENCE_LEVELS.filter((lv) => !draft.levelPlans?.[lv]);
+  const adjust = () => setDraft((d) => ({
+    ...d, levelPlans: { ...d.levelPlans, [level]: (d.planRows || []).map((r) => ({ ...r, id: uid(isPlanNote(r) ? "note" : "row") })) },
+  }));
+  const useShared = async () => {
+    if (!(await confirmDialog({ title: `Use the shared workout for ${level}?`, message: `Your ${level} changes are removed and ${level} goalies get the shared workout again.`, confirmLabel: "Use shared workout", danger: true }))) return;
+    setDraft((d) => { const { [level]: _, ...rest } = d.levelPlans || {}; return { ...d, levelPlans: rest }; });
+  };
+  const toolbar = (
+    <div className="plan-level-bar">
+      <div className="level-tabs" role="tablist" aria-label="Workout for level">
+        {EXPERIENCE_LEVELS.map((lv) => (
+          <button key={lv} type="button" role="tab" aria-selected={level === lv} className={"level-tab" + (level === lv ? " active" : "")} onClick={() => setLevel(lv)}>
+            {lv}{draft.levelPlans?.[lv] && <span className="level-tab-dot" title="Adjusted for this level" />}
+          </button>
+        ))}
+      </div>
+      {own ? (
+        <div className="plan-level-status plan-level-status--own">
+          <span><strong>Adjusted for {level}.</strong> Changes here only apply to {level} goalies.</span>
+          <button type="button" className="btn btn--ghost btn--small" onClick={useShared}>Use the shared workout</button>
+        </div>
+      ) : (
+        <div className="plan-level-status">
+          <span>{sharedLevels.length > 1
+            ? <><strong>Shared by {sharedLevels.slice(0, -1).join(", ")} and {sharedLevels[sharedLevels.length - 1]}.</strong> Changes here apply to {sharedLevels.length === 2 ? "both" : "all three"}.</>
+            : <><strong>Shared workout.</strong> The other levels have their own versions, so changes here only apply to {level}.</>}</span>
+          {sharedLevels.length > 1 && <button type="button" className="btn btn--ghost btn--small" onClick={adjust}><Pencil size={12} /> Adjust for {level} only</button>}
+        </div>
+      )}
+    </div>
+  );
+  return <WorkoutPlanEditor key={level + (own ? "-own" : "")} items={items} setItems={setItems} toolbar={toolbar} />;
+}
+
 function AdminOffIce({ content, updateContent }) {
+  const [planLevel, setPlanLevel] = useState("Youth");
   const [editingId, setEditingId] = useState(null);
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState(BLANK_OFFICE);
@@ -4271,9 +4338,8 @@ function AdminOffIce({ content, updateContent }) {
       id: ex.id || uid("ex"), name: ex.name || "", sets: ex.sets || "", rest: ex.rest || "", instructions: ex.instructions || "",
       imageAssetId: ex.imageAssetId || null, imageUrl: ex.imageUrl || "", videoAssetId: ex.videoAssetId || null, videoUrl: ex.videoUrl || "",
     })),
-    planRows: (o.planRows || []).map((r) => (isPlanNote(r)
-      ? { id: r.id || uid("note"), type: "note", text: r.text || "", intensity: r.intensity || "" }
-      : { id: r.id || uid("row"), exercise: r.exercise || "", sets: r.sets || "", reps: r.reps || "", rest: r.rest || "" })),
+    planRows: normalizePlanItems(o.planRows),
+    levelPlans: Object.fromEntries(Object.entries(o.levelPlans || {}).map(([lv, list]) => [lv, normalizePlanItems(list)])),
   });
   const startEdit = (o) => { setEditingId(o.id); setDraft(toDraft(o)); setCreating(false); media.clearError(); };
   const startCreate = () => { setCreating(true); setEditingId(null); setDraft(BLANK_OFFICE); media.clearError(); };
@@ -4284,12 +4350,8 @@ function AdminOffIce({ content, updateContent }) {
     exercises: (d.exercises || [])
       .filter((ex) => ex.name.trim() || ex.instructions.trim() || ex.imageUrl || ex.videoUrl)
       .map((ex) => ({ ...ex, name: ex.name.trim() || "Untitled exercise" })),
-    // Empty rows and empty descriptions (an editor left with only "<br>") are dropped on save.
-    planRows: (d.planRows || [])
-      .filter((r) => (isPlanNote(r) ? planNoteHasContent(r) : r.exercise.trim() || r.sets.trim() || r.reps.trim() || r.rest.trim()))
-      .map((r) => (isPlanNote(r)
-        ? { ...r, intensity: (r.intensity || "").trim(), text: planNoteHasText(r) ? r.text : "" }
-        : { ...r, exercise: r.exercise.trim() })),
+    planRows: cleanPlanItems(d.planRows),
+    levelPlans: Object.fromEntries(Object.entries(d.levelPlans || {}).map(([lv, list]) => [lv, cleanPlanItems(list)])),
     imageAssetId: d.imageAssetId || null, imageUrl: d.imageUrl || "", videoAssetId: d.videoAssetId || null, videoUrl: d.videoUrl || "",
   });
 
@@ -4330,7 +4392,7 @@ function AdminOffIce({ content, updateContent }) {
 
   const previewDraft = () => {
     if (!draft.title.trim()) return;
-    setPreviewOffice({ ...buildOffice(draft), id: editingId || "preview" });
+    setPreviewOffice(workoutForLevel({ ...buildOffice(draft), id: editingId || "preview" }, planLevel));
   };
 
   return (
@@ -4354,7 +4416,7 @@ function AdminOffIce({ content, updateContent }) {
 
             <ExerciseEditor exercises={draft.exercises} setDraft={setDraft} exMedia={exMedia} />
 
-            <WorkoutPlanEditor items={draft.planRows || []} setDraft={setDraft} />
+            <WorkoutLevelPlans draft={draft} setDraft={setDraft} level={planLevel} setLevel={setPlanLevel} />
 
             <span className="admin-form-span2 media-section-label">Workout cover photo/video</span>
             <MediaFields draft={draft} media={media} />
@@ -4400,7 +4462,7 @@ function AdminOffIce({ content, updateContent }) {
                     <td>{o.duration}</td><td>{o.exercises.length}</td>
                     <td><button className={"status-pill" + (o.published ? " status-pill--live" : "")} onClick={() => togglePublish(o.id)}>{o.published ? <Eye size={12} /> : <EyeOff size={12} />} {o.published ? "Published" : "Draft"}</button></td>
                     <td className="admin-row-actions">
-                      <button className="icon-btn" onClick={() => setPreviewOffice(o)} aria-label="Preview"><Play size={14} /></button>
+                      <button className="icon-btn" onClick={() => setPreviewOffice(workoutForLevel(o, planLevel))} aria-label="Preview"><Play size={14} /></button>
                       <button className="icon-btn" onClick={() => startEdit(o)} aria-label="Edit"><Pencil size={14} /></button>
                       <button className="icon-btn" onClick={() => duplicate(o)} aria-label="Duplicate"><Copy size={14} /></button>
                       <button className="icon-btn" onClick={() => remove(o.id)} aria-label="Delete"><Trash2 size={14} /></button>
@@ -4414,7 +4476,7 @@ function AdminOffIce({ content, updateContent }) {
       )}
 
       {previewOffice && (
-        <PreviewModal label="Preview — how goalies will see this workout" onClose={() => setPreviewOffice(null)}>
+        <PreviewModal label={`Preview — how ${planLevel} goalies will see this workout`} onClose={() => setPreviewOffice(null)}>
           <OffIceDetailPage office={previewOffice} branding={content.branding} onBack={() => setPreviewOffice(null)} complete={false} onComplete={() => {}} />
         </PreviewModal>
       )}
@@ -4426,7 +4488,13 @@ function AdminOffIce({ content, updateContent }) {
    ADMIN — DAILY TRAINING CALENDAR
    ============================================================================ */
 
-function AssignmentPicker({ label, icon: Icon, items, categories, value, onChange, categoryFilter, onCategoryFilterChange }) {
+// Under the Off-Ice picker of a training block: which version of the workout this level's goalies get.
+function workoutLevelNote(office, level) {
+  if (!office || !Object.keys(office.levelPlans || {}).length) return null;
+  return office.levelPlans[level] ? `${level} goalies get the ${level} version of this workout.` : `${level} goalies get the shared version of this workout.`;
+}
+
+function AssignmentPicker({ label, icon: Icon, items, categories, value, onChange, categoryFilter, onCategoryFilterChange, note }) {
   // Drafts can be assigned so blocks can be built before content is published; they are labelled,
   // and goalies only see an item once it is published.
   const filtered = items.filter((it) => it.id === value || !categoryFilter || it.category === categoryFilter);
@@ -4446,6 +4514,7 @@ function AssignmentPicker({ label, icon: Icon, items, categories, value, onChang
         {filtered.map((it) => <option key={it.id} value={it.id}>{it.title}{!it.published ? " (Draft — hidden from goalies until published)" : ""}</option>)}
       </select>
       {filtered.length === 0 && <p className="planner-empty-hint">Nothing in this category yet.</p>}
+      {note && <p className="planner-level-note"><Check size={12} /> {note}</p>}
     </div>
   );
 }
@@ -4659,6 +4728,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
             <AssignmentPicker
               label="Off-Ice" icon={CircleDot} items={content.offIceWorkouts} categories={categoriesOfType(content, "office")}
               value={day.workoutId} onChange={(v) => setDraft(saved.id, { workoutId: v })} categoryFilter={officeCat} onCategoryFilterChange={setOfficeCat}
+              note={workoutLevelNote(content.offIceWorkouts.find((x) => x.id === day.workoutId), level)}
             />
           </div>
 
@@ -4680,7 +4750,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
         const d = { ...list[previewIndex], ...drafts[list[previewIndex].id] };
         const drill = content.drills.find((x) => x.id === d.drillId);
         const focus = content.focusPoints.find((x) => x.id === d.focusId);
-        const office = content.offIceWorkouts.find((x) => x.id === d.workoutId);
+        const office = workoutForLevel(content.offIceWorkouts.find((x) => x.id === d.workoutId), level);
         const noop = () => {};
         return (
           <PreviewModal label={`Preview — Block ${previewIndex + 1} (${level})`} onClose={() => setPreviewIndex(null)}>
@@ -5893,7 +5963,7 @@ function PrintSheet({ content, date, assignment }) {
   const printDate = date || TODAY_DATE;
   const drill = assignment && content.drills.find((d) => d.id === assignment.drillId && d.published);
   const focus = assignment && content.focusPoints.find((f) => f.id === assignment.focusId && f.published);
-  const office = assignment && content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published);
+  const office = assignment && workoutForLevel(content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published), assignment.level);
   const drillImg = drill ? brandImage(drill.imageUrl, content.branding?.drill, DRILL_IMG) : null;
   const focusImg = focus ? brandImage(focus.imageUrl, content.branding?.focus, FOCUS_IMG) : null;
   const officeImg = office ? brandImage(office.imageUrl, content.branding?.office, OFFICE_IMG) : null;
@@ -6522,7 +6592,7 @@ function AppInner() {
   const assignment = trainingDayForDate(content, user, dateKey(viewDate), experience);
   const drill = assignment && content.drills.find((d) => d.id === assignment.drillId && d.published);
   const focus = assignment && content.focusPoints.find((f) => f.id === assignment.focusId && f.published);
-  const office = assignment && content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published);
+  const office = assignment && workoutForLevel(content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published), experience);
   const dayType = resolveDayType(user, dateKey(viewDate));
   const reminders = getReminders(user);
 
@@ -7251,6 +7321,12 @@ button:focus {
 .planner-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 6px; }
 .planner-header h3 { margin: 0; }
 .planner-hint { font-size: 12px; color: var(--text-faint); margin: 0 0 18px; }
+.plan-level-bar { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 14px; }
+.plan-level-bar .level-tabs { align-self: flex-start; }
+.plan-level-status { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); font-size: 13px; color: var(--text-dim); }
+.plan-level-status strong { color: var(--text); font-weight: 600; }
+.plan-level-status--own { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: color-mix(in srgb, var(--accent) 8%, var(--surface-2)); }
+.planner-level-note { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); margin: 8px 0 0; }
 .level-tabs { display: flex; gap: 4px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 20px; padding: 3px; }
 .level-tab { position: relative; padding: 7px 14px; border-radius: 16px; font-size: 12px; font-weight: 600; color: var(--text-dim); display: flex; align-items: center; gap: 6px; }
 .level-tab.active { background: var(--accent); color: #fff; }
