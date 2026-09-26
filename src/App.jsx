@@ -121,9 +121,6 @@ function addDays(d, n) {
 }
 // Goalies can only look back this many days from TODAY_DATE — older content isn't reachable.
 const MAX_DAYS_BACK = 2;
-// A goalie who doesn't open the app for this many days in a row has that whole absence
-// skipped over by the training list (it pauses, then picks up where they left off).
-const ABSENCE_PAUSE_DAYS = 3;
 
 // The training week runs Monday to Sunday.
 function dateFromKey(key) {
@@ -153,13 +150,12 @@ function monthPlanFor(u, dateKeyStr) {
   return (u.monthPlans || {})[dateKeyStr.slice(0, 7)] || "sunday";
 }
 // True when the Sunday of this week is a normal training day rather than the automatic rest day:
-// the goalie chose their own rest days this month, marked a rest day of their own that week (game
-// days don't count), or set that Sunday back to normal ("show my training" / clearing it in the
-// calendar).
+// the goalie chose their own rest days this month, marked a game or rest day of their own that
+// week, or set that Sunday back to normal ("show my training" / clearing it in the calendar).
 function sundayIsTraining(u, monday) {
   const sundayKey = dateKey(addDays(monday, 6));
   if (monthPlanFor(u, sundayKey) === "own") return true;
-  for (let i = 0; i < 7; i++) if (personalDayType(u, dateKey(addDays(monday, i))) === "rest") return true;
+  for (let i = 0; i < 7; i++) if (personalDayType(u, dateKey(addDays(monday, i)))) return true;
   return (u.dayTypes || {})[sundayKey] === "none";
 }
 // Sunday is an automatic rest day unless sundayIsTraining. A coach has no marks, so previewing
@@ -173,69 +169,60 @@ function resolveDayType(u, dateKeyStr) {
   return personalDayType(u, dateKeyStr) || (isAutoRest(u, dateKeyStr) ? "rest" : null);
 }
 
-// Each goalie walks their level's ordered training-day list, one week at a time. In a week,
-// the days that are available to train (not marked game/rest, not Sunday unless it is a training Sunday (see sundayIsTraining), not part of a long absence) are taken in order and paired up: the first two are
-// block 1, the next two block 2, the next two block 3 (so an unmarked week is Mon-Tue,
-// Wed-Thu, Fri-Sat with Sunday off, and a marked week shifts things along, e.g. Wed game +
-// Sat rest gives Mon-Tue, Thu-Fri, and Sunday alone as block 3). Every block shows the next
-// training day from the list. Blocks start over each Monday. A stretch of ABSENCE_PAUSE_DAYS
-// or more days in a row without opening the app doesn't count as available (the list pauses,
-// then resumes where they left off); one or two missed days still count. The first training
-// day is shown on the first day they open the app. Returns { ...trainingDay, index, block }
-// for dateKeyStr, or null if that date is a game/rest day or the coach hasn't created that
-// many training days yet.
+// Each goalie walks their level's ordered list of training blocks, one week at a time. A week's
+// training days are the days not marked game/rest, plus Sunday only when it's a training Sunday
+// (see sundayIsTraining). They're taken in order and paired up, each pair one block: with nothing
+// marked that's Mon-Tue, Wed-Thu, Fri-Sat with Sunday off; a game Wednesday + rest Saturday gives
+// Mon-Tue, Thu-Fri and Sunday alone; games Friday + Saturday and rest Sunday gives Mon-Tue, Wed-Thu.
+// Pairing starts over each Monday. A block only starts on a day the goalie opens the app: if
+// they're away the day a block should start, their list waits (nothing is skipped) and that
+// block starts on the next training day they're back. The first block is shown the first day
+// they open the app. Returns { ...trainingBlock, level, index, block, dayInBlock, blockDays } for
+// dateKeyStr, or null if that date is a game/rest day, a day their list was waiting, or past the
+// last block the coach has created.
 function trainingDayForDate(content, user, dateKeyStr, level) {
   if (resolveDayType(user, dateKeyStr)) return null;
-  const target = dateFromKey(dateKeyStr);
   // Being in the app right now counts as today's activity, even before the record is saved.
-  const loginDays = { ...(user.loginDays || {}), [dateKey(TODAY_DATE)]: true };
+  const todayKey = dateKey(TODAY_DATE);
+  const loginDays = { ...(user.loginDays || {}), [todayKey]: true };
   const firstLogin = Object.keys(loginDays).sort()[0];
   const signup = new Date(user.createdAt || TODAY_DATE.getTime());
   const signupKey = dateKey(new Date(signup.getFullYear(), signup.getMonth(), signup.getDate()));
   // Before activity tracking existed there's no login history, so those days aren't judged.
   const startKey = firstLogin && firstLogin > signupKey ? firstLogin : signupKey;
   if (dateKeyStr < startKey) return null;
-
-  // Attendance is judged through today, not just up to the viewed day, so looking back at a day
-  // in the middle of a 3+ day absence shows it as paused rather than as a block you "missed".
-  const todayKey = dateKey(TODAY_DATE);
-  const days = [];
-  for (let d = dateFromKey(startKey); dateKey(d) <= todayKey; d = addDays(d, 1)) {
-    const key = dateKey(d);
-    days.push({ key, away: !!firstLogin && key !== startKey && !loginDays[key], paused: false });
-  }
-  for (let i = 0; i < days.length; ) {
-    if (!days[i].away) { i++; continue; }
-    let j = i;
-    while (j < days.length && days[j].away) j++;
-    if (j - i >= ABSENCE_PAUSE_DAYS) for (let k = i; k < j; k++) days[k].paused = true;
-    i = j;
-  }
-  const pausedKeys = new Set(days.filter((d) => d.paused).map((d) => d.key));
-  if (pausedKeys.has(dateKeyStr)) return null;
-  const isAvailable = (date, sundayOk) => {
+  // Away = a past day with no visit. Days after today can't be judged yet, so they count as present.
+  const isAway = (key) => key !== startKey && key < todayKey && !loginDays[key];
+  const isTrainingDay = (date, sundayOk) => {
     const key = dateKey(date);
-    return key >= startKey && !personalDayType(user, key) && !pausedKeys.has(key) && (date.getDay() !== 0 || sundayOk);
+    return key >= startKey && !personalDayType(user, key) && (date.getDay() !== 0 || sundayOk);
   };
 
-  const targetMonday = mondayOf(target);
-  let entriesBefore = 0;
-  for (let monday = mondayOf(dateFromKey(startKey)); dateKey(monday) < dateKey(targetMonday); monday = addDays(monday, 7)) {
+  let started = 0; // blocks started so far = list position of the next block
+  const targetMonday = dateKey(mondayOf(dateFromKey(dateKeyStr)));
+  for (let monday = mondayOf(dateFromKey(startKey)); dateKey(monday) <= targetMonday; monday = addDays(monday, 7)) {
     const sundayOk = user.role !== "coach" && sundayIsTraining(user, monday);
-    let available = 0;
-    for (let i = 0; i < 7; i++) if (isAvailable(addDays(monday, i), sundayOk)) available++;
-    entriesBefore += Math.ceil(available / 2);
+    let blockNo = 0, current = null, open = false;
+    for (let i = 0; i < 7; i++) {
+      const day = addDays(monday, i);
+      const key = dateKey(day);
+      if (key > dateKeyStr) break;
+      if (!isTrainingDay(day, sundayOk)) continue;
+      if (open) { open = false; current = { ...current, dayInBlock: 2 }; }
+      else if (isAway(key)) { current = null; }
+      else { open = true; blockNo++; current = { index: started, block: blockNo, dayInBlock: 1, startDay: i }; started++; }
+      if (key !== dateKeyStr) continue;
+      if (!current) return null;
+      let blockDays = 2;
+      if (current.dayInBlock === 1) {
+        blockDays = 1;
+        for (let j = i + 1; j < 7; j++) if (isTrainingDay(addDays(monday, j), sundayOk)) { blockDays = 2; break; }
+      }
+      const entry = (content.trainingDays?.[level] || [])[current.index];
+      return entry ? { ...entry, level, index: current.index, block: current.block, dayInBlock: current.dayInBlock, blockDays } : null;
+    }
   }
-  const sundayOk = user.role !== "coach" && sundayIsTraining(user, targetMonday);
-  let before = 0;
-  for (let d = targetMonday; dateKey(d) < dateKeyStr; d = addDays(d, 1)) if (isAvailable(d, sundayOk)) before++;
-  const blockIndex = Math.floor(before / 2);
-  const index = entriesBefore + blockIndex;
-  let availableThisWeek = 0;
-  for (let i = 0; i < 7; i++) if (isAvailable(addDays(targetMonday, i), sundayOk)) availableThisWeek++;
-  const blockDays = Math.min(2, availableThisWeek - blockIndex * 2);
-  const entry = (content.trainingDays?.[level] || [])[index];
-  return entry ? { ...entry, level, index, block: blockIndex + 1, dayInBlock: (before % 2) + 1, blockDays } : null;
+  return null;
 }
 
 // The notification bell's content — always computed fresh from the goalie's own calendar
@@ -1496,7 +1483,7 @@ function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoFo
           </section>
         </div>
         <div className="empty-state empty-state--hero">
-          <p>{isToday ? "Your coach hasn't assigned today's training yet." : "Your coach hadn't assigned training for this day."}</p>
+          <p>{isToday ? "Your coach hasn't assigned today's training yet." : "No training block for this day — if you weren't in the app, your list waited for you."}</p>
         </div>
         {calendarModal}
       </div>
@@ -1619,7 +1606,7 @@ function MonthPlanPrompt({ monthName, current, onChoose, onOpenCalendar, onLater
       <h2 className="month-plan-q">How should your Sundays work?</h2>
       <button className={"month-plan-option" + (current === "sunday" ? " month-plan-option--active" : "")} onClick={() => choose("sunday")} disabled={busy}>
         <strong>Make Sunday an automatic rest day</strong>
-        <span>Every Sunday is a rest day, unless you mark another rest day that week.</span>
+        <span>Every Sunday is a rest day, unless you mark a game or rest day that week.</span>
       </button>
       <button className={"month-plan-option" + (current === "own" ? " month-plan-option--active" : "")} onClick={() => choose("own")} disabled={busy}>
         <strong>I'll add my own rest days</strong>
@@ -4708,7 +4695,12 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
   return (
     <div className="admin-page">
       <h1 className="admin-h1">Training blocks</h1>
-      <p className="admin-sub">Build the ordered list of training blocks each level works through. A new block is added to Youth, Junior and Pro at once and what you fill in and save is copied to all three, so open a level afterwards to adjust its text or intensity. Moving, copying or deleting a block does the same in all three levels, so each block number always lines up. Each week has 3 blocks of about 2 days. With nothing marked it runs block 1 Monday–Tuesday, block 2 Wednesday–Thursday, block 3 Friday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day that week, Sunday opens up as a training day and the blocks shift along the days they have left (a game day Wednesday and a rest day Saturday gives Monday–Tuesday, Thursday–Friday, and Sunday alone as block 3). A new goalie starts at Block 1 the first day they open the app, and being away 3 or more days in a row pauses their list until they're back.</p>
+      <div className="admin-sub">
+        <p>Build the ordered list of training blocks for each level. A new block is added to Youth, Junior and Pro at once and what you fill in and save is copied to all three. If you select a level afterwards, you can switch its drills or titles.</p>
+        <p>Moving, copying or deleting a block does the same in all three levels, so each block number always lines up.</p>
+        <p>Each ideal week has 3 blocks of 2 days. With nothing marked for that week, block 1 runs Monday–Tuesday, block 2 Wednesday–Thursday, block 3 Friday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day within that week, Sunday opens up as a training day and the blocks shift along the days they have left (a game day Wednesday and a rest day Saturday means the blocks go Monday–Tuesday, Thursday–Friday, and Sunday alone as block 3). If there are two game days in a row followed by a rest day (for example game days Friday and Saturday and a rest day Sunday), there are only two blocks that week: Monday–Tuesday and Wednesday–Thursday.</p>
+        <p>A new goalie starts at Block 1 the first day they open the app. If a goalie is away when the next block should start, their list pauses until they're back, so they don't miss any blocks.</p>
+      </div>
 
       <div className="admin-panel">
         <div className="planner-header">
@@ -6447,7 +6439,7 @@ function AppInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.email]);
 
-  // Record that this account opened the app today (drives the away-3-days pause rule).
+  // Record that this account opened the app today (a block only starts on a day they're in the app).
   useEffect(() => {
     if (!user?.id) return;
     const today = dateKey(TODAY_DATE);
@@ -7690,6 +7682,7 @@ button:focus {
 .email-preview-frame { width: 100%; height: 520px; border: 0; background: #fff; border-radius: 0 0 var(--radius) var(--radius); }
 
 .admin-sub { font-size: 13px; color: var(--text-dim); margin: -12px 0 20px; max-width: 620px; line-height: 1.5; }
+.admin-sub p + p { margin-top: 8px; }
 .front-page-panel-title { font-size: 14px; margin-bottom: 14px; }
 .front-page-panel-body { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
 .brand-image-controls { display: flex; flex-direction: column; gap: 10px; min-width: 200px; }
