@@ -382,6 +382,25 @@ export async function listMediaLibrary() {
   });
 }
 
+// The public web address the media bucket's files start with (used to repoint image links when
+// a backup is restored into a different project).
+export function mediaPublicBase() {
+  return supabase.storage.from("media").getPublicUrl("").data.publicUrl.replace(/\/?$/, "/");
+}
+
+// Puts a file from a backup back at its original place in storage and in the media library.
+// Only used for files that are missing, so nothing existing is ever overwritten.
+export async function restoreMediaFile(path, blob, name) {
+  const { error } = await supabase.storage.from("media").upload(path, blob, { contentType: blob.type || undefined });
+  if (error) return false;
+  const { data: existing } = await supabase.from("media").select("id").eq("storage_path", path).limit(1);
+  if (!existing?.length) {
+    const url = supabase.storage.from("media").getPublicUrl(path).data.publicUrl;
+    await supabase.from("media").insert({ url, content_type: blob.type, size_bytes: blob.size, name: name || path.split("/").pop(), storage_path: path });
+  }
+  return true;
+}
+
 // Permanently deletes files from storage and the media library.
 export async function deleteMediaFiles(paths) {
   if (!paths?.length) return true;

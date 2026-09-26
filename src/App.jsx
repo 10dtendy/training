@@ -22,6 +22,7 @@ import {
   uploadImage as uploadToStorage, deleteStorageObject, publishConfirmationEmail, getUsage,
   storagePathFromUrl, listMediaLibrary, deleteMediaFiles, deleteAccount,
   getLegal, saveLegalDoc, publishLegalVersion, legalAcceptanceCount, getAppAccess, setAppAccess,
+  mediaPublicBase, restoreMediaFile,
 } from "./lib/data.js";
 
 /* ============================================================================
@@ -5467,6 +5468,222 @@ function AdminAccess() {
   );
 }
 
+/* ============================================================================
+   ADMIN — BACKUP (export / import of all training content)
+   ============================================================================ */
+
+// A backup is one .zip: backup.json (everything Import needs), images/ (every file in the media
+// library) and content.html (a readable copy that opens in any browser). Goalie accounts and
+// their history aren't part of it — only the training content and settings the coach builds.
+const BACKUP_KIND = "10dtendy-content-backup";
+const BACKUP_VERSION = 1;
+const BACKUP_CONTENT_KEYS = ["drills", "focusPoints", "offIceWorkouts", "categories", "trainingDays", "gameDay", "restDay", "branding", "accentColor", "welcome", "announcement", "confirmationEmail"];
+
+function countOf(n, one, many) { return `${n} ${n === 1 ? one : many}`; }
+function backupSummary(c) {
+  const blocks = EXPERIENCE_LEVELS.reduce((n, lv) => n + (c.trainingDays?.[lv] || []).length, 0);
+  return `${countOf(c.drills.length, "drill", "drills")}, ${countOf(c.focusPoints.length, "practice focus", "practice focuses")}, ${countOf(c.offIceWorkouts.length, "off-ice workout", "off-ice workouts")}, ${countOf(blocks, "training block", "training blocks")}`;
+}
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function backupFileName() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `10dtendy-backup-${dateKey(d)}-${pad(d.getHours())}${pad(d.getMinutes())}.zip`;
+}
+
+// The readable copy: every drill, practice focus, off-ice workout and the block lists, with images
+// pointing at the images/ folder next to it.
+function backupReadableHtml(backup) {
+  const c = backup.content;
+  const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const fileByPath = new Map(backup.media.map((m) => [m.path, m.file]));
+  const img = (url, alt = "") => {
+    if (!url) return "";
+    const path = storagePathFromUrl(url);
+    return `<img src="${esc((path && fileByPath.get(path)) || url)}" alt="${esc(alt)}">`;
+  };
+  const rich = (v) => (richTextToPlain(v) ? `<div class="rich">${renderRichText(v)}</div>` : "");
+  const meta = (...parts) => { const t = parts.filter((x) => String(x || "").trim()).map(esc).join(" · "); return t ? `<p class="meta">${t}</p>` : ""; };
+  const draft = (item) => (item.published ? "" : ' <span class="tag">Draft</span>');
+  const video = (url) => (url ? `<p class="meta">Video: <a href="${esc(url)}">${esc(url)}</a></p>` : "");
+  const planTable = (items) => workoutPlanSegments({ planRows: items }).map((seg) => (seg.note
+    ? `<div class="note">${seg.note.intensity ? `<strong>Intensity: ${esc(seg.note.intensity)}</strong>` : ""}${rich(seg.note.text)}</div>`
+    : (() => {
+      const cols = workoutPlanColumns({ planRows: seg.rows });
+      return `<table><tr>${cols.map((col) => `<th>${col.label}</th>`).join("")}</tr>${seg.rows.map((r) => `<tr>${cols.map((col) => `<td>${esc(r[col.key])}</td>`).join("")}</tr>`).join("")}</table>`;
+    })())).join("");
+  const plans = (item, heading) => {
+    const parts = [];
+    if ((item.planRows || []).length) parts.push(`<h4>${heading}${Object.keys(item.levelPlans || {}).length ? " — shared" : ""}</h4>${planTable(item.planRows)}`);
+    for (const lv of EXPERIENCE_LEVELS) if (item.levelPlans?.[lv]) parts.push(`<h4>${heading} — ${lv} version</h4>${planTable(item.levelPlans[lv])}`);
+    return parts.join("");
+  };
+  const list = (title, items) => (items?.length ? `<h4>${title}</h4><ul>${items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "");
+  const name = (items, id) => { const it = items.find((x) => x.id === id); return it ? esc(it.title) + (it.published ? "" : " (draft)") : "—"; };
+
+  const drills = c.drills.map((d) => `<section><h3>${esc(d.title)}${draft(d)}</h3>${meta(d.category, d.duration, d.equipment)}
+    ${img(d.imageUrl, d.title)}${d.description ? `<p>${esc(d.description)}</p>` : ""}${video(d.videoUrl)}
+    ${richTextToPlain(d.objective) ? `<h4>Objective</h4>${rich(d.objective)}` : ""}${img(d.diagramUrl, "Diagram")}
+    ${d.steps?.length ? `<h4>How to perform</h4><ol>${d.steps.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>` : ""}
+    ${meta(d.sets && `Sets: ${d.sets}`, d.reps && `Reps: ${d.reps}`)}${plans(d, "Drill Progression")}
+    ${list("Coaching points", d.coachingPoints)}${list("Common mistakes", (d.mistakes || []).map((m) => m.correction ? `${m.mistake} → ${m.correction}` : m.mistake))}</section>`).join("");
+  const focuses = c.focusPoints.map((f) => `<section><h3>${esc(f.title)}${draft(f)}</h3>${meta(f.category)}${img(f.imageUrl, f.title)}${video(f.videoUrl)}
+    ${f.cue ? `<h4>Today's cue</h4><p>${esc(f.cue)}</p>` : ""}${richTextToPlain(f.explanation) ? `<h4>Execution</h4>${rich(f.explanation)}` : ""}
+    ${(f.blocks || []).map((b) => (b.type === "image" ? img(b.imageUrl) : b.type === "video" ? video(b.videoUrl) : b.type === "drill" ? `<p><strong>Drill:</strong> ${name(c.drills, b.drillId)}</p>` : `${b.heading ? `<h4>${esc(b.heading)}</h4>` : ""}${rich(b.body)}`)).join("")}</section>`).join("");
+  const workouts = c.offIceWorkouts.map((o) => `<section><h3>${esc(o.title)}${draft(o)}</h3>${meta(o.category, o.duration, o.equipment)}
+    ${img(o.imageUrl, o.title)}${o.description ? `<p>${esc(o.description)}</p>` : ""}${video(o.videoUrl)}
+    ${richTextToPlain(o.objective) ? `<h4>Objective</h4>${rich(o.objective)}` : ""}
+    ${(o.exercises || []).length ? `<h4>Exercises</h4>${o.exercises.map((ex) => `<div class="exercise"><strong>${esc(ex.name)}</strong>${meta(ex.sets, ex.rest)}${rich(ex.instructions)}${img(ex.imageUrl, ex.name)}${video(ex.videoUrl)}</div>`).join("")}` : ""}
+    ${plans(o, "Workout")}</section>`).join("");
+  const blocks = EXPERIENCE_LEVELS.map((lv) => `<h3>${lv}</h3>${(c.trainingDays?.[lv] || []).length ? `<table><tr><th>Block</th><th>Title</th><th>Drill</th><th>Practice focus</th><th>Off-ice</th></tr>${c.trainingDays[lv].map((b, i) => `<tr><td>${i + 1}${blockIsReady(c, b) ? "" : " (draft)"}</td><td>${esc(b.title || "")}</td><td>${name(c.drills, b.drillId)}</td><td>${name(c.focusPoints, b.focusId)}</td><td>${name(c.offIceWorkouts, b.workoutId)}</td></tr>`).join("")}</table>` : "<p>No blocks.</p>"}`).join("");
+
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>10DTendy content — ${esc(backup.exportedAt.slice(0, 10))}</title>
+<style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:860px;margin:0 auto;padding:24px 16px;color:#18181b;line-height:1.5}
+h1{margin:0 0 4px}h2{margin:40px 0 8px;padding-bottom:6px;border-bottom:2px solid #be202e}h3{margin:28px 0 4px}h4{margin:16px 0 4px;font-size:14px;text-transform:uppercase;letter-spacing:.04em;color:#52525b}
+section{padding-bottom:16px;border-bottom:1px solid #e4e4e7}.meta{color:#71717a;font-size:14px;margin:2px 0}.tag{font-size:12px;background:#f4f4f5;border-radius:6px;padding:2px 6px;color:#71717a}
+img{display:block;max-width:100%;max-height:320px;border-radius:8px;margin:10px 0}table{border-collapse:collapse;width:100%;margin:6px 0;font-size:14px}th,td{border:1px solid #e4e4e7;padding:6px 8px;text-align:left}th{background:#fafafa}
+.note{background:#fafafa;border-left:3px solid #be202e;padding:6px 10px;margin:8px 0}.exercise{margin:10px 0}nav a{margin-right:14px}</style></head><body>
+<h1>10DTendy training content</h1><p class="meta">Backup from ${esc(new Date(backup.exportedAt).toLocaleString())} · ${esc(backupSummary(c))}</p>
+<nav><a href="#drills">Drills</a><a href="#focus">Practice focus</a><a href="#office">Off-ice</a><a href="#blocks">Training blocks</a></nav>
+<h2 id="drills">Drills</h2>${drills || "<p>None.</p>"}<h2 id="focus">Practice focus</h2>${focuses || "<p>None.</p>"}
+<h2 id="office">Off-ice workouts</h2>${workouts || "<p>None.</p>"}<h2 id="blocks">Training blocks</h2>${blocks}</body></html>`;
+}
+
+async function buildContentBackup(content, onStatus) {
+  const [{ zipSync, strToU8 }, legal, library] = await Promise.all([import("fflate"), getLegal(), listMediaLibrary()]);
+  if (!library || !legal) throw new Error("Couldn't read your media or legal texts — check your connection and try again.");
+  const files = {};
+  const media = [];
+  for (const [i, m] of library.entries()) {
+    onStatus(`Adding images… ${i + 1} of ${library.length}`);
+    const res = await fetch(m.url);
+    if (!res.ok) throw new Error(`Couldn't download ${m.name || m.path} — try again.`);
+    const file = "images/" + m.path.split("/").pop();
+    files[file] = [new Uint8Array(await res.arrayBuffer()), { level: 0 }]; // photos are already compressed
+    media.push({ path: m.path, name: m.name, contentType: m.contentType, file });
+  }
+  const backup = {
+    kind: BACKUP_KIND, version: BACKUP_VERSION, exportedAt: new Date().toISOString(), mediaBase: mediaPublicBase(),
+    content: Object.fromEntries(BACKUP_CONTENT_KEYS.filter((k) => content[k] !== undefined).map((k) => [k, content[k]])),
+    legal: legal.docs || {}, media,
+  };
+  files["backup.json"] = strToU8(JSON.stringify(backup, null, 2));
+  files["content.html"] = strToU8(backupReadableHtml(backup));
+  return new Blob([zipSync(files)], { type: "application/zip" });
+}
+
+async function readContentBackup(file) {
+  const { unzipSync, strFromU8 } = await import("fflate");
+  let entries;
+  try { entries = unzipSync(new Uint8Array(await file.arrayBuffer())); } catch { throw new Error("That file isn't a .zip backup."); }
+  if (!entries["backup.json"]) throw new Error("That .zip isn't a 10DTendy backup (backup.json is missing).");
+  let backup;
+  try { backup = JSON.parse(strFromU8(entries["backup.json"])); } catch { throw new Error("The backup file is damaged and can't be read."); }
+  const c = backup?.content;
+  if (backup?.kind !== BACKUP_KIND || !c || !Array.isArray(c.drills) || !Array.isArray(c.focusPoints) || !Array.isArray(c.offIceWorkouts)) {
+    throw new Error("That .zip isn't a 10DTendy content backup.");
+  }
+  if (backup.version > BACKUP_VERSION) throw new Error("This backup was made by a newer version of the app.");
+  return { backup, entries };
+}
+
+// Puts a backup back: missing images first (so every link works), then all content (items not in
+// the backup are removed, so the app ends up exactly as it was), then the legal texts.
+async function restoreContentBackup({ backup, entries }, saveContent, onStatus) {
+  onStatus("Checking images…");
+  const library = await listMediaLibrary();
+  if (!library) throw new Error("Couldn't read the media library — check your connection and try again.");
+  const have = new Set(library.map((m) => m.path));
+  const missing = (backup.media || []).filter((m) => !have.has(m.path) && entries[m.file]);
+  for (const [i, m] of missing.entries()) {
+    onStatus(`Restoring images… ${i + 1} of ${missing.length}`);
+    if (!(await restoreMediaFile(m.path, new Blob([entries[m.file]], { type: m.contentType || "" }), m.name))) throw new Error(`Couldn't restore ${m.name || m.path}.`);
+  }
+  onStatus("Restoring content…");
+  // Image links point at the project the backup came from; repoint them at this one.
+  let text = JSON.stringify(backup.content);
+  const base = mediaPublicBase();
+  if (backup.mediaBase && backup.mediaBase !== base) text = text.split(backup.mediaBase).join(base);
+  const restored = JSON.parse(text);
+  const patch = Object.fromEntries(BACKUP_CONTENT_KEYS.filter((k) => restored[k] !== undefined).map((k) => [k, restored[k]]));
+  if (patch.trainingDays) patch.trainingDays = Object.fromEntries(EXPERIENCE_LEVELS.map((lv) => [lv, patch.trainingDays[lv] || []]));
+  if (!(await saveContent(patch))) throw new Error("Some content couldn't be restored. Reload the page and import the backup again.");
+  onStatus("Restoring legal texts…");
+  for (const [doc, langs] of Object.entries(backup.legal || {})) {
+    for (const [lang, v] of Object.entries(langs || {})) {
+      if (typeof v?.body === "string" && !(await saveLegalDoc(doc, lang, v.body))) throw new Error("The legal texts couldn't be restored. Import the backup again.");
+    }
+  }
+  await refreshLegal();
+}
+
+function AdminBackup({ content, saveContent }) {
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const [message, setMessage] = useState(null); // { ok, text }
+  const fileRef = useRef(null);
+
+  const exportNow = async () => {
+    setBusy(true); setMessage(null);
+    try {
+      downloadBlob(await buildContentBackup(content, setStatus), backupFileName());
+      setMessage({ ok: true, text: "Backup downloaded. Keep it somewhere safe, like your computer or Google Drive." });
+    } catch (e) {
+      setMessage({ ok: false, text: e.message || "The backup couldn't be made. Try again." });
+    }
+    setBusy(false); setStatus("");
+  };
+
+  const importFile = async (file) => {
+    setMessage(null);
+    let parsed;
+    try { parsed = await readContentBackup(file); } catch (e) { setMessage({ ok: false, text: e.message }); return; }
+    const ok = await confirmDialog({
+      title: "Replace all content with this backup?",
+      message: `Backup from ${new Date(parsed.backup.exportedAt).toLocaleString()}: ${backupSummary(parsed.backup.content)}. Everything you've added since is removed. Goalie accounts and their history aren't touched. A backup of your current content downloads first, just in case.`,
+      confirmLabel: "Replace content", danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      setStatus("Backing up your current content first…");
+      downloadBlob(await buildContentBackup(content, setStatus), backupFileName());
+      await restoreContentBackup(parsed, saveContent, setStatus);
+      setMessage({ ok: true, text: "Backup restored. Your content is back as it was when the backup was made." });
+    } catch (e) {
+      setMessage({ ok: false, text: e.message || "The backup couldn't be restored." });
+    }
+    setBusy(false); setStatus("");
+  };
+
+  return (
+    <div className="admin-page">
+      <h1 className="admin-h1">Backup</h1>
+      <p className="admin-sub">Your content lives in the database. Download a backup now and then, especially after adding a lot, and keep it somewhere safe.</p>
+      <div className="admin-panel">
+        <h3>Export</h3>
+        <p className="planner-hint">Downloads one .zip file with <strong>backup.json</strong> (everything Import needs), an <strong>images</strong> folder with every photo and diagram, and <strong>content.html</strong>, a readable copy of all drills, practice focuses, off-ice workouts and training blocks that opens in any browser. Videos stay on YouTube. Goalie accounts and their history aren't included.</p>
+        <button className="btn btn--primary btn--small" onClick={exportNow} disabled={busy}><Download size={14} /> Download backup</button>
+      </div>
+      <div className="admin-panel">
+        <h3>Import</h3>
+        <p className="planner-hint">Puts a backup .zip back: all drills, practice focuses, off-ice workouts, training blocks, categories, pages, settings and legal texts return to how they were, and any missing images are uploaded again. Anything added after the backup is removed.</p>
+        <button className="btn btn--ghost btn--small" onClick={() => fileRef.current?.click()} disabled={busy}><UploadCloud size={14} /> Import backup…</button>
+        <input ref={fileRef} type="file" accept=".zip,application/zip" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) importFile(f); }} />
+      </div>
+      {status && <p className="planner-hint" role="status">{status}</p>}
+      {message && <div className={"email-status" + (message.ok ? "" : " email-status--error")} role="status">{message.ok ? <Check size={14} /> : <AlertTriangle size={14} />} {message.text}</div>}
+    </div>
+  );
+}
+
 function AdminSettings({ content, updateContent }) {
   const accentColor = content.accentColor || DEFAULT_ACCENT;
   const setAccent = (color) => updateContent((c) => ({ ...c, accentColor: color }));
@@ -6086,6 +6303,7 @@ function AdminApp({ content, updateContent, saveContent }) {
     { key: "users", label: "Users", icon: UsersIcon },
     { key: "media", label: "Media", icon: ImageIcon },
     { key: "settings", label: "Settings", icon: SettingsIcon },
+    { key: "backup", label: "Backup", icon: Download },
   ];
   return (
     <AdminContentContext.Provider value={content}>
@@ -6113,6 +6331,7 @@ function AdminApp({ content, updateContent, saveContent }) {
         {section === "users" && <AdminUsers />}
         {section === "media" && <AdminMedia content={content} saveContent={saveContent} />}
         {section === "settings" && <AdminSettings content={content} updateContent={updateContent} />}
+        {section === "backup" && <AdminBackup content={content} saveContent={saveContent} />}
       </div>
     </div>
     </AdminContentContext.Provider>
