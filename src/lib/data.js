@@ -67,12 +67,13 @@ export async function getProfilesMap() {
 }
 
 export async function getUsersMap() {
-  const [{ data: profiles }, { data: dayTypes }, { data: gameLogs }, { data: restNotes }, { data: dayProgress }] = await Promise.all([
+  const [{ data: profiles }, { data: dayTypes }, { data: gameLogs }, { data: restNotes }, { data: dayProgress }, { data: loginDays }] = await Promise.all([
     supabase.from("profiles").select("*"),
     supabase.from("day_types").select("*"),
     supabase.from("game_logs").select("*"),
     supabase.from("rest_notes").select("*"),
     supabase.from("day_progress").select("user_id, date, drill, focus, office"),
+    supabase.from("login_days").select("user_id, date"),
   ]);
   if (!profiles) return {};
 
@@ -89,12 +90,14 @@ export async function getUsersMap() {
   const restNotesByUser = {};
   for (const r of restNotes || []) (restNotesByUser[r.user_id] ||= {})[r.date] = r.note;
 
+  const loginDaysByUser = {};
+  for (const r of loginDays || []) (loginDaysByUser[r.user_id] ||= {})[r.date] = true;
   const progressRowsByUser = {};
   for (const r of dayProgress || []) (progressRowsByUser[r.user_id] ||= []).push(r);
 
   const out = {};
   for (const p of profiles) {
-    out[p.email] = shapeUser(p, dayTypesByUser[p.id], gameLogsByUser[p.id], restNotesByUser[p.id], undefined, progressByDate(progressRowsByUser[p.id]));
+    out[p.email] = shapeUser(p, dayTypesByUser[p.id], gameLogsByUser[p.id], restNotesByUser[p.id], loginDaysByUser[p.id], progressByDate(progressRowsByUser[p.id]));
   }
   return out;
 }

@@ -182,6 +182,18 @@ function resolveDayType(u, dateKeyStr) {
 // last block the coach has created.
 function trainingDayForDate(content, user, dateKeyStr, level) {
   if (resolveDayType(user, dateKeyStr)) return null;
+  const walk = walkTrainingBlocks(user, dateKeyStr);
+  const current = walk?.current;
+  if (!current) return null;
+  const entry = (content.trainingDays?.[level] || [])[current.index];
+  return entry ? { ...entry, level, index: current.index, block: current.block, dayInBlock: current.dayInBlock, blockDays: current.blockDays } : null;
+}
+
+// Walks a goalie's weeks from their first day up to dateKeyStr (the rules above). Returns
+// { started, current }: how many blocks they had started by the end of that day, and the block
+// that day belongs to ({ index, block, dayInBlock, blockDays }, or null on a day off or a day
+// their list waited). Null if the date is before they started.
+function walkTrainingBlocks(user, dateKeyStr) {
   // Being in the app right now counts as today's activity, even before the record is saved.
   const todayKey = dateKey(TODAY_DATE);
   const loginDays = { ...(user.loginDays || {}), [todayKey]: true };
@@ -199,6 +211,7 @@ function trainingDayForDate(content, user, dateKeyStr, level) {
   };
 
   let started = 0; // blocks started so far = list position of the next block
+  let result = null;
   const targetMonday = dateKey(mondayOf(dateFromKey(dateKeyStr)));
   for (let monday = mondayOf(dateFromKey(startKey)); dateKey(monday) <= targetMonday; monday = addDays(monday, 7)) {
     const sundayOk = user.role !== "coach" && sundayIsTraining(user, monday);
@@ -210,19 +223,17 @@ function trainingDayForDate(content, user, dateKeyStr, level) {
       if (!isTrainingDay(day, sundayOk)) continue;
       if (open) { open = false; current = { ...current, dayInBlock: 2 }; }
       else if (isAway(key)) { current = null; }
-      else { open = true; blockNo++; current = { index: started, block: blockNo, dayInBlock: 1, startDay: i }; started++; }
-      if (key !== dateKeyStr) continue;
-      if (!current) return null;
+      else { open = true; blockNo++; current = { index: started, block: blockNo, dayInBlock: 1 }; started++; }
+      if (key !== dateKeyStr || !current) continue;
       let blockDays = 2;
       if (current.dayInBlock === 1) {
         blockDays = 1;
         for (let j = i + 1; j < 7; j++) if (isTrainingDay(addDays(monday, j), sundayOk)) { blockDays = 2; break; }
       }
-      const entry = (content.trainingDays?.[level] || [])[current.index];
-      return entry ? { ...entry, level, index: current.index, block: current.block, dayInBlock: current.dayInBlock, blockDays } : null;
+      result = { ...current, blockDays };
     }
   }
-  return null;
+  return { started, current: result };
 }
 
 // The notification bell's content — always computed fresh from the goalie's own calendar
@@ -3025,13 +3036,23 @@ function ProgressPage({ user, content }) {
    ============================================================================ */
 
 const ONLINE_THRESHOLD_MS = 3 * 60 * 1000;
-const SCHEDULE_HEALTH_WINDOW_DAYS = 7;
+// Blocks left for the goalie furthest along a level: under this many (about a week) turns red.
+const BLOCKS_LEFT_WARNING = 3;
 
 function trainingDayCount(content, level) {
   return (content.trainingDays?.[level] || []).length;
 }
-function levelScheduleIsHealthy(content, level) {
-  return trainingDayCount(content, level) >= SCHEDULE_HEALTH_WINDOW_DAYS;
+// Where each goalie of a level is in its list today, and how far ahead the furthest one is.
+function levelScheduleStatus(content, level, goalies) {
+  const total = trainingDayCount(content, level);
+  const today = dateKey(TODAY_DATE);
+  const positions = goalies.filter((g) => g.experience === level).map((g) => walkTrainingBlocks(g, today)?.started || 0);
+  const furthest = positions.length ? Math.max(...positions) : 0;
+  return {
+    total, goalieCount: positions.length, furthest,
+    left: total - furthest,
+    runOut: positions.filter((p) => p > total).length,
+  };
 }
 
 // Supabase Free plan limits; update these if the project is upgraded.
@@ -3065,9 +3086,12 @@ function AdminDashboard({ content }) {
   const [usage, setUsage] = useState(undefined);
   useEffect(() => { getUsage().then(setUsage); }, []);
   const [users, setUsers] = useState(null);
-  useEffect(() => { getProfilesMap().then((u) => setUsers(u || {})); }, []);
+  // Full accounts (with their calendars and visits) so the schedule panel can work out where each goalie is.
+  useEffect(() => { getUsersMap().then((u) => setUsers(u || {})); }, []);
 
   const goalies = users ? Object.values(users).filter((u) => u.role !== "coach") : [];
+  const activeGoalies = goalies.filter((u) => !u.removed);
+  const weeksLeft = (left) => (left < BLOCKS_LEFT_WARNING ? "less than a week" : `about ${Math.floor(left / 3)} week${Math.floor(left / 3) === 1 ? "" : "s"}`);
   const onlineCount = goalies.filter((u) => u.lastActive && Date.now() - u.lastActive < ONLINE_THRESHOLD_MS).length;
 
   return (
@@ -3097,18 +3121,31 @@ function AdminDashboard({ content }) {
 
       <div className="admin-panel">
         <h3>Training schedule health</h3>
-        <p className="planner-hint">Each training block lasts about 2 days (3 a week), so {SCHEDULE_HEALTH_WINDOW_DAYS} queued is roughly two weeks of practice. Green means at least that many are queued for the level; red means fewer are ready, so goalies could run out soon.</p>
+        <p className="planner-hint">Goalies use about 3 training blocks a week. Each level shows how far the goalie furthest along its list has got, and how many blocks are left after theirs. Red means less than a week is left ({BLOCKS_LEFT_WARNING} blocks), so add more before they run out.</p>
         <div className="dashboard-health-grid">
           {EXPERIENCE_LEVELS.map((lv) => {
-            const healthy = levelScheduleIsHealthy(content, lv);
-            const ahead = trainingDayCount(content, lv);
+            const st = users === null ? null : levelScheduleStatus(content, lv, activeGoalies);
+            const healthy = st && st.left >= BLOCKS_LEFT_WARNING;
+            let line = "Checking goalies…", sub = "";
+            if (st && st.goalieCount === 0) {
+              line = `No goalies yet · ${st.total} block${st.total === 1 ? "" : "s"} ready`;
+              sub = st.left >= BLOCKS_LEFT_WARNING ? "" : "New goalies need at least a week of blocks.";
+            } else if (st && st.furthest === 0) {
+              line = `${st.goalieCount} goalie${st.goalieCount === 1 ? "" : "s"}, none started yet · ${st.total} block${st.total === 1 ? "" : "s"} ready`;
+            } else if (st) {
+              line = st.furthest > st.total ? `Furthest goalie has finished all ${st.total} block${st.total === 1 ? "" : "s"}` : `Furthest goalie is on Block ${st.furthest} of ${st.total}`;
+              sub = st.runOut > 0 ? `${st.runOut} goalie${st.runOut === 1 ? " has" : "s have"} run out of blocks — add more now.`
+                : st.left === 0 ? "They're on the last block — add more now."
+                : `${st.left} block${st.left === 1 ? "" : "s"} left after theirs, ${weeksLeft(st.left)}.`;
+            }
             return (
               <div className="dashboard-health-card" key={lv}>
                 <div className="dashboard-health-head">
-                  <span className={"dashboard-health-dot" + (healthy ? " dashboard-health-dot--ok" : " dashboard-health-dot--warn")} />
+                  <span className={"dashboard-health-dot" + (!st ? "" : healthy ? " dashboard-health-dot--ok" : " dashboard-health-dot--warn")} />
                   <span>{lv}</span>
                 </div>
-                <span className="dashboard-health-days">{ahead} training block{ahead === 1 ? "" : "s"} queued</span>
+                <span className="dashboard-health-days">{line}</span>
+                {sub && <span className="dashboard-health-sub">{sub}</span>}
               </div>
             );
           })}
@@ -6437,6 +6474,25 @@ function AppInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.email]);
 
+  // "Today" is worked out when the app loads. A phone can keep the home-screen app open in the
+  // background for days, so when a goalie comes back to it on a later date, reload it: that shows
+  // the new day's training and records that they opened the app today (so their list doesn't
+  // wait for them). Coaches are left alone so an admin form they're partway through isn't lost.
+  useEffect(() => {
+    if (!user || user.role === "coach") return;
+    const check = () => {
+      if (document.visibilityState === "visible" && dateKey(new Date()) !== dateKey(TODAY_DATE)) window.location.reload();
+    };
+    document.addEventListener("visibilitychange", check);
+    window.addEventListener("focus", check);
+    window.addEventListener("pageshow", check);
+    return () => {
+      document.removeEventListener("visibilitychange", check);
+      window.removeEventListener("focus", check);
+      window.removeEventListener("pageshow", check);
+    };
+  }, [user?.role, !!user]);
+
   // Record that this account opened the app today (a block only starts on a day they're in the app).
   useEffect(() => {
     if (!user?.id) return;
@@ -7427,6 +7483,7 @@ button:focus {
 .dashboard-health-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .dashboard-health-dot--ok { background: #4cd7a3; box-shadow: 0 0 8px 1px rgba(76,199,150,0.5); }
 .dashboard-health-dot--warn { background: var(--accent); box-shadow: 0 0 8px 1px rgba(190,32,46,0.5); }
+.dashboard-health-sub { display: block; margin-top: 4px; font-size: 12px; color: var(--text-dim); }
 .dashboard-health-days { font-size: 12px; color: var(--text-dim); }
 .upload-dropzone { width: 100%; border: 1px dashed var(--border); border-radius: var(--radius); padding: 32px; display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--text-dim); margin-bottom: 24px; }
 .upload-dropzone:disabled { opacity: 0.6; pointer-events: none; }
