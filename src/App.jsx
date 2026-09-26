@@ -1462,7 +1462,7 @@ function BottomNav({ view, onToday, onGoTo, onProgress, onOpenCalendar, showCale
    TODAY PAGE
    ============================================================================ */
 
-function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoForward, onPrevDay, onNextDay, openDrill, openFocus, openOffice, onDownloadPDF, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame, onMakeRest }) {
+function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoForward, onPrevDay, onNextDay, openDrill, openFocus, openOffice, onDownloadPDF, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame, onSetRestNote, onMakeRest }) {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const drill = assignment && content.drills.find((d) => d.id === assignment.drillId && d.published);
   const focus = assignment && content.focusPoints.find((f) => f.id === assignment.focusId && f.published);
@@ -1491,7 +1491,7 @@ function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoFo
 
   const calendarModal = calendarOpen && (
     <PreviewModal label="Games & Rest" onClose={() => setCalendarOpen(false)} resizeIn>
-      <ProfileCalendar dayTypes={dayTypes || {}} onSetDayType={onSetDayType} onClose={() => setCalendarOpen(false)} gameLogs={gameLogs} restNotes={restNotes} onLogGame={onLogGame} />
+      <ProfileCalendar dayTypes={dayTypes || {}} onSetDayType={onSetDayType} onClose={() => setCalendarOpen(false)} gameLogs={gameLogs} restNotes={restNotes} onLogGame={onLogGame} onSetRestNote={onSetRestNote} />
     </PreviewModal>
   );
 
@@ -1650,7 +1650,7 @@ function MonthPlanPrompt({ monthName, current, onChoose, onOpenCalendar, onLater
   );
 }
 
-function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, onPrevDay, onNextDay, onClear, gameLog, onSaveGameLog, restNote, onSaveRestNote, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame, hideClear = false }) {
+function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, onPrevDay, onNextDay, onClear, gameLog, onSaveGameLog, restNote, onSaveRestNote, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame, onSetRestNote, hideClear = false }) {
   const isGame = type === "game";
   const [logging, setLogging] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -1719,7 +1719,7 @@ function DayTypePage({ type, data, content, viewDate, canGoBack, canGoForward, o
 
       {calendarOpen && (
         <PreviewModal label="Games & Rest" onClose={() => setCalendarOpen(false)} resizeIn>
-          <ProfileCalendar dayTypes={dayTypes || {}} onSetDayType={onSetDayType} onClose={() => setCalendarOpen(false)} gameLogs={gameLogs} restNotes={restNotes} onLogGame={onLogGame} />
+          <ProfileCalendar dayTypes={dayTypes || {}} onSetDayType={onSetDayType} onClose={() => setCalendarOpen(false)} gameLogs={gameLogs} restNotes={restNotes} onLogGame={onLogGame} onSetRestNote={onSetRestNote} />
         </PreviewModal>
       )}
 
@@ -2634,7 +2634,7 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile, onDele
 
 const MonthPlanContext = React.createContext(null);
 
-function ProfileCalendar({ dayTypes, onSetDayType, onClose, gameLogs, restNotes, onLogGame }) {
+function ProfileCalendar({ dayTypes, onSetDayType, onClose, gameLogs, restNotes, onLogGame, onSetRestNote }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [selected, setSelected] = useState(dateKey(TODAY_DATE));
   // Mirrors the dayTypes prop, but updates the instant a goalie taps Game/Rest/Clear —
@@ -2676,6 +2676,7 @@ function ProfileCalendar({ dayTypes, onSetDayType, onClose, gameLogs, restNotes,
     setLocalDayTypes((prev) => ({ ...prev, [selected]: type || "none" }));
     setSaveError("");
     setLoggingGame(false);
+    setNotingRest(false);
     const ok = await onSetDayType(selected, type);
     if (ok === false) setSaveError("Couldn't save that — check your connection and try again.");
   };
@@ -2685,7 +2686,22 @@ function ProfileCalendar({ dayTypes, onSetDayType, onClose, gameLogs, restNotes,
   // enter stats for an older game at all.
   const [loggingGame, setLoggingGame] = useState(false);
   const [gameLogError, setGameLogError] = useState("");
-  const selectDate = (key) => { setSelected(key); setLoggingGame(false); setGameLogError(""); };
+  // Rest day notes can be added or edited here too, for any rest day in the calendar.
+  const [notingRest, setNotingRest] = useState(false);
+  const [restNoteDraft, setRestNoteDraft] = useState("");
+  const [restNoteBusy, setRestNoteBusy] = useState(false);
+  const [restNoteError, setRestNoteError] = useState("");
+  const selectedRestNote = (restNotes || {})[selected] || "";
+  const startRestNote = () => { setRestNoteDraft(selectedRestNote); setRestNoteError(""); setNotingRest(true); };
+  const handleSaveRestNote = async () => {
+    setRestNoteError("");
+    setRestNoteBusy(true);
+    const ok = await onSetRestNote(selected, restNoteDraft.trim());
+    setRestNoteBusy(false);
+    if (ok === false) { setRestNoteError("Couldn't save that — check your connection and try again."); return; }
+    setNotingRest(false);
+  };
+  const selectDate = (key) => { setSelected(key); setLoggingGame(false); setGameLogError(""); setNotingRest(false); setRestNoteError(""); };
   const handleSaveGameLog = async (log) => {
     setGameLogError("");
     const ok = await onLogGame(selected, log);
@@ -2760,6 +2776,30 @@ function ProfileCalendar({ dayTypes, onSetDayType, onClose, gameLogs, restNotes,
         <div className="profile-calendar-gamelog">
           {gameLogError && <div className="auth-error"><AlertTriangle size={13} /> {gameLogError}</div>}
           <GameStatsForm initial={selectedGameLog} onSave={handleSaveGameLog} onCancel={() => { setGameLogError(""); setLoggingGame(false); }} />
+        </div>
+      )}
+      {selectedType === "rest" && onSetRestNote && !notingRest && (
+        <div className="profile-calendar-restnote">
+          {selectedRestNote && <p className="restnote-text">{selectedRestNote}</p>}
+          <button className="btn btn--ghost btn--small profile-calendar-log-btn" onClick={startRestNote}>
+            {selectedRestNote ? <><Pencil size={13} /> Edit note</> : <><Plus size={13} /> Add a note</>}
+          </button>
+        </div>
+      )}
+      {notingRest && (
+        <div className="profile-calendar-gamelog">
+          {restNoteError && <div className="auth-error"><AlertTriangle size={13} /> {restNoteError}</div>}
+          <textarea
+            className="restnote-textarea" rows={3} value={restNoteDraft} maxLength={280}
+            onChange={(e) => setRestNoteDraft(e.target.value)}
+            placeholder="What did you do this day? e.g. light skate, gym, full recovery…"
+            aria-label="Rest day note" autoFocus
+          />
+          <p className="planner-hint">Please don't include medical or injury details here.</p>
+          <div className="admin-form-actions">
+            <button className="btn btn--ghost btn--small" onClick={() => { setRestNoteError(""); setNotingRest(false); }} disabled={restNoteBusy}>Cancel</button>
+            <button className="btn btn--primary btn--small" onClick={handleSaveRestNote} disabled={restNoteBusy}>{restNoteBusy ? "Saving…" : "Save note"}</button>
+          </div>
         </div>
       )}
       <div className="profile-calendar-footer">
@@ -6778,7 +6818,7 @@ function AppInner() {
                   restNote={(user.restNotes || {})[dateStr]} onSaveRestNote={(note) => setRestNote(dateStr, note)}
                   dayTypes={user.dayTypes || {}} onSetDayType={setDayType}
                   gameLogs={user.gameLogs || {}} restNotes={user.restNotes || {}}
-                  onLogGame={setGameLog}
+                  onLogGame={setGameLog} onSetRestNote={setRestNote}
                 />
               ) : (
                 <TodayPage
@@ -6788,7 +6828,7 @@ function AppInner() {
                   openDrill={() => goTo("drill")} openFocus={() => goTo("focus")} openOffice={() => goTo("office")} onDownloadPDF={handlePDF}
                   dayTypes={user.dayTypes || {}} onSetDayType={setDayType}
                   gameLogs={user.gameLogs || {}} restNotes={user.restNotes || {}}
-                  onLogGame={setGameLog}
+                  onLogGame={setGameLog} onSetRestNote={setRestNote}
                 />
               );
               if (view === "drill") return drill ? <DrillDetailPage drill={drill} branding={content.branding} onBack={() => goTo("today")} complete={progress.drill} onComplete={() => toggleComplete("drill")} /> : todayPage;
@@ -6827,7 +6867,7 @@ function AppInner() {
       )}
       {navCalendarOpen && (
         <PreviewModal label="Games & Rest" onClose={() => setNavCalendarOpen(false)} resizeIn>
-          <ProfileCalendar dayTypes={user.dayTypes || {}} onSetDayType={setDayType} onClose={() => setNavCalendarOpen(false)} gameLogs={user.gameLogs || {}} restNotes={user.restNotes || {}} onLogGame={setGameLog} />
+          <ProfileCalendar dayTypes={user.dayTypes || {}} onSetDayType={setDayType} onClose={() => setNavCalendarOpen(false)} gameLogs={user.gameLogs || {}} restNotes={user.restNotes || {}} onLogGame={setGameLog} onSetRestNote={setRestNote} />
         </PreviewModal>
       )}
       {welcomeOpen && <WelcomeModal label="Welcome" data={content.welcome || DEFAULT_WELCOME} onClose={markWelcomeSeen} />}
@@ -7465,6 +7505,9 @@ button:focus {
 .profile-calendar-selected { font-size: 13px; color: var(--text-dim); }
 .profile-calendar-buttons { display: flex; gap: 8px; }
 .profile-calendar-log-btn { margin-top: 12px; }
+.profile-calendar-restnote { margin-top: 12px; }
+.profile-calendar-restnote .restnote-text { margin: 0; }
+.profile-calendar-restnote .profile-calendar-log-btn { margin-top: 8px; }
 .profile-calendar-gamelog { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
 .planner-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 6px; }
 .planner-header h3 { margin: 0; }
