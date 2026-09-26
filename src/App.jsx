@@ -1301,7 +1301,7 @@ function ResetPasswordScreen({ onDone }) {
    NAV
    ============================================================================ */
 
-function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen, user, onLogout, previewLevel, setPreviewLevel, dayType, onGoToday, reminders, onOpenReminder, onOpenCalendar, onOpenPlan }) {
+function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen, user, onLogout, previewLevel, setPreviewLevel, dayType, viewingToday, onGoToday, reminders, onOpenReminder, onOpenCalendar, onOpenPlan }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const notifWrapRef = useRef(null);
   const notifButtonRef = useRef(null);
@@ -1311,15 +1311,16 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
   const menuPanelId = useId();
   useDismissable(notifOpen, () => setNotifOpen(false), [notifWrapRef], notifButtonRef);
   useDismissable(mobileOpen, () => setMobileOpen(false), [menuPanelRef, menuButtonRef], menuButtonRef);
-  // "Today" always takes the goalie back to the present day, whichever day they're looking at.
-  // On a game or rest day there's no drill, focus or off-ice to link to.
+  // "Today" always takes the goalie back to the present day; while they're looking at an earlier
+  // day it says "Back to today". On a game or rest day there's no drill, focus or off-ice to link to.
+  const todayLabel = viewingToday ? "Today" : "Back to today";
   const items = dayType
     ? [
-        { key: "today", label: "Today", view: "today" },
+        { key: "today", label: todayLabel, view: "today" },
         { key: "progress", label: "Progress", view: "progress" },
       ]
     : [
-        { key: "today", label: "Today", view: "today" },
+        { key: "today", label: todayLabel, view: "today" },
         { key: "drill", label: "Drill", view: "drill" },
         { key: "focus", label: "Focus", view: "focus" },
         { key: "office", label: "Off Ice", view: "office" },
@@ -6744,7 +6745,7 @@ function AppInner() {
       {!isAdmin && (
         <NavBar
           view={view} setView={goTo} isAdmin={isAdmin} setIsAdmin={setIsAdmin} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen}
-          user={user} onLogout={onLogout} previewLevel={previewLevel} setPreviewLevel={setPreviewLevel} dayType={dayType} onGoToday={goToToday}
+          user={user} onLogout={onLogout} previewLevel={previewLevel} setPreviewLevel={setPreviewLevel} dayType={dayType} viewingToday={dateKey(viewDate) === dateKey(TODAY_DATE)} onGoToday={goToToday}
           reminders={reminders} onOpenReminder={openReminderDate} onOpenCalendar={() => setNavCalendarOpen(true)} onOpenPlan={() => setPlanOpen(true)}
         />
       )}
