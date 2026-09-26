@@ -1311,21 +1311,24 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
   const menuPanelId = useId();
   useDismissable(notifOpen, () => setNotifOpen(false), [notifWrapRef], notifButtonRef);
   useDismissable(mobileOpen, () => setMobileOpen(false), [menuPanelRef, menuButtonRef], menuButtonRef);
-  // "Today" always takes the goalie back to the present day; while they're looking at an earlier
-  // day it says "Back to today". On a game or rest day there's no drill, focus or off-ice to link to.
-  const todayLabel = viewingToday ? "Today" : "Back to today";
+  // "Today" always takes the goalie back to the present day. While they're looking at an earlier
+  // game or rest day, "Game Day" / "Rest Day" takes them back to that day (e.g. from Progress).
+  // On a game or rest day there's no drill, focus or off-ice to link to.
   const items = dayType
     ? [
-        { key: "today", label: todayLabel, view: "today" },
+        { key: "today", label: "Today", view: "today" },
+        ...(viewingToday ? [] : [{ key: "day", label: dayType === "game" ? "Game Day" : "Rest Day", view: "today" }]),
         { key: "progress", label: "Progress", view: "progress" },
       ]
     : [
-        { key: "today", label: todayLabel, view: "today" },
+        { key: "today", label: "Today", view: "today" },
         { key: "drill", label: "Drill", view: "drill" },
         { key: "focus", label: "Focus", view: "focus" },
         { key: "office", label: "Off Ice", view: "office" },
         { key: "progress", label: "Progress", view: "progress" },
       ];
+  // On an earlier game/rest day, the day's page belongs to "Game Day"/"Rest Day", not "Today".
+  const isItemActive = (it) => !isAdmin && view === it.view && !(it.key === "today" && !viewingToday && dayType);
   return (
     <header className="nav">
       <div className="nav-inner">
@@ -1335,7 +1338,7 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
 
         <nav className="nav-links">
           {items.map((it) => (
-            <button key={it.key} className={"nav-link" + (view === it.view && !isAdmin ? " nav-link--active" : "")}
+            <button key={it.key} className={"nav-link" + (isItemActive(it) ? " nav-link--active" : "")}
               onClick={() => { setIsAdmin(false); if (it.key === "today") onGoToday(); else setView(it.view); }}>
               {it.label}
             </button>
