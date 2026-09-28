@@ -187,7 +187,7 @@ export async function getContent() {
     id: d.id, title: d.title || "", category: d.category || "", duration: d.duration || "", equipment: d.equipment || "",
     description: d.description || "", objective: d.objective || "",
     steps: d.steps || [], sets: d.sets || "", reps: d.reps || "", coachingPoints: d.coaching_points || [], mistakes: d.mistakes || [],
-    planRows: d.plan_rows || [], levelPlans: d.level_plans || {},
+    planRows: d.plan_rows || [], levelPlans: d.level_plans || {}, intensityPlans: d.intensity_plans || {},
     published: d.published, imageAssetId: null, imageUrl: d.image_url || "", videoAssetId: null, videoUrl: d.video_url || "",
     diagramUrl: d.diagram_url || "",
   });
@@ -199,7 +199,7 @@ export async function getContent() {
   const toWorkoutShape = (o) => ({
     id: o.id, title: o.title || "", category: o.category || "", duration: o.duration || "", equipment: o.equipment || "",
     description: o.description || "", objective: o.objective || "", exercises: o.exercises || [], planRows: o.plan_rows || [],
-    levelPlans: o.level_plans || {},
+    levelPlans: o.level_plans || {}, intensityPlans: o.intensity_plans || {},
     published: o.published, imageAssetId: null, imageUrl: o.image_url || "", videoAssetId: null, videoUrl: o.video_url || "",
   });
 
@@ -208,6 +208,7 @@ export async function getContent() {
     trainingDaysShape[row.level]?.push({
       id: row.id, drillId: row.drill_id || "", focusId: row.focus_id || "", workoutId: row.workout_id || "",
       title: row.title || "", subtitle: row.subtitle || "", createdAt: row.created_at,
+      drillIntensity: row.drill_intensity || "moderate", workoutIntensity: row.workout_intensity || "moderate",
     });
   }
 
@@ -277,6 +278,7 @@ async function writeTrainingDays(byLevel) {
       id: d.id, drill_id: d.drillId || null, focus_id: d.focusId || null, workout_id: d.workoutId || null,
       title: d.title || null, subtitle: d.subtitle || null,
       created_at: d.createdAt || new Date().toISOString(),
+      drill_intensity: d.drillIntensity || "moderate", workout_intensity: d.workoutIntensity || "moderate",
     }));
     const { error } = await supabase.rpc("replace_training_days", { p_level: level, p_rows: rows });
     if (error) allOk = false;
@@ -293,7 +295,7 @@ export async function updateContentFields(patch, prev = {}) {
         id: d.id, title: d.title, category: d.category, duration: d.duration, equipment: d.equipment,
         description: d.description, objective: d.objective,
         steps: d.steps || [], sets: d.sets || "", reps: d.reps || "", coaching_points: d.coachingPoints || [], mistakes: d.mistakes || [],
-        plan_rows: d.planRows || [], level_plans: d.levelPlans || {},
+        plan_rows: d.planRows || [], level_plans: d.levelPlans || {}, intensity_plans: d.intensityPlans || {},
         published: !!d.published, image_url: d.imageUrl || null, video_url: d.videoUrl || null,
         diagram_url: d.diagramUrl || null,
       }), prev.drills));
@@ -309,7 +311,7 @@ export async function updateContentFields(patch, prev = {}) {
       ok.push(await reconcileTable("off_ice_workouts", patch.offIceWorkouts, (o) => ({
         id: o.id, title: o.title, category: o.category, duration: o.duration, equipment: o.equipment,
         description: o.description, objective: o.objective, exercises: o.exercises || [], plan_rows: o.planRows || [],
-        level_plans: o.levelPlans || {},
+        level_plans: o.levelPlans || {}, intensity_plans: o.intensityPlans || {},
         published: !!o.published, image_url: o.imageUrl || null, video_url: o.videoUrl || null,
       }), prev.offIceWorkouts));
     }

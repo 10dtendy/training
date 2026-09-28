@@ -2271,7 +2271,7 @@ function DrillDetailPage({ drill, branding, onBack, complete, onComplete }) {
   );
 }
 
-function FocusDetailPage({ focus, branding, drills = [], level, onBack, complete, onComplete }) {
+function FocusDetailPage({ focus, branding, drills = [], level, blockDrill, onBack, complete, onComplete }) {
   const focusImg = brandImage(focus.imageUrl, branding?.focus, FOCUS_IMG);
   return (
     <div className="page detail">
@@ -2294,7 +2294,7 @@ function FocusDetailPage({ focus, branding, drills = [], level, onBack, complete
       {(focus.blocks || []).map((b) => (
         b.type === "image" ? (b.imageUrl && <img key={b.id} src={b.imageUrl} alt="" className="focus-block-image" />)
         : b.type === "video" ? (b.videoUrl && <VideoPlayer key={b.id} title={focus.title} src={b.videoUrl} />)
-        : b.type === "drill" ? (() => { const d = drills.find((x) => x.id === b.drillId && x.published); return d ? <FocusDrillCard key={b.id} drill={planForLevel(d, level)} branding={branding} /> : null; })()
+        : b.type === "drill" ? (() => { const d = drills.find((x) => x.id === b.drillId && x.published); return d ? <FocusDrillCard key={b.id} drill={planForLevel(d, level, blockDrill?.id === d.id ? blockDrill.intensity : undefined)} branding={branding} /> : null; })()
         : (b.body && <section key={b.id} className="detail-block">{b.heading && <h2>{b.heading}</h2>}<RichText value={b.body} /></section>)
       ))}
       <button className={"btn btn--complete" + (complete ? " btn--complete-done" : "")} onClick={onComplete}>
@@ -3239,7 +3239,7 @@ function AdminDashboard({ content }) {
 
 const BLANK_DRILL = {
   title: "", category: "", duration: "", equipment: "",
-  description: "", objective: "", stepsText: "", sets: "", reps: "", coachingPointsText: "", mistakesText: "", planRows: [], levelPlans: {}, published: false,
+  description: "", objective: "", stepsText: "", sets: "", reps: "", coachingPointsText: "", mistakesText: "", planRows: [], levelPlans: {}, intensityPlans: {}, published: false,
   imageAssetId: null, imageUrl: "", videoAssetId: null, videoUrl: "", diagramUrl: "",
 };
 
@@ -3482,6 +3482,7 @@ function WelcomeDialog({ label, data, onClose }) {
 
 function AdminDrills({ content, updateContent }) {
   const [planLevel, setPlanLevel] = useState("Youth");
+  const [planIntensity, setPlanIntensity] = useState("moderate");
   const [editingId, setEditingId] = useState(null);
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState(BLANK_DRILL);
@@ -3505,6 +3506,7 @@ function AdminDrills({ content, updateContent }) {
     mistakesText: (d.mistakes || []).map((m) => `${m.mistake} | ${m.correction}`).join("\n"),
     planRows: normalizePlanItems(d.planRows),
     levelPlans: Object.fromEntries(Object.entries(d.levelPlans || {}).map(([lv, list]) => [lv, normalizePlanItems(list)])),
+    intensityPlans: normalizeIntensityPlans(d.intensityPlans),
   });
 
   const buildDrill = (d) => ({
@@ -3515,6 +3517,7 @@ function AdminDrills({ content, updateContent }) {
     reps: (d.reps || "").trim(),
     planRows: cleanPlanItems(d.planRows),
     levelPlans: Object.fromEntries(Object.entries(d.levelPlans || {}).map(([lv, list]) => [lv, cleanPlanItems(list)])),
+    intensityPlans: cleanIntensityPlans(d.intensityPlans),
     coachingPoints: parseLines(d.coachingPointsText),
     mistakes: parseLines(d.mistakesText).map((line) => {
       const [mistake, correction] = line.split("|").map((s) => (s || "").trim());
@@ -3580,7 +3583,7 @@ function AdminDrills({ content, updateContent }) {
 
   const previewDraft = () => {
     if (!draft.title.trim()) return;
-    setPreviewDrill(planForLevel({ ...buildDrill(draft), id: editingId || "preview" }, planLevel));
+    setPreviewDrill(planForLevel({ ...buildDrill(draft), id: editingId || "preview" }, planLevel, planIntensity));
   };
 
   return (
@@ -3627,8 +3630,8 @@ function AdminDrills({ content, updateContent }) {
             <label className="admin-form-span2">Steps (one per line)<textarea rows={4} value={draft.stepsText} onChange={(e) => setDraft({ ...draft, stepsText: e.target.value })} placeholder={"Start in your stance.\nMove to the post.\n..."} /></label>
             <label>Sets<input value={draft.sets || ""} onChange={(e) => setDraft({ ...draft, sets: e.target.value })} placeholder="e.g. 3" maxLength={50} /></label>
             <label>Reps<input value={draft.reps || ""} onChange={(e) => setDraft({ ...draft, reps: e.target.value })} placeholder="e.g. 10 each side" maxLength={50} /></label>
-            <WorkoutLevelPlans
-              draft={draft} setDraft={setDraft} level={planLevel} setLevel={setPlanLevel} label="Drill Progression" noun="drill progression"
+            <IntensityPlans
+              draft={draft} setDraft={setDraft} intensity={planIntensity} setIntensity={setPlanIntensity} level={planLevel} setLevel={setPlanLevel} label="Drill Progression" noun="drill progression"
               hint="How the drill builds up, step by step, with sets, reps and rest. Add a set description wherever you need to explain a stage — for example what changes from one progression to the next — and move it above, between or below the rows."
             />
             <label className="admin-form-span2">Coaching points (one per line)<textarea rows={3} value={draft.coachingPointsText} onChange={(e) => setDraft({ ...draft, coachingPointsText: e.target.value })} /></label>
@@ -3678,7 +3681,7 @@ function AdminDrills({ content, updateContent }) {
                     <td>{d.duration}</td>
                     <td><button className={"status-pill" + (d.published ? " status-pill--live" : "")} onClick={() => togglePublish(d.id)}>{d.published ? <Eye size={12} /> : <EyeOff size={12} />} {d.published ? "Published" : "Draft"}</button></td>
                     <td className="admin-row-actions">
-                      <button className="icon-btn" onClick={() => setPreviewDrill(planForLevel(d, planLevel))} aria-label="Preview"><Play size={14} /></button>
+                      <button className="icon-btn" onClick={() => setPreviewDrill(planForLevel(d, planLevel, planIntensity))} aria-label="Preview"><Play size={14} /></button>
                       <button className="icon-btn" onClick={() => startEdit(d)} aria-label="Edit"><Pencil size={14} /></button>
                       <button className="icon-btn" onClick={() => duplicate(d)} aria-label="Duplicate"><Copy size={14} /></button>
                       <button className="icon-btn" onClick={() => remove(d.id)} aria-label="Delete"><Trash2 size={14} /></button>
@@ -3692,7 +3695,7 @@ function AdminDrills({ content, updateContent }) {
       )}
 
       {previewDrill && (
-        <PreviewModal label={`Preview — how ${planLevel} goalies will see this drill`} onClose={() => setPreviewDrill(null)}>
+        <PreviewModal label={`Preview — how ${planLevel} goalies will see this drill (${INTENSITY_LABEL[planIntensity]})`} onClose={() => setPreviewDrill(null)}>
           <DrillDetailPage drill={previewDrill} branding={content.branding} onBack={() => setPreviewDrill(null)} complete={false} onComplete={() => {}} />
         </PreviewModal>
       )}
@@ -4182,7 +4185,7 @@ const blankExercise = () => ({
 });
 
 const BLANK_OFFICE = {
-  title: "", duration: "", equipment: "", description: "", objective: "", exercises: [], planRows: [], levelPlans: {}, category: "", published: false,
+  title: "", duration: "", equipment: "", description: "", objective: "", exercises: [], planRows: [], levelPlans: {}, intensityPlans: {}, category: "", published: false,
   imageAssetId: null, imageUrl: "", videoAssetId: null, videoUrl: "",
 };
 const blankPlanRow = () => ({ id: uid("row"), exercise: "", sets: "", reps: "", rest: "" });
@@ -4196,9 +4199,23 @@ function planNoteHasContent(item) { return planNoteHasText(item) || !!String(ite
 // A plan (an off-ice Workout or a Drill Progression) can differ per level: levelPlans[level] is that
 // level's own adjusted version, and a level without one follows the shared planRows. Returns the
 // workout or drill as a goalie at `level` sees it.
-function planForLevel(item, level) {
-  const own = item && level ? item.levelPlans?.[level] : null;
-  return own ? { ...item, planRows: own } : item;
+function planForLevel(item, level, intensity) {
+  if (!item) return item;
+  const base = { ...item, ...intensityVersion(item, intensity) };
+  const own = level ? base.levelPlans?.[level] : null;
+  return own ? { ...base, planRows: own } : base;
+}
+// Drills and off-ice workouts can have Light and Hard versions next to the standard Moderate one
+// (planRows / levelPlans). The coach picks one per training block; goalies never see which. A
+// version that hasn't been set up falls back to Moderate.
+const INTENSITIES = [["light", "Light"], ["moderate", "Moderate"], ["hard", "Hard"]];
+const INTENSITY_LABEL = Object.fromEntries(INTENSITIES);
+function intensityVersion(item, intensity) {
+  const v = intensity && intensity !== "moderate" ? item.intensityPlans?.[intensity] : null;
+  return v ? { planRows: v.planRows || [], levelPlans: v.levelPlans || {} } : { planRows: item.planRows || [], levelPlans: item.levelPlans || {} };
+}
+function hasIntensity(item, intensity) {
+  return intensity === "moderate" || !!item?.intensityPlans?.[intensity];
 }
 
 // A workout's plan as goalies follow it, in the coach's order: each run of exercise rows becomes
@@ -4427,7 +4444,7 @@ function cleanPlanItems(list) {
 // The Workout with a Youth / Junior / Pro toggle. What's filled in is shared by all three levels;
 // "Adjust for <level>" gives that level its own copy to change (structure, reps…) without touching
 // the others, and "Use the shared workout" drops the copy again.
-function WorkoutLevelPlans({ draft, setDraft, level, setLevel, label = "Workout", hint, noun = "workout" }) {
+function WorkoutLevelPlans({ draft, setDraft, level, setLevel, label = "Workout", hint, noun = "workout", topBar }) {
   const own = draft.levelPlans?.[level];
   const items = own || draft.planRows || [];
   const setItems = (updater) => setDraft((d) => (d.levelPlans?.[level]
@@ -4443,6 +4460,7 @@ function WorkoutLevelPlans({ draft, setDraft, level, setLevel, label = "Workout"
   };
   const toolbar = (
     <div className="plan-level-bar">
+      {topBar}
       <div className="level-tabs" role="tablist" aria-label={`${label} for level`}>
         {EXPERIENCE_LEVELS.map((lv) => (
           <button key={lv} type="button" role="tab" aria-selected={level === lv} className={"level-tab" + (level === lv ? " active" : "")} onClick={() => setLevel(lv)}>
@@ -4468,8 +4486,85 @@ function WorkoutLevelPlans({ draft, setDraft, level, setLevel, label = "Workout"
   return <WorkoutPlanEditor key={level + (own ? "-own" : "")} items={items} setItems={setItems} toolbar={toolbar} label={label} hint={hint} />;
 }
 
+// The Workout / Drill Progression editor with Light / Moderate / Hard tabs on top of the level
+// toggle. Moderate is the drill's or workout's standard plan; Light and Hard are optional extra
+// versions, each with its own level adjustments.
+function IntensityPlans({ draft, setDraft, intensity, setIntensity, level, setLevel, label, hint, noun }) {
+  const isModerate = intensity === "moderate";
+  const version = isModerate ? null : draft.intensityPlans?.[intensity];
+  const tabs = (
+    <div className="level-tabs intensity-tabs" role="tablist" aria-label={`${label} intensity`}>
+      {INTENSITIES.map(([key, name]) => (
+        <button key={key} type="button" role="tab" aria-selected={intensity === key} className={"level-tab" + (intensity === key ? " active" : "")} onClick={() => setIntensity(key)}>
+          {name}{key !== "moderate" && draft.intensityPlans?.[key] && <span className="level-tab-dot" title="Set up" />}
+        </button>
+      ))}
+    </div>
+  );
+  const create = () => setDraft((d) => ({
+    ...d,
+    intensityPlans: {
+      ...d.intensityPlans,
+      [intensity]: {
+        planRows: (d.planRows || []).map((r) => ({ ...r, id: uid(isPlanNote(r) ? "note" : "row") })),
+        levelPlans: Object.fromEntries(Object.entries(d.levelPlans || {}).map(([lv, list]) => [lv, list.map((r) => ({ ...r, id: uid(isPlanNote(r) ? "note" : "row") }))])),
+      },
+    },
+  }));
+  const remove = async () => {
+    if (!(await confirmDialog({ title: `Remove the ${INTENSITY_LABEL[intensity]} version?`, message: `Blocks that pick ${INTENSITY_LABEL[intensity]} will use the Moderate version instead.`, confirmLabel: "Remove", danger: true }))) return;
+    setDraft((d) => { const { [intensity]: _, ...rest } = d.intensityPlans || {}; return { ...d, intensityPlans: rest }; });
+  };
+  if (!isModerate && !version) {
+    return (
+      <div className="admin-form-span2 plan-table-editor">
+        <span className="media-field-label">{label}</span>
+        <div className="plan-level-bar">
+          {tabs}
+          <div className="plan-level-status">
+            <span><strong>No {INTENSITY_LABEL[intensity]} version yet.</strong> Blocks that pick {INTENSITY_LABEL[intensity]} use the Moderate version.</span>
+            <button type="button" className="btn btn--ghost btn--small" onClick={create}><Plus size={12} /> Create from Moderate</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  // Light and Hard are edited through the same level editor, pointed at that version's plan.
+  const vDraft = isModerate ? draft : { ...draft, planRows: version.planRows || [], levelPlans: version.levelPlans || {} };
+  const vSetDraft = isModerate ? setDraft : (fn) => setDraft((d) => {
+    const cur = d.intensityPlans[intensity];
+    const next = fn({ ...d, planRows: cur.planRows || [], levelPlans: cur.levelPlans || {} });
+    return { ...d, intensityPlans: { ...d.intensityPlans, [intensity]: { planRows: next.planRows, levelPlans: next.levelPlans } } };
+  });
+  const topBar = (
+    <>
+      {tabs}
+      {!isModerate && (
+        <div className="plan-level-status">
+          <span><strong>{INTENSITY_LABEL[intensity]} version.</strong> Used in blocks where you pick {INTENSITY_LABEL[intensity]}.</span>
+          <button type="button" className="btn btn--ghost btn--small" onClick={remove}><Trash2 size={12} /> Remove version</button>
+        </div>
+      )}
+    </>
+  );
+  return <WorkoutLevelPlans key={intensity} draft={vDraft} setDraft={vSetDraft} level={level} setLevel={setLevel} label={label} hint={hint} noun={noun} topBar={topBar} />;
+}
+function normalizeIntensityPlans(plans) {
+  return Object.fromEntries(Object.entries(plans || {}).filter(([k]) => k === "light" || k === "hard").map(([k, v]) => [k, {
+    planRows: normalizePlanItems(v.planRows),
+    levelPlans: Object.fromEntries(Object.entries(v.levelPlans || {}).map(([lv, list]) => [lv, normalizePlanItems(list)])),
+  }]));
+}
+function cleanIntensityPlans(plans) {
+  return Object.fromEntries(Object.entries(plans || {}).map(([k, v]) => [k, {
+    planRows: cleanPlanItems(v.planRows),
+    levelPlans: Object.fromEntries(Object.entries(v.levelPlans || {}).map(([lv, list]) => [lv, cleanPlanItems(list)])),
+  }]));
+}
+
 function AdminOffIce({ content, updateContent }) {
   const [planLevel, setPlanLevel] = useState("Youth");
+  const [planIntensity, setPlanIntensity] = useState("moderate");
   const [editingId, setEditingId] = useState(null);
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState(BLANK_OFFICE);
@@ -4497,6 +4592,7 @@ function AdminOffIce({ content, updateContent }) {
     })),
     planRows: normalizePlanItems(o.planRows),
     levelPlans: Object.fromEntries(Object.entries(o.levelPlans || {}).map(([lv, list]) => [lv, normalizePlanItems(list)])),
+    intensityPlans: normalizeIntensityPlans(o.intensityPlans),
   });
   const startEdit = (o) => { setEditingId(o.id); setDraft(toDraft(o)); setCreating(false); media.clearError(); };
   const startCreate = () => { setCreating(true); setEditingId(null); setDraft(BLANK_OFFICE); media.clearError(); };
@@ -4509,6 +4605,7 @@ function AdminOffIce({ content, updateContent }) {
       .map((ex) => ({ ...ex, name: ex.name.trim() || "Untitled exercise" })),
     planRows: cleanPlanItems(d.planRows),
     levelPlans: Object.fromEntries(Object.entries(d.levelPlans || {}).map(([lv, list]) => [lv, cleanPlanItems(list)])),
+    intensityPlans: cleanIntensityPlans(d.intensityPlans),
     imageAssetId: d.imageAssetId || null, imageUrl: d.imageUrl || "", videoAssetId: d.videoAssetId || null, videoUrl: d.videoUrl || "",
   });
 
@@ -4549,7 +4646,7 @@ function AdminOffIce({ content, updateContent }) {
 
   const previewDraft = () => {
     if (!draft.title.trim()) return;
-    setPreviewOffice(planForLevel({ ...buildOffice(draft), id: editingId || "preview" }, planLevel));
+    setPreviewOffice(planForLevel({ ...buildOffice(draft), id: editingId || "preview" }, planLevel, planIntensity));
   };
 
   return (
@@ -4573,7 +4670,7 @@ function AdminOffIce({ content, updateContent }) {
 
             <ExerciseEditor exercises={draft.exercises} setDraft={setDraft} exMedia={exMedia} />
 
-            <WorkoutLevelPlans draft={draft} setDraft={setDraft} level={planLevel} setLevel={setPlanLevel} />
+            <IntensityPlans draft={draft} setDraft={setDraft} intensity={planIntensity} setIntensity={setPlanIntensity} level={planLevel} setLevel={setPlanLevel} label="Workout" noun="workout" />
 
             <span className="admin-form-span2 media-section-label">Workout cover photo/video</span>
             <MediaFields draft={draft} media={media} />
@@ -4619,7 +4716,7 @@ function AdminOffIce({ content, updateContent }) {
                     <td>{o.duration}</td><td>{o.exercises.length}</td>
                     <td><button className={"status-pill" + (o.published ? " status-pill--live" : "")} onClick={() => togglePublish(o.id)}>{o.published ? <Eye size={12} /> : <EyeOff size={12} />} {o.published ? "Published" : "Draft"}</button></td>
                     <td className="admin-row-actions">
-                      <button className="icon-btn" onClick={() => setPreviewOffice(planForLevel(o, planLevel))} aria-label="Preview"><Play size={14} /></button>
+                      <button className="icon-btn" onClick={() => setPreviewOffice(planForLevel(o, planLevel, planIntensity))} aria-label="Preview"><Play size={14} /></button>
                       <button className="icon-btn" onClick={() => startEdit(o)} aria-label="Edit"><Pencil size={14} /></button>
                       <button className="icon-btn" onClick={() => duplicate(o)} aria-label="Duplicate"><Copy size={14} /></button>
                       <button className="icon-btn" onClick={() => remove(o.id)} aria-label="Delete"><Trash2 size={14} /></button>
@@ -4633,7 +4730,7 @@ function AdminOffIce({ content, updateContent }) {
       )}
 
       {previewOffice && (
-        <PreviewModal label={`Preview — how ${planLevel} goalies will see this workout`} onClose={() => setPreviewOffice(null)}>
+        <PreviewModal label={`Preview — how ${planLevel} goalies will see this workout (${INTENSITY_LABEL[planIntensity]})`} onClose={() => setPreviewOffice(null)}>
           <OffIceDetailPage office={previewOffice} branding={content.branding} onBack={() => setPreviewOffice(null)} complete={false} onComplete={() => {}} />
         </PreviewModal>
       )}
@@ -4646,12 +4743,14 @@ function AdminOffIce({ content, updateContent }) {
    ============================================================================ */
 
 // Under the Off-Ice picker of a training block: which version of the workout this level's goalies get.
-function planLevelNote(item, level, noun) {
-  if (!item || !Object.keys(item.levelPlans || {}).length) return null;
-  return item.levelPlans[level] ? `${level} goalies get the ${level} version of this ${noun}.` : `${level} goalies get the shared version of this ${noun}.`;
+function planLevelNote(item, level, noun, intensity) {
+  if (!item) return null;
+  const { levelPlans } = intensityVersion(item, intensity);
+  if (!Object.keys(levelPlans).length) return null;
+  return levelPlans[level] ? `${level} goalies get the ${level} version of this ${noun}.` : `${level} goalies get the shared version of this ${noun}.`;
 }
 
-function AssignmentPicker({ label, icon: Icon, items, categories, value, onChange, categoryFilter, onCategoryFilterChange, note }) {
+function AssignmentPicker({ label, icon: Icon, items, categories, value, onChange, categoryFilter, onCategoryFilterChange, note, intensity, onIntensityChange }) {
   // Drafts can be assigned so blocks can be built before content is published; they are labelled,
   // and goalies only see an item once it is published.
   const filtered = items.filter((it) => it.id === value || !categoryFilter || it.category === categoryFilter);
@@ -4671,6 +4770,19 @@ function AssignmentPicker({ label, icon: Icon, items, categories, value, onChang
         {filtered.map((it) => <option key={it.id} value={it.id}>{it.title}{!it.published ? " (Draft — hidden from goalies until published)" : ""}</option>)}
       </select>
       {filtered.length === 0 && <p className="planner-empty-hint">Nothing in this category yet.</p>}
+      {onIntensityChange && value && (() => {
+        // Only the coach sees this: which version of the drill / workout the block uses.
+        const item = items.find((it) => it.id === value);
+        const current = intensity || "moderate";
+        return (
+          <label className="planner-intensity">
+            <span>Intensity</span>
+            <select value={current} onChange={(e) => onIntensityChange(e.target.value)}>
+              {INTENSITIES.map(([key, name]) => <option key={key} value={key}>{name}{hasIntensity(item, key) ? "" : " (not set up — uses Moderate)"}</option>)}
+            </select>
+          </label>
+        );
+      })()}
       {note && <p className="planner-level-note"><Check size={12} /> {note}</p>}
     </div>
   );
@@ -4733,7 +4845,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
     const ids = Object.fromEntries(LEVELS.map((lv) => [lv, crypto.randomUUID()]));
     updateContent((c) => ({
       ...c,
-      trainingDays: Object.fromEntries(LEVELS.map((lv) => [lv, [...(c.trainingDays[lv] || []), { id: ids[lv], drillId: "", focusId: "", workoutId: "", title: "", subtitle: "", createdAt: now }]])),
+      trainingDays: Object.fromEntries(LEVELS.map((lv) => [lv, [...(c.trainingDays[lv] || []), { id: ids[lv], drillId: "", focusId: "", workoutId: "", drillIntensity: "moderate", workoutIntensity: "moderate", title: "", subtitle: "", createdAt: now }]])),
     }));
     setEditingId(ids[level]);
     setQuery("");
@@ -4894,7 +5006,8 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
             <AssignmentPicker
               label="Drill of the block" icon={GoalieMask} items={content.drills} categories={categoriesOfType(content, "drill")}
               value={day.drillId} onChange={(v) => setDraft(saved.id, { drillId: v })} categoryFilter={drillCat} onCategoryFilterChange={setDrillCat}
-              note={planLevelNote(content.drills.find((x) => x.id === day.drillId), level, "drill")}
+              intensity={day.drillIntensity} onIntensityChange={(v) => setDraft(saved.id, { drillIntensity: v })}
+              note={planLevelNote(content.drills.find((x) => x.id === day.drillId), level, "drill", day.drillIntensity)}
             />
             <AssignmentPicker
               label="Practice focus" icon={HockeyNet} items={content.focusPoints} categories={categoriesOfType(content, "focus")}
@@ -4903,7 +5016,8 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
             <AssignmentPicker
               label="Off-Ice" icon={CircleDot} items={content.offIceWorkouts} categories={categoriesOfType(content, "office")}
               value={day.workoutId} onChange={(v) => setDraft(saved.id, { workoutId: v })} categoryFilter={officeCat} onCategoryFilterChange={setOfficeCat}
-              note={planLevelNote(content.offIceWorkouts.find((x) => x.id === day.workoutId), level, "workout")}
+              intensity={day.workoutIntensity} onIntensityChange={(v) => setDraft(saved.id, { workoutIntensity: v })}
+              note={planLevelNote(content.offIceWorkouts.find((x) => x.id === day.workoutId), level, "workout", day.workoutIntensity)}
             />
           </div>
 
@@ -4923,9 +5037,9 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
       {saveError && <div className="email-status email-status--error"><AlertTriangle size={14} /> {saveError}</div>}
       {previewIndex !== null && list[previewIndex] && (() => {
         const d = { ...list[previewIndex], ...drafts[list[previewIndex].id] };
-        const drill = planForLevel(content.drills.find((x) => x.id === d.drillId), level);
+        const drill = planForLevel(content.drills.find((x) => x.id === d.drillId), level, d.drillIntensity);
         const focus = content.focusPoints.find((x) => x.id === d.focusId);
-        const office = planForLevel(content.offIceWorkouts.find((x) => x.id === d.workoutId), level);
+        const office = planForLevel(content.offIceWorkouts.find((x) => x.id === d.workoutId), level, d.workoutIntensity);
         const noop = () => {};
         return (
           <PreviewModal label={`Preview — Block ${previewIndex + 1} (${level})`} onClose={() => setPreviewIndex(null)}>
@@ -4934,7 +5048,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
               {d.subtitle && <p className="hero-sub">{d.subtitle}</p>}
               {!drill && !focus && !office && <p className="planner-empty-hint">Nothing is assigned to this block yet.</p>}
               {drill && <DrillDetailPage drill={drill} branding={content.branding} onBack={noop} complete={false} onComplete={noop} />}
-              {focus && <FocusDetailPage focus={focus} branding={content.branding} drills={content.drills} level={level} onBack={noop} complete={false} onComplete={noop} />}
+              {focus && <FocusDetailPage focus={focus} branding={content.branding} drills={content.drills} level={level} blockDrill={{ id: d.drillId, intensity: d.drillIntensity }} onBack={noop} complete={false} onComplete={noop} />}
               {office && <OffIceDetailPage office={office} branding={content.branding} onBack={noop} complete={false} onComplete={noop} />}
             </div>
           </PreviewModal>
@@ -5511,8 +5625,13 @@ function backupReadableHtml(backup) {
     })())).join("");
   const plans = (item, heading) => {
     const parts = [];
-    if ((item.planRows || []).length) parts.push(`<h4>${heading}${Object.keys(item.levelPlans || {}).length ? " — shared" : ""}</h4>${planTable(item.planRows)}`);
-    for (const lv of EXPERIENCE_LEVELS) if (item.levelPlans?.[lv]) parts.push(`<h4>${heading} — ${lv} version</h4>${planTable(item.levelPlans[lv])}`);
+    for (const [key, name] of INTENSITIES) {
+      if (!hasIntensity(item, key)) continue;
+      const v = intensityVersion(item, key);
+      const title = `${heading}${item.intensityPlans && Object.keys(item.intensityPlans).length ? ` — ${name}` : ""}`;
+      if (v.planRows.length) parts.push(`<h4>${title}${Object.keys(v.levelPlans).length ? " — shared" : ""}</h4>${planTable(v.planRows)}`);
+      for (const lv of EXPERIENCE_LEVELS) if (v.levelPlans[lv]) parts.push(`<h4>${title} — ${lv} version</h4>${planTable(v.levelPlans[lv])}`);
+    }
     return parts.join("");
   };
   const list = (title, items) => (items?.length ? `<h4>${title}</h4><ul>${items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "");
@@ -5532,7 +5651,7 @@ function backupReadableHtml(backup) {
     ${richTextToPlain(o.objective) ? `<h4>Objective</h4>${rich(o.objective)}` : ""}
     ${(o.exercises || []).length ? `<h4>Exercises</h4>${o.exercises.map((ex) => `<div class="exercise"><strong>${esc(ex.name)}</strong>${meta(ex.sets, ex.rest)}${rich(ex.instructions)}${img(ex.imageUrl, ex.name)}${video(ex.videoUrl)}</div>`).join("")}` : ""}
     ${plans(o, "Workout")}</section>`).join("");
-  const blocks = EXPERIENCE_LEVELS.map((lv) => `<h3>${lv}</h3>${(c.trainingDays?.[lv] || []).length ? `<table><tr><th>Block</th><th>Title</th><th>Drill</th><th>Practice focus</th><th>Off-ice</th></tr>${c.trainingDays[lv].map((b, i) => `<tr><td>${i + 1}${blockIsReady(c, b) ? "" : " (draft)"}</td><td>${esc(b.title || "")}</td><td>${name(c.drills, b.drillId)}</td><td>${name(c.focusPoints, b.focusId)}</td><td>${name(c.offIceWorkouts, b.workoutId)}</td></tr>`).join("")}</table>` : "<p>No blocks.</p>"}`).join("");
+  const blocks = EXPERIENCE_LEVELS.map((lv) => `<h3>${lv}</h3>${(c.trainingDays?.[lv] || []).length ? `<table><tr><th>Block</th><th>Title</th><th>Drill</th><th>Practice focus</th><th>Off-ice</th></tr>${c.trainingDays[lv].map((b, i) => `<tr><td>${i + 1}${blockIsReady(c, b) ? "" : " (draft)"}</td><td>${esc(b.title || "")}</td><td>${name(c.drills, b.drillId)}${b.drillId ? ` (${INTENSITY_LABEL[b.drillIntensity || "moderate"]})` : ""}</td><td>${name(c.focusPoints, b.focusId)}</td><td>${name(c.offIceWorkouts, b.workoutId)}${b.workoutId ? ` (${INTENSITY_LABEL[b.workoutIntensity || "moderate"]})` : ""}</td></tr>`).join("")}</table>` : "<p>No blocks.</p>"}`).join("");
 
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>10DTendy content — ${esc(backup.exportedAt.slice(0, 10))}</title>
@@ -6354,9 +6473,9 @@ function PrintHeading({ children }) { return <h3 className="print-section-headin
 // focus and off-ice workout, with a "Done" box to tick on paper.
 function PrintSheet({ content, date, assignment }) {
   const printDate = date || TODAY_DATE;
-  const drill = assignment && planForLevel(content.drills.find((d) => d.id === assignment.drillId && d.published), assignment.level);
+  const drill = assignment && planForLevel(content.drills.find((d) => d.id === assignment.drillId && d.published), assignment.level, assignment.drillIntensity);
   const focus = assignment && content.focusPoints.find((f) => f.id === assignment.focusId && f.published);
-  const office = assignment && planForLevel(content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published), assignment.level);
+  const office = assignment && planForLevel(content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published), assignment.level, assignment.workoutIntensity);
   const drillImg = drill ? brandImage(drill.imageUrl, content.branding?.drill, DRILL_IMG) : null;
   const focusImg = focus ? brandImage(focus.imageUrl, content.branding?.focus, FOCUS_IMG) : null;
   const officeImg = office ? brandImage(office.imageUrl, content.branding?.office, OFFICE_IMG) : null;
@@ -6989,9 +7108,9 @@ function AppInner() {
   }
   const experience = isCoach ? previewLevel : (EXPERIENCE_LEVELS.includes(user.experience) ? user.experience : "Junior");
   const assignment = trainingDayForDate(content, user, dateKey(viewDate), experience);
-  const drill = assignment && planForLevel(content.drills.find((d) => d.id === assignment.drillId && d.published), experience);
+  const drill = assignment && planForLevel(content.drills.find((d) => d.id === assignment.drillId && d.published), experience, assignment.drillIntensity);
   const focus = assignment && content.focusPoints.find((f) => f.id === assignment.focusId && f.published);
-  const office = assignment && planForLevel(content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published), experience);
+  const office = assignment && planForLevel(content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published), experience, assignment.workoutIntensity);
   const dayType = resolveDayType(user, dateKey(viewDate));
   const reminders = getReminders(user);
 
@@ -7055,7 +7174,7 @@ function AppInner() {
                 />
               );
               if (view === "drill") return drill ? <DrillDetailPage drill={drill} branding={content.branding} onBack={() => goTo("today")} complete={progress.drill} onComplete={() => toggleComplete("drill")} /> : todayPage;
-              if (view === "focus") return focus ? <FocusDetailPage focus={focus} branding={content.branding} drills={content.drills} level={experience} onBack={() => goTo("today")} complete={progress.focus} onComplete={() => toggleComplete("focus")} /> : todayPage;
+              if (view === "focus") return focus ? <FocusDetailPage focus={focus} branding={content.branding} drills={content.drills} level={experience} blockDrill={assignment && { id: assignment.drillId, intensity: assignment.drillIntensity }} onBack={() => goTo("today")} complete={progress.focus} onComplete={() => toggleComplete("focus")} /> : todayPage;
               if (view === "office") return office ? <OffIceDetailPage office={office} branding={content.branding} onBack={() => goTo("today")} complete={progress.office} onComplete={() => toggleComplete("office")} /> : todayPage;
               if (view === "progress") return <ProgressPage user={user} />;
               if (view === "profile") return <ProfilePage user={user} onLogout={onLogout} onChangePassword={changePassword} onUpdateProfile={updateProfile} onDeleteAccount={deleteMyAccount} />;
@@ -7710,6 +7829,8 @@ button:focus {
 .planner-header h3 { margin: 0; }
 .planner-hint { font-size: 12px; color: var(--text-faint); margin: 0 0 18px; }
 .plan-level-bar { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 14px; }
+.planner-intensity { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 13px; color: var(--text-dim); }
+.planner-intensity select { flex: 1; min-width: 0; }
 .plan-level-bar .level-tabs { align-self: flex-start; }
 .plan-level-status { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); font-size: 13px; color: var(--text-dim); }
 .plan-level-status strong { color: var(--text); font-weight: 600; }
