@@ -2270,7 +2270,7 @@ function DrillDetailPage({ drill, branding, onBack, complete, onComplete }) {
   );
 }
 
-function FocusDetailPage({ focus, branding, drills = [], level, blockDrill, onBack, complete, onComplete }) {
+function FocusDetailPage({ focus, branding, drills = [], level, day, onBack, complete, onComplete }) {
   const focusImg = brandImage(focus.imageUrl, branding?.focus, FOCUS_IMG);
   return (
     <div className="page detail">
@@ -2293,7 +2293,7 @@ function FocusDetailPage({ focus, branding, drills = [], level, blockDrill, onBa
       {(focus.blocks || []).map((b) => (
         b.type === "image" ? (b.imageUrl && <img key={b.id} src={b.imageUrl} alt="" className="focus-block-image" />)
         : b.type === "video" ? (b.videoUrl && <VideoPlayer key={b.id} title={focus.title} src={b.videoUrl} />)
-        : b.type === "drill" ? (() => { const d = drills.find((x) => x.id === b.drillId && x.published); return d ? <FocusDrillCard key={b.id} drill={planForLevel(d, level, blockDrill?.id === d.id ? blockDrill.intensity : undefined)} branding={branding} /> : null; })()
+        : b.type === "drill" ? (() => { const d = drills.find((x) => x.id === b.drillId && x.published); return d ? <FocusDrillCard key={b.id} drill={planForLevel(d, level, day)} branding={branding} /> : null; })()
         : (b.body && <section key={b.id} className="detail-block">{b.heading && <h2>{b.heading}</h2>}<RichText value={b.body} /></section>)
       ))}
       <button className={"btn btn--complete" + (complete ? " btn--complete-done" : "")} onClick={onComplete}>
@@ -3239,7 +3239,7 @@ function AdminDashboard({ content }) {
 
 const BLANK_DRILL = {
   title: "", category: "", duration: "", equipment: "",
-  description: "", objective: "", stepsText: "", sets: "", reps: "", coachingPointsText: "", mistakesText: "", planRows: [], levelPlans: {}, intensityPlans: {}, published: false,
+  description: "", objective: "", stepsText: "", sets: "", reps: "", coachingPointsText: "", mistakesText: "", planRows: [], levelPlans: {}, dayPlans: {}, published: false,
   imageAssetId: null, imageUrl: "", videoAssetId: null, videoUrl: "", diagramUrl: "",
 };
 
@@ -3482,7 +3482,7 @@ function WelcomeDialog({ label, data, onClose }) {
 
 function AdminDrills({ content, updateContent }) {
   const [planLevel, setPlanLevel] = useState("Youth");
-  const [planIntensity, setPlanIntensity] = useState("moderate");
+  const [planDay, setPlanDay] = useState(1);
   const [editingId, setEditingId] = useState(null);
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState(BLANK_DRILL);
@@ -3506,7 +3506,7 @@ function AdminDrills({ content, updateContent }) {
     mistakesText: (d.mistakes || []).map((m) => `${m.mistake} | ${m.correction}`).join("\n"),
     planRows: normalizePlanItems(d.planRows),
     levelPlans: Object.fromEntries(Object.entries(d.levelPlans || {}).map(([lv, list]) => [lv, normalizePlanItems(list)])),
-    intensityPlans: normalizeIntensityPlans(d.intensityPlans),
+    dayPlans: normalizeDayPlans(d.dayPlans),
   });
 
   const buildDrill = (d) => ({
@@ -3517,7 +3517,7 @@ function AdminDrills({ content, updateContent }) {
     reps: (d.reps || "").trim(),
     planRows: cleanPlanItems(d.planRows),
     levelPlans: Object.fromEntries(Object.entries(d.levelPlans || {}).map(([lv, list]) => [lv, cleanPlanItems(list)])),
-    intensityPlans: cleanIntensityPlans(d.intensityPlans),
+    dayPlans: cleanDayPlans(d.dayPlans),
     coachingPoints: parseLines(d.coachingPointsText),
     mistakes: parseLines(d.mistakesText).map((line) => {
       const [mistake, correction] = line.split("|").map((s) => (s || "").trim());
@@ -3583,7 +3583,7 @@ function AdminDrills({ content, updateContent }) {
 
   const previewDraft = () => {
     if (!draft.title.trim()) return;
-    setPreviewDrill(planForLevel({ ...buildDrill(draft), id: editingId || "preview" }, planLevel, planIntensity));
+    setPreviewDrill(planForLevel({ ...buildDrill(draft), id: editingId || "preview" }, planLevel, planDay));
   };
 
   return (
@@ -3630,8 +3630,8 @@ function AdminDrills({ content, updateContent }) {
             <label className="admin-form-span2">Steps (one per line)<textarea rows={4} value={draft.stepsText} onChange={(e) => setDraft({ ...draft, stepsText: e.target.value })} placeholder={"Start in your stance.\nMove to the post.\n..."} /></label>
             <label>Sets<input value={draft.sets || ""} onChange={(e) => setDraft({ ...draft, sets: e.target.value })} placeholder="e.g. 3" maxLength={50} /></label>
             <label>Reps<input value={draft.reps || ""} onChange={(e) => setDraft({ ...draft, reps: e.target.value })} placeholder="e.g. 10 each side" maxLength={50} /></label>
-            <IntensityPlans
-              draft={draft} setDraft={setDraft} intensity={planIntensity} setIntensity={setPlanIntensity} level={planLevel} setLevel={setPlanLevel} label="Drill Progression" noun="drill progression"
+            <DayPlans
+              draft={draft} setDraft={setDraft} day={planDay} setDay={setPlanDay} level={planLevel} setLevel={setPlanLevel} label="Drill Progression" noun="drill progression"
               hint="How the drill builds up, step by step, with sets, reps and rest. Add a set description wherever you need to explain a stage — for example what changes from one progression to the next — and move it above, between or below the rows."
             />
             <label className="admin-form-span2">Coaching points (one per line)<textarea rows={3} value={draft.coachingPointsText} onChange={(e) => setDraft({ ...draft, coachingPointsText: e.target.value })} /></label>
@@ -3681,7 +3681,7 @@ function AdminDrills({ content, updateContent }) {
                     <td>{d.duration}</td>
                     <td><button className={"status-pill" + (d.published ? " status-pill--live" : "")} onClick={() => togglePublish(d.id)}>{d.published ? <Eye size={12} /> : <EyeOff size={12} />} {d.published ? "Published" : "Draft"}</button></td>
                     <td className="admin-row-actions">
-                      <button className="icon-btn" onClick={() => setPreviewDrill(planForLevel(d, planLevel, planIntensity))} aria-label="Preview"><Play size={14} /></button>
+                      <button className="icon-btn" onClick={() => setPreviewDrill(planForLevel(d, planLevel, planDay))} aria-label="Preview"><Play size={14} /></button>
                       <button className="icon-btn" onClick={() => startEdit(d)} aria-label="Edit"><Pencil size={14} /></button>
                       <button className="icon-btn" onClick={() => duplicate(d)} aria-label="Duplicate"><Copy size={14} /></button>
                       <button className="icon-btn" onClick={() => remove(d.id)} aria-label="Delete"><Trash2 size={14} /></button>
@@ -3695,7 +3695,7 @@ function AdminDrills({ content, updateContent }) {
       )}
 
       {previewDrill && (
-        <PreviewModal label={`Preview — how ${planLevel} goalies will see this drill (${INTENSITY_LABEL[planIntensity]})`} onClose={() => setPreviewDrill(null)}>
+        <PreviewModal label={`Preview — how ${planLevel} goalies will see this drill on day ${planDay}`} onClose={() => setPreviewDrill(null)}>
           <DrillDetailPage drill={previewDrill} branding={content.branding} onBack={() => setPreviewDrill(null)} complete={false} onComplete={() => {}} />
         </PreviewModal>
       )}
@@ -3877,7 +3877,7 @@ function AdminCategories({ content, updateContent }) {
    ============================================================================ */
 
 const BLANK_FOCUS = {
-  title: "", explanation: "", cue: "", category: "", published: false,
+  title: "", explanation: "", cue: "", dayVersions: {}, category: "", published: false,
   imageAssetId: null, imageUrl: "", videoAssetId: null, videoUrl: "",
   blocks: [],
 };
@@ -4032,7 +4032,53 @@ function FocusBlocksEditor({ blocks, setDraft, blockMedia, drills = [], drillCat
   );
 }
 
+// Today's cue and Execution for each day of a block: Day 1 is the focus's own text, Day 2 and
+// Day 3 optional versions (a day without one uses the day before it).
+function FocusDayFields({ draft, setDraft, day, setDay }) {
+  const version = day > 1 ? draft.dayVersions?.[day] : null;
+  const usedDay = Number(dayKeyFor(draft.dayVersions, day - 1) || 1);
+  const tabs = <BlockDayTabs day={day} setDay={setDay} has={(d) => !!draft.dayVersions?.[d]} label="Practice focus" />;
+  const setField = (field, value) => setDraft((d) => (day === 1
+    ? { ...d, [field]: value }
+    : { ...d, dayVersions: { ...d.dayVersions, [day]: { ...d.dayVersions[day], [field]: value } } }));
+  const create = () => setDraft((d) => {
+    const src = focusForDay(d, day - 1);
+    return { ...d, dayVersions: { ...d.dayVersions, [day]: { cue: src.cue || "", explanation: src.explanation || "" } } };
+  });
+  const remove = async () => {
+    if (!(await confirmDialog({ title: `Remove the Day ${day} version?`, message: `On day ${day} of a block, goalies get the Day ${usedDay} cue and execution instead.`, confirmLabel: "Remove", danger: true }))) return;
+    setDraft((d) => { const { [day]: _, ...rest } = d.dayVersions || {}; return { ...d, dayVersions: rest }; });
+  };
+  const fields = day === 1 ? draft : version;
+  return (
+    <div className="admin-form-span2 focus-day-fields">
+      <div className="plan-level-bar">
+        {tabs}
+        {day > 1 && !version && (
+          <div className="plan-level-status">
+            <span><strong>Same as Day {usedDay}.</strong> Give day {day} of a block its own cue and execution.</span>
+            <button type="button" className="btn btn--ghost btn--small" onClick={create}><Plus size={12} /> Create Day {day} from Day {usedDay}</button>
+          </div>
+        )}
+        {version && (
+          <div className="plan-level-status">
+            <span><strong>Day {day} version.</strong> Goalies get it on day {day} of a block.</span>
+            <button type="button" className="btn btn--ghost btn--small" onClick={remove}><Trash2 size={12} /> Remove Day {day}</button>
+          </div>
+        )}
+      </div>
+      {fields && (
+        <div className="admin-form-grid" key={day}>
+          <label className="admin-form-span2">Today's cue<input value={fields.cue || ""} onChange={(e) => setField("cue", e.target.value)} /></label>
+          <div className="admin-form-span2 rich-field-wrap"><span className="rich-field-label">Execution</span><RichTextEditor rows={3} value={fields.explanation || ""} onChange={(v) => setField("explanation", v)} /></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminFocusPoints({ content, updateContent }) {
+  const [focusDay, setFocusDay] = useState(1);
   const [editingId, setEditingId] = useState(null);
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState(BLANK_FOCUS);
@@ -4088,7 +4134,7 @@ function AdminFocusPoints({ content, updateContent }) {
 
   const previewDraft = () => {
     if (!draft.title.trim()) return;
-    setPreviewFocus({ ...draft, id: editingId || "preview" });
+    setPreviewFocus(focusForDay({ ...draft, id: editingId || "preview" }, focusDay));
   };
 
   return (
@@ -4105,8 +4151,7 @@ function AdminFocusPoints({ content, updateContent }) {
                 {categoriesOfType(content, "focus").map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
               </select>
             </label>
-            <label className="admin-form-span2">Today's cue<input value={draft.cue} onChange={(e) => setDraft({ ...draft, cue: e.target.value })} /></label>
-            <div className="admin-form-span2 rich-field-wrap"><span className="rich-field-label">Execution</span><RichTextEditor rows={3} value={draft.explanation} onChange={(v) => setDraft({ ...draft, explanation: v })} /></div>
+            <FocusDayFields draft={draft} setDraft={setDraft} day={focusDay} setDay={setFocusDay} />
 
             <MediaFields draft={draft} media={media} />
 
@@ -4153,7 +4198,7 @@ function AdminFocusPoints({ content, updateContent }) {
                     <td>{f.cue}</td>
                     <td><button className={"status-pill" + (f.published ? " status-pill--live" : "")} onClick={() => togglePublish(f.id)}>{f.published ? <Eye size={12} /> : <EyeOff size={12} />} {f.published ? "Published" : "Draft"}</button></td>
                     <td className="admin-row-actions">
-                      <button className="icon-btn" onClick={() => setPreviewFocus(f)} aria-label="Preview"><Play size={14} /></button>
+                      <button className="icon-btn" onClick={() => setPreviewFocus(focusForDay(f, focusDay))} aria-label="Preview"><Play size={14} /></button>
                       <button className="icon-btn" onClick={() => startEdit(f)} aria-label="Edit"><Pencil size={14} /></button>
                       <button className="icon-btn" onClick={() => duplicate(f)} aria-label="Duplicate"><Copy size={14} /></button>
                       <button className="icon-btn" onClick={() => remove(f.id)} aria-label="Delete"><Trash2 size={14} /></button>
@@ -4167,8 +4212,8 @@ function AdminFocusPoints({ content, updateContent }) {
       )}
 
       {previewFocus && (
-        <PreviewModal label="Preview — how goalies will see this practice focus" onClose={() => setPreviewFocus(null)}>
-          <FocusDetailPage focus={previewFocus} branding={content.branding} drills={content.drills} onBack={() => setPreviewFocus(null)} complete={false} onComplete={() => {}} />
+        <PreviewModal label={`Preview — how goalies will see this practice focus on day ${focusDay}`} onClose={() => setPreviewFocus(null)}>
+          <FocusDetailPage focus={previewFocus} branding={content.branding} drills={content.drills} day={focusDay} onBack={() => setPreviewFocus(null)} complete={false} onComplete={() => {}} />
         </PreviewModal>
       )}
     </div>
@@ -4185,7 +4230,7 @@ const blankExercise = () => ({
 });
 
 const BLANK_OFFICE = {
-  title: "", duration: "", equipment: "", description: "", objective: "", exercises: [], planRows: [], levelPlans: {}, intensityPlans: {}, category: "", published: false,
+  title: "", duration: "", equipment: "", description: "", objective: "", exercises: [], planRows: [], levelPlans: {}, dayPlans: {}, category: "", published: false,
   imageAssetId: null, imageUrl: "", videoAssetId: null, videoUrl: "",
 };
 const blankPlanRow = () => ({ id: uid("row"), exercise: "", sets: "", reps: "", rest: "" });
@@ -4199,23 +4244,28 @@ function planNoteHasContent(item) { return planNoteHasText(item) || !!String(ite
 // A plan (an off-ice Workout or a Drill Progression) can differ per level: levelPlans[level] is that
 // level's own adjusted version, and a level without one follows the shared planRows. Returns the
 // workout or drill as a goalie at `level` sees it.
-function planForLevel(item, level, intensity) {
+function planForLevel(item, level, day) {
   if (!item) return item;
-  const base = { ...item, ...intensityVersion(item, intensity) };
+  const base = { ...item, ...dayVersion(item, day) };
   const own = level ? base.levelPlans?.[level] : null;
   return own ? { ...base, planRows: own } : base;
 }
-// Drills and off-ice workouts can have Light and Hard versions next to the standard Moderate one
-// (planRows / levelPlans). The coach picks one per training block; goalies never see which. A
-// version that hasn't been set up falls back to Moderate.
-const INTENSITIES = [["light", "Light"], ["moderate", "Moderate"], ["hard", "Hard"]];
-const INTENSITY_LABEL = Object.fromEntries(INTENSITIES);
-function intensityVersion(item, intensity) {
-  const v = intensity && intensity !== "moderate" ? item.intensityPlans?.[intensity] : null;
+// A training block runs up to 3 days, and its drill, practice focus and off-ice workout can change
+// from day to day: Day 1 is the item's normal content, Day 2 and Day 3 optional versions (dayPlans
+// on drills and workouts, dayVersions on focuses). A day without its own version uses the day
+// before it, so a block never shows nothing.
+const BLOCK_DAY_NUMBERS = [1, 2, 3];
+function dayKeyFor(versions, day) {
+  for (let d = Math.min(day || 1, 3); d >= 2; d--) if (versions?.[d]) return String(d);
+  return null;
+}
+function dayVersion(item, day) {
+  const v = item.dayPlans?.[dayKeyFor(item.dayPlans, day)];
   return v ? { planRows: v.planRows || [], levelPlans: v.levelPlans || {} } : { planRows: item.planRows || [], levelPlans: item.levelPlans || {} };
 }
-function hasIntensity(item, intensity) {
-  return intensity === "moderate" || !!item?.intensityPlans?.[intensity];
+function focusForDay(focus, day) {
+  const v = focus?.dayVersions?.[dayKeyFor(focus.dayVersions, day)];
+  return v ? { ...focus, cue: v.cue || "", explanation: v.explanation || "" } : focus;
 }
 
 // A workout's plan as goalies follow it, in the coach's order: each run of exercise rows becomes
@@ -4486,76 +4536,73 @@ function WorkoutLevelPlans({ draft, setDraft, level, setLevel, label = "Workout"
   return <WorkoutPlanEditor key={level + (own ? "-own" : "")} items={items} setItems={setItems} toolbar={toolbar} label={label} hint={hint} />;
 }
 
-// The Workout / Drill Progression editor with Light / Moderate / Hard tabs on top of the level
-// toggle. Moderate is the drill's or workout's standard plan; Light and Hard are optional extra
-// versions, each with its own level adjustments.
-function IntensityPlans({ draft, setDraft, intensity, setIntensity, level, setLevel, label, hint, noun }) {
-  const isModerate = intensity === "moderate";
-  const version = isModerate ? null : draft.intensityPlans?.[intensity];
-  const tabs = (
-    <div className="level-tabs intensity-tabs" role="tablist" aria-label={`${label} intensity`}>
-      {INTENSITIES.map(([key, name]) => (
-        <button key={key} type="button" role="tab" aria-selected={intensity === key} className={"level-tab" + (intensity === key ? " active" : "")} onClick={() => setIntensity(key)}>
-          {name}{key !== "moderate" && draft.intensityPlans?.[key] && <span className="level-tab-dot" title="Set up" />}
+// Day 1 / Day 2 / Day 3 tabs over the level editor of a Workout or Drill Progression. Day 1 is the
+// item's normal plan; Day 2 and Day 3 are optional versions, each with its own level adjustments.
+function BlockDayTabs({ day, setDay, has, label }) {
+  return (
+    <div className="level-tabs day-tabs" role="tablist" aria-label={`${label} day`}>
+      {BLOCK_DAY_NUMBERS.map((d) => (
+        <button key={d} type="button" role="tab" aria-selected={day === d} className={"level-tab" + (day === d ? " active" : "")} onClick={() => setDay(d)}>
+          Day {d}{d > 1 && has(d) && <span className="level-tab-dot" title="Has its own version" />}
         </button>
       ))}
     </div>
   );
-  const create = () => setDraft((d) => ({
-    ...d,
-    intensityPlans: {
-      ...d.intensityPlans,
-      [intensity]: {
-        planRows: (d.planRows || []).map((r) => ({ ...r, id: uid(isPlanNote(r) ? "note" : "row") })),
-        levelPlans: Object.fromEntries(Object.entries(d.levelPlans || {}).map(([lv, list]) => [lv, list.map((r) => ({ ...r, id: uid(isPlanNote(r) ? "note" : "row") }))])),
-      },
-    },
-  }));
+}
+function DayPlans({ draft, setDraft, day, setDay, level, setLevel, label, hint, noun }) {
+  const version = day > 1 ? draft.dayPlans?.[day] : null;
+  const tabs = <BlockDayTabs day={day} setDay={setDay} has={(d) => !!draft.dayPlans?.[d]} label={label} />;
+  const usedDay = (d) => Number(dayKeyFor(draft.dayPlans, d - 1) || 1);
+  const create = () => setDraft((d) => {
+    const src = dayVersion(d, day - 1);
+    const copy = (list) => list.map((r) => ({ ...r, id: uid(isPlanNote(r) ? "note" : "row") }));
+    return { ...d, dayPlans: { ...d.dayPlans, [day]: { planRows: copy(src.planRows), levelPlans: Object.fromEntries(Object.entries(src.levelPlans).map(([lv, list]) => [lv, copy(list)])) } } };
+  });
   const remove = async () => {
-    if (!(await confirmDialog({ title: `Remove the ${INTENSITY_LABEL[intensity]} version?`, message: `Blocks that pick ${INTENSITY_LABEL[intensity]} will use the Moderate version instead.`, confirmLabel: "Remove", danger: true }))) return;
-    setDraft((d) => { const { [intensity]: _, ...rest } = d.intensityPlans || {}; return { ...d, intensityPlans: rest }; });
+    if (!(await confirmDialog({ title: `Remove the Day ${day} version?`, message: `On day ${day} of a block, goalies get the Day ${usedDay(day)} version instead.`, confirmLabel: "Remove", danger: true }))) return;
+    setDraft((d) => { const { [day]: _, ...rest } = d.dayPlans || {}; return { ...d, dayPlans: rest }; });
   };
-  if (!isModerate && !version) {
+  if (day > 1 && !version) {
     return (
       <div className="admin-form-span2 plan-table-editor">
         <span className="media-field-label">{label}</span>
         <div className="plan-level-bar">
           {tabs}
           <div className="plan-level-status">
-            <span><strong>No {INTENSITY_LABEL[intensity]} version yet.</strong> Blocks that pick {INTENSITY_LABEL[intensity]} use the Moderate version.</span>
-            <button type="button" className="btn btn--ghost btn--small" onClick={create}><Plus size={12} /> Create from Moderate</button>
+            <span><strong>Same as Day {usedDay(day)}.</strong> Give day {day} of a block its own version to change sets, reps, rest or structure.</span>
+            <button type="button" className="btn btn--ghost btn--small" onClick={create}><Plus size={12} /> Create Day {day} from Day {usedDay(day)}</button>
           </div>
         </div>
       </div>
     );
   }
-  // Light and Hard are edited through the same level editor, pointed at that version's plan.
-  const vDraft = isModerate ? draft : { ...draft, planRows: version.planRows || [], levelPlans: version.levelPlans || {} };
-  const vSetDraft = isModerate ? setDraft : (fn) => setDraft((d) => {
-    const cur = d.intensityPlans[intensity];
+  // Day 2 and Day 3 are edited through the same level editor, pointed at that day's plan.
+  const vDraft = day === 1 ? draft : { ...draft, planRows: version.planRows || [], levelPlans: version.levelPlans || {} };
+  const vSetDraft = day === 1 ? setDraft : (fn) => setDraft((d) => {
+    const cur = d.dayPlans[day];
     const next = fn({ ...d, planRows: cur.planRows || [], levelPlans: cur.levelPlans || {} });
-    return { ...d, intensityPlans: { ...d.intensityPlans, [intensity]: { planRows: next.planRows, levelPlans: next.levelPlans } } };
+    return { ...d, dayPlans: { ...d.dayPlans, [day]: { planRows: next.planRows, levelPlans: next.levelPlans } } };
   });
   const topBar = (
     <>
       {tabs}
-      {!isModerate && (
+      {day > 1 && (
         <div className="plan-level-status">
-          <span><strong>{INTENSITY_LABEL[intensity]} version.</strong> Used in blocks where you pick {INTENSITY_LABEL[intensity]}.</span>
-          <button type="button" className="btn btn--ghost btn--small" onClick={remove}><Trash2 size={12} /> Remove version</button>
+          <span><strong>Day {day} version.</strong> Goalies get it on day {day} of a block.</span>
+          <button type="button" className="btn btn--ghost btn--small" onClick={remove}><Trash2 size={12} /> Remove Day {day}</button>
         </div>
       )}
     </>
   );
-  return <WorkoutLevelPlans key={intensity} draft={vDraft} setDraft={vSetDraft} level={level} setLevel={setLevel} label={label} hint={hint} noun={noun} topBar={topBar} />;
+  return <WorkoutLevelPlans key={day} draft={vDraft} setDraft={vSetDraft} level={level} setLevel={setLevel} label={label} hint={hint} noun={noun} topBar={topBar} />;
 }
-function normalizeIntensityPlans(plans) {
-  return Object.fromEntries(Object.entries(plans || {}).filter(([k]) => k === "light" || k === "hard").map(([k, v]) => [k, {
+function normalizeDayPlans(plans) {
+  return Object.fromEntries(Object.entries(plans || {}).filter(([k]) => k === "2" || k === "3").map(([k, v]) => [k, {
     planRows: normalizePlanItems(v.planRows),
     levelPlans: Object.fromEntries(Object.entries(v.levelPlans || {}).map(([lv, list]) => [lv, normalizePlanItems(list)])),
   }]));
 }
-function cleanIntensityPlans(plans) {
+function cleanDayPlans(plans) {
   return Object.fromEntries(Object.entries(plans || {}).map(([k, v]) => [k, {
     planRows: cleanPlanItems(v.planRows),
     levelPlans: Object.fromEntries(Object.entries(v.levelPlans || {}).map(([lv, list]) => [lv, cleanPlanItems(list)])),
@@ -4564,7 +4611,7 @@ function cleanIntensityPlans(plans) {
 
 function AdminOffIce({ content, updateContent }) {
   const [planLevel, setPlanLevel] = useState("Youth");
-  const [planIntensity, setPlanIntensity] = useState("moderate");
+  const [planDay, setPlanDay] = useState(1);
   const [editingId, setEditingId] = useState(null);
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState(BLANK_OFFICE);
@@ -4592,7 +4639,7 @@ function AdminOffIce({ content, updateContent }) {
     })),
     planRows: normalizePlanItems(o.planRows),
     levelPlans: Object.fromEntries(Object.entries(o.levelPlans || {}).map(([lv, list]) => [lv, normalizePlanItems(list)])),
-    intensityPlans: normalizeIntensityPlans(o.intensityPlans),
+    dayPlans: normalizeDayPlans(o.dayPlans),
   });
   const startEdit = (o) => { setEditingId(o.id); setDraft(toDraft(o)); setCreating(false); media.clearError(); };
   const startCreate = () => { setCreating(true); setEditingId(null); setDraft(BLANK_OFFICE); media.clearError(); };
@@ -4605,7 +4652,7 @@ function AdminOffIce({ content, updateContent }) {
       .map((ex) => ({ ...ex, name: ex.name.trim() || "Untitled exercise" })),
     planRows: cleanPlanItems(d.planRows),
     levelPlans: Object.fromEntries(Object.entries(d.levelPlans || {}).map(([lv, list]) => [lv, cleanPlanItems(list)])),
-    intensityPlans: cleanIntensityPlans(d.intensityPlans),
+    dayPlans: cleanDayPlans(d.dayPlans),
     imageAssetId: d.imageAssetId || null, imageUrl: d.imageUrl || "", videoAssetId: d.videoAssetId || null, videoUrl: d.videoUrl || "",
   });
 
@@ -4646,7 +4693,7 @@ function AdminOffIce({ content, updateContent }) {
 
   const previewDraft = () => {
     if (!draft.title.trim()) return;
-    setPreviewOffice(planForLevel({ ...buildOffice(draft), id: editingId || "preview" }, planLevel, planIntensity));
+    setPreviewOffice(planForLevel({ ...buildOffice(draft), id: editingId || "preview" }, planLevel, planDay));
   };
 
   return (
@@ -4670,7 +4717,7 @@ function AdminOffIce({ content, updateContent }) {
 
             <ExerciseEditor exercises={draft.exercises} setDraft={setDraft} exMedia={exMedia} />
 
-            <IntensityPlans draft={draft} setDraft={setDraft} intensity={planIntensity} setIntensity={setPlanIntensity} level={planLevel} setLevel={setPlanLevel} label="Workout" noun="workout" />
+            <DayPlans draft={draft} setDraft={setDraft} day={planDay} setDay={setPlanDay} level={planLevel} setLevel={setPlanLevel} label="Workout" noun="workout" />
 
             <span className="admin-form-span2 media-section-label">Workout cover photo/video</span>
             <MediaFields draft={draft} media={media} />
@@ -4716,7 +4763,7 @@ function AdminOffIce({ content, updateContent }) {
                     <td>{o.duration}</td><td>{o.exercises.length}</td>
                     <td><button className={"status-pill" + (o.published ? " status-pill--live" : "")} onClick={() => togglePublish(o.id)}>{o.published ? <Eye size={12} /> : <EyeOff size={12} />} {o.published ? "Published" : "Draft"}</button></td>
                     <td className="admin-row-actions">
-                      <button className="icon-btn" onClick={() => setPreviewOffice(planForLevel(o, planLevel, planIntensity))} aria-label="Preview"><Play size={14} /></button>
+                      <button className="icon-btn" onClick={() => setPreviewOffice(planForLevel(o, planLevel, planDay))} aria-label="Preview"><Play size={14} /></button>
                       <button className="icon-btn" onClick={() => startEdit(o)} aria-label="Edit"><Pencil size={14} /></button>
                       <button className="icon-btn" onClick={() => duplicate(o)} aria-label="Duplicate"><Copy size={14} /></button>
                       <button className="icon-btn" onClick={() => remove(o.id)} aria-label="Delete"><Trash2 size={14} /></button>
@@ -4730,7 +4777,7 @@ function AdminOffIce({ content, updateContent }) {
       )}
 
       {previewOffice && (
-        <PreviewModal label={`Preview — how ${planLevel} goalies will see this workout (${INTENSITY_LABEL[planIntensity]})`} onClose={() => setPreviewOffice(null)}>
+        <PreviewModal label={`Preview — how ${planLevel} goalies will see this workout on day ${planDay}`} onClose={() => setPreviewOffice(null)}>
           <OffIceDetailPage office={previewOffice} branding={content.branding} onBack={() => setPreviewOffice(null)} complete={false} onComplete={() => {}} />
         </PreviewModal>
       )}
@@ -4743,14 +4790,14 @@ function AdminOffIce({ content, updateContent }) {
    ============================================================================ */
 
 // Under the Off-Ice picker of a training block: which version of the workout this level's goalies get.
-function planLevelNote(item, level, noun, intensity) {
+function planLevelNote(item, level, noun) {
   if (!item) return null;
-  const { levelPlans } = intensityVersion(item, intensity);
+  const { levelPlans } = dayVersion(item, 1);
   if (!Object.keys(levelPlans).length) return null;
   return levelPlans[level] ? `${level} goalies get the ${level} version of this ${noun}.` : `${level} goalies get the shared version of this ${noun}.`;
 }
 
-function AssignmentPicker({ label, icon: Icon, items, categories, value, onChange, categoryFilter, onCategoryFilterChange, note, intensity, onIntensityChange }) {
+function AssignmentPicker({ label, icon: Icon, items, categories, value, onChange, categoryFilter, onCategoryFilterChange, note }) {
   // Drafts can be assigned so blocks can be built before content is published; they are labelled,
   // and goalies only see an item once it is published.
   const filtered = items.filter((it) => it.id === value || !categoryFilter || it.category === categoryFilter);
@@ -4770,19 +4817,6 @@ function AssignmentPicker({ label, icon: Icon, items, categories, value, onChang
         {filtered.map((it) => <option key={it.id} value={it.id}>{it.title}{!it.published ? " (Draft — hidden from goalies until published)" : ""}</option>)}
       </select>
       {filtered.length === 0 && <p className="planner-empty-hint">Nothing in this category yet.</p>}
-      {onIntensityChange && value && (() => {
-        // Only the coach sees this: which version of the drill / workout the block uses.
-        const item = items.find((it) => it.id === value);
-        const current = intensity || "moderate";
-        return (
-          <label className="planner-intensity">
-            <span>Intensity</span>
-            <select value={current} onChange={(e) => onIntensityChange(e.target.value)}>
-              {INTENSITIES.map(([key, name]) => <option key={key} value={key}>{name}{hasIntensity(item, key) ? "" : " (not set up — uses Moderate)"}</option>)}
-            </select>
-          </label>
-        );
-      })()}
       {note && <p className="planner-level-note"><Check size={12} /> {note}</p>}
     </div>
   );
@@ -4810,6 +4844,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
   const [drafts, setDrafts] = useState({});
   const [editingId, setEditingId] = useState(null);
   const [previewIndex, setPreviewIndex] = useState(null);
+  const [previewDay, setPreviewDay] = useState(1);
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState(null);
   const [saveError, setSaveError] = useState(null);
@@ -4845,7 +4880,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
     const ids = Object.fromEntries(LEVELS.map((lv) => [lv, crypto.randomUUID()]));
     updateContent((c) => ({
       ...c,
-      trainingDays: Object.fromEntries(LEVELS.map((lv) => [lv, [...(c.trainingDays[lv] || []), { id: ids[lv], drillId: "", focusId: "", workoutId: "", drillIntensity: "moderate", workoutIntensity: "moderate", title: "", subtitle: "", createdAt: now }]])),
+      trainingDays: Object.fromEntries(LEVELS.map((lv) => [lv, [...(c.trainingDays[lv] || []), { id: ids[lv], drillId: "", focusId: "", workoutId: "", title: "", subtitle: "", createdAt: now }]])),
     }));
     setEditingId(ids[level]);
     setQuery("");
@@ -4923,6 +4958,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
         <p>Moving, copying or deleting a block does the same in all three levels, so each block number always lines up.</p>
         <p>Each ideal week has 2 blocks of 3 days. With nothing marked for that week, block 1 runs Monday–Wednesday, block 2 Thursday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day within that week, Sunday opens up as a training day and the blocks shift along the days they have left: a game day Wednesday and a rest day Saturday means block 1 runs Monday, Tuesday and Thursday, and block 2 Friday and Sunday. If there are two game days in a row followed by a rest day (for example game days Friday and Saturday and a rest day Sunday), block 1 runs Monday–Wednesday and block 2 is Thursday alone.</p>
         <p>A new goalie starts at Block 1 the first day they open the app. If a goalie is away when the next block should start, their list pauses until they're back, so they don't miss any blocks.</p>
+        <p>The days of a block don't have to be identical: in a drill, practice focus or off-ice workout, the Day 1, Day 2 and Day 3 tabs let you change the progression, cue and execution or workout for each day of the block. A day without its own version shows the day before it. Preview a block to see each day.</p>
         <p>A block needs a drill, a practice focus and an off-ice workout, all published. Until then it's a draft: goalies skip it and get the next complete block.</p>
         <p>When a goalie has had every block of their level, they start again from Block 1 so they always have training. As soon as you add new blocks, they go on to those next.</p>
       </div>
@@ -5006,8 +5042,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
             <AssignmentPicker
               label="Drill of the block" icon={GoalieMask} items={content.drills} categories={categoriesOfType(content, "drill")}
               value={day.drillId} onChange={(v) => setDraft(saved.id, { drillId: v })} categoryFilter={drillCat} onCategoryFilterChange={setDrillCat}
-              intensity={day.drillIntensity} onIntensityChange={(v) => setDraft(saved.id, { drillIntensity: v })}
-              note={planLevelNote(content.drills.find((x) => x.id === day.drillId), level, "drill", day.drillIntensity)}
+              note={planLevelNote(content.drills.find((x) => x.id === day.drillId), level, "drill")}
             />
             <AssignmentPicker
               label="Practice focus" icon={HockeyNet} items={content.focusPoints} categories={categoriesOfType(content, "focus")}
@@ -5016,8 +5051,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
             <AssignmentPicker
               label="Off-Ice" icon={CircleDot} items={content.offIceWorkouts} categories={categoriesOfType(content, "office")}
               value={day.workoutId} onChange={(v) => setDraft(saved.id, { workoutId: v })} categoryFilter={officeCat} onCategoryFilterChange={setOfficeCat}
-              intensity={day.workoutIntensity} onIntensityChange={(v) => setDraft(saved.id, { workoutIntensity: v })}
-              note={planLevelNote(content.offIceWorkouts.find((x) => x.id === day.workoutId), level, "workout", day.workoutIntensity)}
+              note={planLevelNote(content.offIceWorkouts.find((x) => x.id === day.workoutId), level, "workout")}
             />
           </div>
 
@@ -5037,18 +5071,19 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
       {saveError && <div className="email-status email-status--error"><AlertTriangle size={14} /> {saveError}</div>}
       {previewIndex !== null && list[previewIndex] && (() => {
         const d = { ...list[previewIndex], ...drafts[list[previewIndex].id] };
-        const drill = planForLevel(content.drills.find((x) => x.id === d.drillId), level, d.drillIntensity);
-        const focus = content.focusPoints.find((x) => x.id === d.focusId);
-        const office = planForLevel(content.offIceWorkouts.find((x) => x.id === d.workoutId), level, d.workoutIntensity);
+        const drill = planForLevel(content.drills.find((x) => x.id === d.drillId), level, previewDay);
+        const focus = focusForDay(content.focusPoints.find((x) => x.id === d.focusId), previewDay);
+        const office = planForLevel(content.offIceWorkouts.find((x) => x.id === d.workoutId), level, previewDay);
         const noop = () => {};
         return (
-          <PreviewModal label={`Preview — Block ${previewIndex + 1} (${level})`} onClose={() => setPreviewIndex(null)}>
+          <PreviewModal label={`Preview — Block ${previewIndex + 1} (${level}), day ${previewDay}`} onClose={() => { setPreviewIndex(null); setPreviewDay(1); }}>
             <div className="page detail">
+              <BlockDayTabs day={previewDay} setDay={setPreviewDay} has={() => false} label="Preview" />
               <h1 className="detail-title">{d.title || `Block ${previewIndex + 1}`}</h1>
               {d.subtitle && <p className="hero-sub">{d.subtitle}</p>}
               {!drill && !focus && !office && <p className="planner-empty-hint">Nothing is assigned to this block yet.</p>}
               {drill && <DrillDetailPage drill={drill} branding={content.branding} onBack={noop} complete={false} onComplete={noop} />}
-              {focus && <FocusDetailPage focus={focus} branding={content.branding} drills={content.drills} level={level} blockDrill={{ id: d.drillId, intensity: d.drillIntensity }} onBack={noop} complete={false} onComplete={noop} />}
+              {focus && <FocusDetailPage focus={focus} branding={content.branding} drills={content.drills} level={level} day={previewDay} onBack={noop} complete={false} onComplete={noop} />}
               {office && <OffIceDetailPage office={office} branding={content.branding} onBack={noop} complete={false} onComplete={noop} />}
             </div>
           </PreviewModal>
@@ -5625,10 +5660,10 @@ function backupReadableHtml(backup) {
     })())).join("");
   const plans = (item, heading) => {
     const parts = [];
-    for (const [key, name] of INTENSITIES) {
-      if (!hasIntensity(item, key)) continue;
-      const v = intensityVersion(item, key);
-      const title = `${heading}${item.intensityPlans && Object.keys(item.intensityPlans).length ? ` — ${name}` : ""}`;
+    for (const day of BLOCK_DAY_NUMBERS) {
+      if (day > 1 && !item.dayPlans?.[day]) continue;
+      const v = dayVersion(item, day);
+      const title = `${heading}${item.dayPlans && Object.keys(item.dayPlans).length ? ` — Day ${day}` : ""}`;
       if (v.planRows.length) parts.push(`<h4>${title}${Object.keys(v.levelPlans).length ? " — shared" : ""}</h4>${planTable(v.planRows)}`);
       for (const lv of EXPERIENCE_LEVELS) if (v.levelPlans[lv]) parts.push(`<h4>${title} — ${lv} version</h4>${planTable(v.levelPlans[lv])}`);
     }
@@ -5644,14 +5679,14 @@ function backupReadableHtml(backup) {
     ${meta(d.sets && `Sets: ${d.sets}`, d.reps && `Reps: ${d.reps}`)}${plans(d, "Drill Progression")}
     ${list("Coaching points", d.coachingPoints)}${list("Common mistakes", (d.mistakes || []).map((m) => m.correction ? `${m.mistake} → ${m.correction}` : m.mistake))}</section>`).join("");
   const focuses = c.focusPoints.map((f) => `<section><h3>${esc(f.title)}${draft(f)}</h3>${meta(f.category)}${img(f.imageUrl, f.title)}${video(f.videoUrl)}
-    ${f.cue ? `<h4>Today's cue</h4><p>${esc(f.cue)}</p>` : ""}${richTextToPlain(f.explanation) ? `<h4>Execution</h4>${rich(f.explanation)}` : ""}
+    ${BLOCK_DAY_NUMBERS.filter((day) => day === 1 || f.dayVersions?.[day]).map((day) => { const v = focusForDay(f, day); const tag = f.dayVersions && Object.keys(f.dayVersions).length ? ` — Day ${day}` : ""; return `${v.cue ? `<h4>Today's cue${tag}</h4><p>${esc(v.cue)}</p>` : ""}${richTextToPlain(v.explanation) ? `<h4>Execution${tag}</h4>${rich(v.explanation)}` : ""}`; }).join("")}
     ${(f.blocks || []).map((b) => (b.type === "image" ? img(b.imageUrl) : b.type === "video" ? video(b.videoUrl) : b.type === "drill" ? `<p><strong>Drill:</strong> ${name(c.drills, b.drillId)}</p>` : `${b.heading ? `<h4>${esc(b.heading)}</h4>` : ""}${rich(b.body)}`)).join("")}</section>`).join("");
   const workouts = c.offIceWorkouts.map((o) => `<section><h3>${esc(o.title)}${draft(o)}</h3>${meta(o.category, o.duration, o.equipment)}
     ${img(o.imageUrl, o.title)}${o.description ? `<p>${esc(o.description)}</p>` : ""}${video(o.videoUrl)}
     ${richTextToPlain(o.objective) ? `<h4>Objective</h4>${rich(o.objective)}` : ""}
     ${(o.exercises || []).length ? `<h4>Exercises</h4>${o.exercises.map((ex) => `<div class="exercise"><strong>${esc(ex.name)}</strong>${meta(ex.sets, ex.rest)}${rich(ex.instructions)}${img(ex.imageUrl, ex.name)}${video(ex.videoUrl)}</div>`).join("")}` : ""}
     ${plans(o, "Workout")}</section>`).join("");
-  const blocks = EXPERIENCE_LEVELS.map((lv) => `<h3>${lv}</h3>${(c.trainingDays?.[lv] || []).length ? `<table><tr><th>Block</th><th>Title</th><th>Drill</th><th>Practice focus</th><th>Off-ice</th></tr>${c.trainingDays[lv].map((b, i) => `<tr><td>${i + 1}${blockIsReady(c, b) ? "" : " (draft)"}</td><td>${esc(b.title || "")}</td><td>${name(c.drills, b.drillId)}${b.drillId ? ` (${INTENSITY_LABEL[b.drillIntensity || "moderate"]})` : ""}</td><td>${name(c.focusPoints, b.focusId)}</td><td>${name(c.offIceWorkouts, b.workoutId)}${b.workoutId ? ` (${INTENSITY_LABEL[b.workoutIntensity || "moderate"]})` : ""}</td></tr>`).join("")}</table>` : "<p>No blocks.</p>"}`).join("");
+  const blocks = EXPERIENCE_LEVELS.map((lv) => `<h3>${lv}</h3>${(c.trainingDays?.[lv] || []).length ? `<table><tr><th>Block</th><th>Title</th><th>Drill</th><th>Practice focus</th><th>Off-ice</th></tr>${c.trainingDays[lv].map((b, i) => `<tr><td>${i + 1}${blockIsReady(c, b) ? "" : " (draft)"}</td><td>${esc(b.title || "")}</td><td>${name(c.drills, b.drillId)}</td><td>${name(c.focusPoints, b.focusId)}</td><td>${name(c.offIceWorkouts, b.workoutId)}</td></tr>`).join("")}</table>` : "<p>No blocks.</p>"}`).join("");
 
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>10DTendy content — ${esc(backup.exportedAt.slice(0, 10))}</title>
@@ -6473,9 +6508,9 @@ function PrintHeading({ children }) { return <h3 className="print-section-headin
 // focus and off-ice workout, with a "Done" box to tick on paper.
 function PrintSheet({ content, date, assignment }) {
   const printDate = date || TODAY_DATE;
-  const drill = assignment && planForLevel(content.drills.find((d) => d.id === assignment.drillId && d.published), assignment.level, assignment.drillIntensity);
-  const focus = assignment && content.focusPoints.find((f) => f.id === assignment.focusId && f.published);
-  const office = assignment && planForLevel(content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published), assignment.level, assignment.workoutIntensity);
+  const drill = assignment && planForLevel(content.drills.find((d) => d.id === assignment.drillId && d.published), assignment.level, assignment.dayInBlock);
+  const focus = assignment && focusForDay(content.focusPoints.find((f) => f.id === assignment.focusId && f.published), assignment.dayInBlock);
+  const office = assignment && planForLevel(content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published), assignment.level, assignment.dayInBlock);
   const drillImg = drill ? brandImage(drill.imageUrl, content.branding?.drill, DRILL_IMG) : null;
   const focusImg = focus ? brandImage(focus.imageUrl, content.branding?.focus, FOCUS_IMG) : null;
   const officeImg = office ? brandImage(office.imageUrl, content.branding?.office, OFFICE_IMG) : null;
@@ -7108,9 +7143,9 @@ function AppInner() {
   }
   const experience = isCoach ? previewLevel : (EXPERIENCE_LEVELS.includes(user.experience) ? user.experience : "Junior");
   const assignment = trainingDayForDate(content, user, dateKey(viewDate), experience);
-  const drill = assignment && planForLevel(content.drills.find((d) => d.id === assignment.drillId && d.published), experience, assignment.drillIntensity);
-  const focus = assignment && content.focusPoints.find((f) => f.id === assignment.focusId && f.published);
-  const office = assignment && planForLevel(content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published), experience, assignment.workoutIntensity);
+  const drill = assignment && planForLevel(content.drills.find((d) => d.id === assignment.drillId && d.published), experience, assignment.dayInBlock);
+  const focus = assignment && focusForDay(content.focusPoints.find((f) => f.id === assignment.focusId && f.published), assignment.dayInBlock);
+  const office = assignment && planForLevel(content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published), experience, assignment.dayInBlock);
   const dayType = resolveDayType(user, dateKey(viewDate));
   const reminders = getReminders(user);
 
@@ -7174,7 +7209,7 @@ function AppInner() {
                 />
               );
               if (view === "drill") return drill ? <DrillDetailPage drill={drill} branding={content.branding} onBack={() => goTo("today")} complete={progress.drill} onComplete={() => toggleComplete("drill")} /> : todayPage;
-              if (view === "focus") return focus ? <FocusDetailPage focus={focus} branding={content.branding} drills={content.drills} level={experience} blockDrill={assignment && { id: assignment.drillId, intensity: assignment.drillIntensity }} onBack={() => goTo("today")} complete={progress.focus} onComplete={() => toggleComplete("focus")} /> : todayPage;
+              if (view === "focus") return focus ? <FocusDetailPage focus={focus} branding={content.branding} drills={content.drills} level={experience} day={assignment?.dayInBlock} onBack={() => goTo("today")} complete={progress.focus} onComplete={() => toggleComplete("focus")} /> : todayPage;
               if (view === "office") return office ? <OffIceDetailPage office={office} branding={content.branding} onBack={() => goTo("today")} complete={progress.office} onComplete={() => toggleComplete("office")} /> : todayPage;
               if (view === "progress") return <ProgressPage user={user} />;
               if (view === "profile") return <ProfilePage user={user} onLogout={onLogout} onChangePassword={changePassword} onUpdateProfile={updateProfile} onDeleteAccount={deleteMyAccount} />;
@@ -7829,8 +7864,7 @@ button:focus {
 .planner-header h3 { margin: 0; }
 .planner-hint { font-size: 12px; color: var(--text-faint); margin: 0 0 18px; }
 .plan-level-bar { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 14px; }
-.planner-intensity { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 13px; color: var(--text-dim); }
-.planner-intensity select { flex: 1; min-width: 0; }
+.focus-day-fields .admin-form-grid { margin-top: 4px; }
 .plan-level-bar .level-tabs { align-self: flex-start; }
 .plan-level-status { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); font-size: 13px; color: var(--text-dim); }
 .plan-level-status strong { color: var(--text); font-weight: 600; }
