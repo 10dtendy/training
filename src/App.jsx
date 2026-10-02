@@ -178,7 +178,7 @@ function trainingDayForDate(content, user, dateKeyStr, level) {
   const current = walkTrainingBlocks(user, dateKeyStr, list)?.current;
   if (!current) return null;
   const entry = list[current.index];
-  return entry ? { ...entry, level, index: current.index, block: current.block, dayInBlock: current.dayInBlock, blockDays: current.blockDays } : null;
+  return entry ? { ...entry, level, index: current.index, block: current.block, dayInBlock: current.dayInBlock, blockDays: current.blockDays, blockDates: current.dates } : null;
 }
 
 // Walks a goalie's weeks from their first day up to dateKeyStr (the rules above) through the
@@ -223,7 +223,7 @@ function walkTrainingBlocks(user, dateKeyStr, list) {
       const key = dateKey(day);
       if (key > dateKeyStr) break;
       if (!isTrainingDay(day, sundayOk)) continue;
-      if (daysLeft > 0) { daysLeft--; current = { ...current, dayInBlock: current.dayInBlock + 1 }; }
+      if (daysLeft > 0) { daysLeft--; current = { ...current, dayInBlock: current.dayInBlock + 1, dates: [...current.dates, key] }; }
       else if (isAway(key)) { current = null; }
       else {
         const available = availableOn(key);
@@ -231,7 +231,7 @@ function walkTrainingBlocks(user, dateKeyStr, list) {
         if (reached < available) { index = reached++; repeatPos = 0; repeating = false; }
         else if (available > 0) { index = repeatPos % available; repeatPos++; repeating = true; }
         if (index === null) current = null;
-        else { daysLeft = BLOCK_DAYS - 1; blockNo++; current = { index, block: blockNo, dayInBlock: 1 }; }
+        else { daysLeft = BLOCK_DAYS - 1; blockNo++; current = { index, block: blockNo, dayInBlock: 1, dates: [key] }; }
       }
       if (key !== dateKeyStr || !current) continue;
       // How many days this block gets: the days so far plus the training days left this week, up to BLOCK_DAYS.
@@ -4056,13 +4056,13 @@ function FocusDayFields({ draft, setDraft, day, setDay }) {
         {tabs}
         {day > 1 && !version && (
           <div className="plan-level-status">
-            <span><strong>Same as Day {usedDay}.</strong> Give day {day} of a block its own cue and execution.</span>
+            <span><strong>Same as Day {usedDay}.</strong> Give Day {day} its own cue and execution.</span>
             <button type="button" className="btn btn--ghost btn--small" onClick={create}><Plus size={12} /> Create Day {day} from Day {usedDay}</button>
           </div>
         )}
         {version && (
           <div className="plan-level-status">
-            <span><strong>Day {day} version.</strong> Goalies get it on day {day} of a block.</span>
+            <span><strong>Day {day} version.</strong> Goalies get it once they've completed Day {day - 1} in a block.</span>
             <button type="button" className="btn btn--ghost btn--small" onClick={remove}><Trash2 size={12} /> Remove Day {day}</button>
           </div>
         )}
@@ -4255,6 +4255,15 @@ function planForLevel(item, level, day) {
 // on drills and workouts, dayVersions on focuses). A day without its own version uses the day
 // before it, so a block never shows nothing.
 const BLOCK_DAY_NUMBERS = [1, 2, 3];
+// Each part of a block moves on to its next day's version only once the goalie has completed it:
+// the version is 1 + the number of earlier days of this block on which that part was ticked off
+// (so if day 1's drill isn't ticked, day 2 shows the Day 1 drill again).
+function withItemDays(assignment, dayProgress) {
+  if (!assignment) return assignment;
+  const earlier = (assignment.blockDates || []).slice(0, assignment.dayInBlock - 1);
+  const versionOf = (part) => Math.min(3, 1 + earlier.filter((key) => dayProgress?.[key]?.[part]).length);
+  return { ...assignment, itemDays: { drill: versionOf("drill"), focus: versionOf("focus"), office: versionOf("office") } };
+}
 function dayKeyFor(versions, day) {
   for (let d = Math.min(day || 1, 3); d >= 2; d--) if (versions?.[d]) return String(d);
   return null;
@@ -4569,7 +4578,7 @@ function DayPlans({ draft, setDraft, day, setDay, level, setLevel, label, hint, 
         <div className="plan-level-bar">
           {tabs}
           <div className="plan-level-status">
-            <span><strong>Same as Day {usedDay(day)}.</strong> Give day {day} of a block its own version to change sets, reps, rest or structure.</span>
+            <span><strong>Same as Day {usedDay(day)}.</strong> Give Day {day} its own version to change sets, reps, rest or structure.</span>
             <button type="button" className="btn btn--ghost btn--small" onClick={create}><Plus size={12} /> Create Day {day} from Day {usedDay(day)}</button>
           </div>
         </div>
@@ -4588,7 +4597,7 @@ function DayPlans({ draft, setDraft, day, setDay, level, setLevel, label, hint, 
       {tabs}
       {day > 1 && (
         <div className="plan-level-status">
-          <span><strong>Day {day} version.</strong> Goalies get it on day {day} of a block.</span>
+          <span><strong>Day {day} version.</strong> Goalies get it once they've completed Day {day - 1} in a block.</span>
           <button type="button" className="btn btn--ghost btn--small" onClick={remove}><Trash2 size={12} /> Remove Day {day}</button>
         </div>
       )}
@@ -4958,7 +4967,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
         <p>Moving, copying or deleting a block does the same in all three levels, so each block number always lines up.</p>
         <p>Each ideal week has 2 blocks of 3 days. With nothing marked for that week, block 1 runs Monday–Wednesday, block 2 Thursday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day within that week, Sunday opens up as a training day and the blocks shift along the days they have left: a game day Wednesday and a rest day Saturday means block 1 runs Monday, Tuesday and Thursday, and block 2 Friday and Sunday. If there are two game days in a row followed by a rest day (for example game days Friday and Saturday and a rest day Sunday), block 1 runs Monday–Wednesday and block 2 is Thursday alone.</p>
         <p>A new goalie starts at Block 1 the first day they open the app. If a goalie is away when the next block should start, their list pauses until they're back, so they don't miss any blocks.</p>
-        <p>The days of a block don't have to be identical: in a drill, practice focus or off-ice workout, the Day 1, Day 2 and Day 3 tabs let you change the progression, cue and execution or workout for each day of the block. A day without its own version shows the day before it. Preview a block to see each day.</p>
+        <p>The days of a block don't have to be identical: in a drill, practice focus or off-ice workout, the Day 1, Day 2 and Day 3 tabs let you set up a next step for the progression, the cue and execution, or the workout. A goalie moves on to Day 2 of a part only after completing it on an earlier day of the block, and to Day 3 after completing it twice; until then they get the same day again. A day without its own version shows the day before it. Preview a block to see each day.</p>
         <p>A block needs a drill, a practice focus and an off-ice workout, all published. Until then it's a draft: goalies skip it and get the next complete block.</p>
         <p>When a goalie has had every block of their level, they start again from Block 1 so they always have training. As soon as you add new blocks, they go on to those next.</p>
       </div>
@@ -6508,9 +6517,9 @@ function PrintHeading({ children }) { return <h3 className="print-section-headin
 // focus and off-ice workout, with a "Done" box to tick on paper.
 function PrintSheet({ content, date, assignment }) {
   const printDate = date || TODAY_DATE;
-  const drill = assignment && planForLevel(content.drills.find((d) => d.id === assignment.drillId && d.published), assignment.level, assignment.dayInBlock);
-  const focus = assignment && focusForDay(content.focusPoints.find((f) => f.id === assignment.focusId && f.published), assignment.dayInBlock);
-  const office = assignment && planForLevel(content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published), assignment.level, assignment.dayInBlock);
+  const drill = assignment && planForLevel(content.drills.find((d) => d.id === assignment.drillId && d.published), assignment.level, assignment.itemDays?.drill);
+  const focus = assignment && focusForDay(content.focusPoints.find((f) => f.id === assignment.focusId && f.published), assignment.itemDays?.focus);
+  const office = assignment && planForLevel(content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published), assignment.level, assignment.itemDays?.office);
   const drillImg = drill ? brandImage(drill.imageUrl, content.branding?.drill, DRILL_IMG) : null;
   const focusImg = focus ? brandImage(focus.imageUrl, content.branding?.focus, FOCUS_IMG) : null;
   const officeImg = office ? brandImage(office.imageUrl, content.branding?.office, OFFICE_IMG) : null;
@@ -7142,10 +7151,10 @@ function AppInner() {
     );
   }
   const experience = isCoach ? previewLevel : (EXPERIENCE_LEVELS.includes(user.experience) ? user.experience : "Junior");
-  const assignment = trainingDayForDate(content, user, dateKey(viewDate), experience);
-  const drill = assignment && planForLevel(content.drills.find((d) => d.id === assignment.drillId && d.published), experience, assignment.dayInBlock);
-  const focus = assignment && focusForDay(content.focusPoints.find((f) => f.id === assignment.focusId && f.published), assignment.dayInBlock);
-  const office = assignment && planForLevel(content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published), experience, assignment.dayInBlock);
+  const assignment = withItemDays(trainingDayForDate(content, user, dateKey(viewDate), experience), user.dayProgress);
+  const drill = assignment && planForLevel(content.drills.find((d) => d.id === assignment.drillId && d.published), experience, assignment.itemDays.drill);
+  const focus = assignment && focusForDay(content.focusPoints.find((f) => f.id === assignment.focusId && f.published), assignment.itemDays.focus);
+  const office = assignment && planForLevel(content.offIceWorkouts.find((o) => o.id === assignment.workoutId && o.published), experience, assignment.itemDays.office);
   const dayType = resolveDayType(user, dateKey(viewDate));
   const reminders = getReminders(user);
 
@@ -7209,7 +7218,7 @@ function AppInner() {
                 />
               );
               if (view === "drill") return drill ? <DrillDetailPage drill={drill} branding={content.branding} onBack={() => goTo("today")} complete={progress.drill} onComplete={() => toggleComplete("drill")} /> : todayPage;
-              if (view === "focus") return focus ? <FocusDetailPage focus={focus} branding={content.branding} drills={content.drills} level={experience} day={assignment?.dayInBlock} onBack={() => goTo("today")} complete={progress.focus} onComplete={() => toggleComplete("focus")} /> : todayPage;
+              if (view === "focus") return focus ? <FocusDetailPage focus={focus} branding={content.branding} drills={content.drills} level={experience} day={assignment?.itemDays.focus} onBack={() => goTo("today")} complete={progress.focus} onComplete={() => toggleComplete("focus")} /> : todayPage;
               if (view === "office") return office ? <OffIceDetailPage office={office} branding={content.branding} onBack={() => goTo("today")} complete={progress.office} onComplete={() => toggleComplete("office")} /> : todayPage;
               if (view === "progress") return <ProgressPage user={user} />;
               if (view === "profile") return <ProfilePage user={user} onLogout={onLogout} onChangePassword={changePassword} onUpdateProfile={updateProfile} onDeleteAccount={deleteMyAccount} />;
