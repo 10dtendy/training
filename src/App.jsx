@@ -152,15 +152,16 @@ function resolveDayType(u, dateKeyStr) {
 
 // Each goalie walks their level's ordered list of training blocks, one week at a time. A week's
 // training days are the days not marked game/rest, plus Sunday only when it's a training Sunday
-// (see sundayIsTraining). They're taken in order and paired up, each pair one block: with nothing
-// marked that's Mon-Tue, Wed-Thu, Fri-Sat with Sunday off; a game Wednesday + rest Saturday gives
-// Mon-Tue, Thu-Fri and Sunday alone; games Friday + Saturday and rest Sunday gives Mon-Tue, Wed-Thu.
-// Pairing starts over each Monday. A block only starts on a day the goalie opens the app: if
+// (see sundayIsTraining). They're taken in order in groups of BLOCK_DAYS, each group one block:
+// with nothing marked that's Mon-Wed and Thu-Sat with Sunday off; a game Wednesday + rest Saturday
+// gives Mon-Tue-Thu and Fri-Sun; games Friday + Saturday and rest Sunday gives Mon-Wed and Thu
+// alone. Grouping starts over each Monday. A block only starts on a day the goalie opens the app: if
 // they're away the day a block should start, their list waits (nothing is skipped) and that
 // block starts on the next training day they're back. The first block is shown the first day
 // they open the app. Returns { ...trainingBlock, level, index, block, dayInBlock, blockDays } for
 // dateKeyStr, or null if that date is a game/rest day, a day their list was waiting, or the coach
 // hasn't created any blocks yet.
+const BLOCK_DAYS = 3; // training days per block: 2 blocks in an ideal week
 // A block goalies get: it has a drill, a practice focus and an off-ice workout, all published.
 // Anything less is a draft that goalies skip until it's complete.
 function blockIsReady(content, block) {
@@ -216,13 +217,13 @@ function walkTrainingBlocks(user, dateKeyStr, list) {
   const targetMonday = dateKey(mondayOf(dateFromKey(dateKeyStr)));
   for (let monday = mondayOf(dateFromKey(startKey)); dateKey(monday) <= targetMonday; monday = addDays(monday, 7)) {
     const sundayOk = user.role !== "coach" && sundayIsTraining(user, monday);
-    let blockNo = 0, current = null, open = false;
+    let blockNo = 0, current = null, daysLeft = 0; // daysLeft: days the current block still has to run
     for (let i = 0; i < 7; i++) {
       const day = addDays(monday, i);
       const key = dateKey(day);
       if (key > dateKeyStr) break;
       if (!isTrainingDay(day, sundayOk)) continue;
-      if (open) { open = false; current = { ...current, dayInBlock: 2 }; }
+      if (daysLeft > 0) { daysLeft--; current = { ...current, dayInBlock: current.dayInBlock + 1 }; }
       else if (isAway(key)) { current = null; }
       else {
         const available = availableOn(key);
@@ -230,15 +231,13 @@ function walkTrainingBlocks(user, dateKeyStr, list) {
         if (reached < available) { index = reached++; repeatPos = 0; repeating = false; }
         else if (available > 0) { index = repeatPos % available; repeatPos++; repeating = true; }
         if (index === null) current = null;
-        else { open = true; blockNo++; current = { index, block: blockNo, dayInBlock: 1 }; }
+        else { daysLeft = BLOCK_DAYS - 1; blockNo++; current = { index, block: blockNo, dayInBlock: 1 }; }
       }
       if (key !== dateKeyStr || !current) continue;
-      let blockDays = 2;
-      if (current.dayInBlock === 1) {
-        blockDays = 1;
-        for (let j = i + 1; j < 7; j++) if (isTrainingDay(addDays(monday, j), sundayOk)) { blockDays = 2; break; }
-      }
-      result = { ...current, blockDays };
+      // How many days this block gets: the days so far plus the training days left this week, up to BLOCK_DAYS.
+      let later = 0;
+      for (let j = i + 1; j < 7 && later < daysLeft; j++) if (isTrainingDay(addDays(monday, j), sundayOk)) later++;
+      result = { ...current, blockDays: current.dayInBlock + later };
     }
   }
   return { reached, repeating, current: result };
@@ -3093,7 +3092,8 @@ function ProgressPage({ user }) {
 
 const ONLINE_THRESHOLD_MS = 3 * 60 * 1000;
 // Blocks left for the goalie furthest along a level: under this many (about a week) turns red.
-const BLOCKS_LEFT_WARNING = 3;
+const BLOCKS_PER_WEEK = 2;
+const BLOCKS_LEFT_WARNING = BLOCKS_PER_WEEK;
 
 // Where each goalie of a level is in its list today, and how far ahead the furthest one is.
 // Only ready blocks count (drafts are skipped); block numbers are their place in the full list.
@@ -3149,7 +3149,7 @@ function AdminDashboard({ content }) {
 
   const goalies = users ? Object.values(users).filter((u) => u.role !== "coach") : [];
   const activeGoalies = goalies.filter((u) => !u.removed);
-  const weeksLeft = (left) => (left < BLOCKS_LEFT_WARNING ? "less than a week" : `about ${Math.floor(left / 3)} week${Math.floor(left / 3) === 1 ? "" : "s"}`);
+  const weeksLeft = (left) => (left < BLOCKS_LEFT_WARNING ? "less than a week" : `about ${Math.floor(left / BLOCKS_PER_WEEK)} week${Math.floor(left / BLOCKS_PER_WEEK) === 1 ? "" : "s"}`);
   const onlineCount = goalies.filter((u) => u.lastActive && Date.now() - u.lastActive < ONLINE_THRESHOLD_MS).length;
 
   return (
@@ -3179,7 +3179,7 @@ function AdminDashboard({ content }) {
 
       <div className="admin-panel">
         <h3>Training schedule health</h3>
-        <p className="planner-hint">Goalies use about 3 training blocks a week. Each level shows how far the goalie furthest along its list has got, and how many blocks are left after theirs. Red means less than a week is left ({BLOCKS_LEFT_WARNING} blocks), so add more before they run out.</p>
+        <p className="planner-hint">Goalies use about {BLOCKS_PER_WEEK} training blocks a week. Each level shows how far the goalie furthest along its list has got, and how many blocks are left after theirs. Red means less than a week is left ({BLOCKS_LEFT_WARNING} blocks), so add more before they run out.</p>
         <div className="dashboard-health-grid">
           {EXPERIENCE_LEVELS.map((lv) => {
             const st = users === null ? null : levelScheduleStatus(content, lv, activeGoalies);
@@ -4921,7 +4921,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
       <div className="admin-sub training-blocks-about" id="training-blocks-about">
         <p>Build the ordered list of training blocks for each level. A new block is added to Youth, Junior and Pro at once and what you fill in and save is copied to all three. If you select a level afterwards, you can switch its drills or titles.</p>
         <p>Moving, copying or deleting a block does the same in all three levels, so each block number always lines up.</p>
-        <p>Each ideal week has 3 blocks of 2 days. With nothing marked for that week, block 1 runs Monday–Tuesday, block 2 Wednesday–Thursday, block 3 Friday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day within that week, Sunday opens up as a training day and the blocks shift along the days they have left (a game day Wednesday and a rest day Saturday means the blocks go Monday–Tuesday, Thursday–Friday, and Sunday alone as block 3). If there are two game days in a row followed by a rest day (for example game days Friday and Saturday and a rest day Sunday), there are only two blocks that week: Monday–Tuesday and Wednesday–Thursday.</p>
+        <p>Each ideal week has 2 blocks of 3 days. With nothing marked for that week, block 1 runs Monday–Wednesday, block 2 Thursday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day within that week, Sunday opens up as a training day and the blocks shift along the days they have left: a game day Wednesday and a rest day Saturday means block 1 runs Monday, Tuesday and Thursday, and block 2 Friday and Sunday. If there are two game days in a row followed by a rest day (for example game days Friday and Saturday and a rest day Sunday), block 1 runs Monday–Wednesday and block 2 is Thursday alone.</p>
         <p>A new goalie starts at Block 1 the first day they open the app. If a goalie is away when the next block should start, their list pauses until they're back, so they don't miss any blocks.</p>
         <p>A block needs a drill, a practice focus and an off-ice workout, all published. Until then it's a draft: goalies skip it and get the next complete block.</p>
         <p>When a goalie has had every block of their level, they start again from Block 1 so they always have training. As soon as you add new blocks, they go on to those next.</p>
