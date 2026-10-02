@@ -152,16 +152,16 @@ function resolveDayType(u, dateKeyStr) {
 
 // Each goalie walks their level's ordered list of training blocks, one week at a time. A week's
 // training days are the days not marked game/rest, plus Sunday only when it's a training Sunday
-// (see sundayIsTraining). They're taken in order in groups of BLOCK_DAYS, each group one block:
-// with nothing marked that's Mon-Wed and Thu-Sat with Sunday off; a game Wednesday + rest Saturday
-// gives Mon-Tue-Thu and Fri-Sun; games Friday + Saturday and rest Sunday gives Mon-Wed and Thu
-// alone. Grouping starts over each Monday. A block only starts on a day the goalie opens the app: if
+// (see sundayIsTraining). Each week has BLOCKS_PER_WEEK blocks that split those days between them,
+// the first taking the extra day when the count is odd: with nothing marked that's Mon-Wed and
+// Thu-Sat with Sunday off; a game Wednesday + rest Saturday gives Mon-Tue-Thu and Fri-Sun; two
+// games and a rest day leave 4 days, so 2 blocks of 2 days. Blocks start over each Monday. A block only starts on a day the goalie opens the app: if
 // they're away the day a block should start, their list waits (nothing is skipped) and that
 // block starts on the next training day they're back. The first block is shown the first day
 // they open the app. Returns { ...trainingBlock, level, index, block, dayInBlock, blockDays } for
 // dateKeyStr, or null if that date is a game/rest day, a day their list was waiting, or the coach
 // hasn't created any blocks yet.
-const BLOCK_DAYS = 3; // training days per block: 2 blocks in an ideal week
+const BLOCKS_PER_WEEK = 2;
 // A block goalies get: it has a drill, a practice focus and an off-ice workout, all published.
 // Anything less is a draft that goalies skip until it's complete.
 function blockIsReady(content, block) {
@@ -217,6 +217,14 @@ function walkTrainingBlocks(user, dateKeyStr, list) {
   const targetMonday = dateKey(mondayOf(dateFromKey(dateKeyStr)));
   for (let monday = mondayOf(dateFromKey(startKey)); dateKey(monday) <= targetMonday; monday = addDays(monday, 7)) {
     const sundayOk = user.role !== "coach" && sundayIsTraining(user, monday);
+    // The week's training days split between its blocks: 6 → 3 + 3, 5 → 3 + 2, 4 → 2 + 2, 3 → 2 + 1.
+    // Counted over the whole week, so someone joining on a Thursday still gets a full 3-day block.
+    let trainingDays = 0;
+    for (let i = 0; i < 7; i++) {
+      const day = addDays(monday, i);
+      if (!personalDayType(user, dateKey(day)) && (day.getDay() !== 0 || sundayOk)) trainingDays++;
+    }
+    const blockSizes = Array.from({ length: BLOCKS_PER_WEEK }, (_, b) => Math.floor((trainingDays + BLOCKS_PER_WEEK - 1 - b) / BLOCKS_PER_WEEK));
     let blockNo = 0, current = null, daysLeft = 0; // daysLeft: days the current block still has to run
     for (let i = 0; i < 7; i++) {
       const day = addDays(monday, i);
@@ -231,10 +239,10 @@ function walkTrainingBlocks(user, dateKeyStr, list) {
         if (reached < available) { index = reached++; repeatPos = 0; repeating = false; }
         else if (available > 0) { index = repeatPos % available; repeatPos++; repeating = true; }
         if (index === null) current = null;
-        else { daysLeft = BLOCK_DAYS - 1; blockNo++; current = { index, block: blockNo, dayInBlock: 1, dates: [key] }; }
+        else { blockNo++; daysLeft = (blockSizes[blockNo - 1] || 1) - 1; current = { index, block: blockNo, dayInBlock: 1, dates: [key] }; }
       }
       if (key !== dateKeyStr || !current) continue;
-      // How many days this block gets: the days so far plus the training days left this week, up to BLOCK_DAYS.
+      // How many days this block gets: the days so far plus the training days left this week, up to its size.
       let later = 0;
       for (let j = i + 1; j < 7 && later < daysLeft; j++) if (isTrainingDay(addDays(monday, j), sundayOk)) later++;
       result = { ...current, blockDays: current.dayInBlock + later };
@@ -3092,7 +3100,6 @@ function ProgressPage({ user }) {
 
 const ONLINE_THRESHOLD_MS = 3 * 60 * 1000;
 // Blocks left for the goalie furthest along a level: under this many (about a week) turns red.
-const BLOCKS_PER_WEEK = 2;
 const BLOCKS_LEFT_WARNING = BLOCKS_PER_WEEK;
 
 // Where each goalie of a level is in its list today, and how far ahead the furthest one is.
@@ -4965,7 +4972,7 @@ function AdminTrainingDays({ content, updateContent, saveContent }) {
       <div className="admin-sub training-blocks-about" id="training-blocks-about">
         <p>Build the ordered list of training blocks for each level. A new block is added to Youth, Junior and Pro at once and what you fill in and save is copied to all three. If you select a level afterwards, you can switch its drills or titles.</p>
         <p>Moving, copying or deleting a block does the same in all three levels, so each block number always lines up.</p>
-        <p>Each ideal week has 2 blocks of 3 days. With nothing marked for that week, block 1 runs Monday–Wednesday, block 2 Thursday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day within that week, Sunday opens up as a training day and the blocks shift along the days they have left: a game day Wednesday and a rest day Saturday means block 1 runs Monday, Tuesday and Thursday, and block 2 Friday and Sunday. If there are two game days in a row followed by a rest day (for example game days Friday and Saturday and a rest day Sunday), block 1 runs Monday–Wednesday and block 2 is Thursday alone.</p>
+        <p>Each ideal week has 2 blocks of 3 days. With nothing marked for that week, block 1 runs Monday–Wednesday, block 2 Thursday–Saturday, and Sunday is an automatic rest day. If a goalie marks a game or rest day within that week, Sunday opens up as a training day and the blocks shift along the days they have left: a game day Wednesday and a rest day Saturday means block 1 runs Monday, Tuesday and Thursday, and block 2 Friday and Sunday. The two blocks always share the week's training days: if a goalie has two games and a rest day in a week, the 4 days left become 2 blocks of 2 days (for example game days Friday and Saturday and a rest day Sunday give Monday–Tuesday and Wednesday–Thursday).</p>
         <p>A new goalie starts at Block 1 the first day they open the app. If a goalie is away when the next block should start, their list pauses until they're back, so they don't miss any blocks.</p>
         <p>The days of a block don't have to be identical: in a drill, practice focus or off-ice workout, the Day 1, Day 2 and Day 3 tabs let you set up a next step for the progression, the cue and execution, or the workout. A goalie moves on to Day 2 of a part only after completing it on an earlier day of the block, and to Day 3 after completing it twice; until then they get the same day again. A day without its own version shows the day before it. Preview a block to see each day.</p>
         <p>A block needs a drill, a practice focus and an off-ice workout, all published. Until then it's a draft: goalies skip it and get the next complete block.</p>
