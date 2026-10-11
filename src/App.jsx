@@ -7753,9 +7753,9 @@ button:focus {
 .heat-cell { width: 100%; aspect-ratio: 1; border-radius: 5px; }
 .heat-cell--none { background: var(--surface-2); }
 .heat-cell--partial { background: var(--accent-dim); }
-.heat-cell--full { background: var(--accent); }
-.heat-cell--game { background: var(--text-dim); }
-.heat-cell--rest { background: #4cd7a3; }
+.heat-cell--full { background: #15803d; }
+.heat-cell--game { background: #3b82f6; }
+.heat-cell--rest { background: #8b5cf6; }
 .heat-legend { display: flex; gap: 18px; font-size: 12px; color: var(--text-dim); align-items: center; flex-wrap: wrap; }
 .heat-legend span { display: flex; align-items: center; gap: 6px; }
 .heat-legend i.heat-cell { width: 11px; height: 11px; display: inline-block; }
