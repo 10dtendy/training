@@ -2169,10 +2169,11 @@ function DrillBody({ drill }) {
     <>
         {richTextToPlain(drill.objective) && <section className="detail-block"><h2>Objective</h2><RichText value={drill.objective} /></section>}
         {drill.diagramUrl && <section className="detail-block"><img src={drill.diagramUrl} alt="Drill diagram" className="drill-diagram" /></section>}
-        {drill.steps.length > 0 && (
+        {(drill.steps.length > 0 || richTextToPlain(drill.performText)) && (
         <section className="detail-block">
           <h2>How to perform</h2>
-          <ol className="steps">{drill.steps.map((s, i) => <li key={i}><span className="step-num">{i + 1}</span><span>{s}</span></li>)}</ol>
+          {richTextToPlain(drill.performText) && <RichText value={drill.performText} className="perform-text" />}
+          {drill.steps.length > 0 && <ol className="steps">{drill.steps.map((s, i) => <li key={i}><span className="step-num">{i + 1}</span><span>{s}</span></li>)}</ol>}
         </section>
         )}
         {(sets || reps || rounds) && (
@@ -3261,7 +3262,7 @@ function AdminDashboard({ content }) {
 
 const BLANK_DRILL = {
   title: "", category: "", duration: "", equipment: "",
-  description: "", objective: "", stepsText: "", sets: "", reps: "", rounds: "", coachingPointsText: "", mistakesText: "", planRows: [], levelPlans: {}, dayPlans: {}, published: false,
+  description: "", objective: "", stepsText: "", performText: "", sets: "", reps: "", rounds: "", coachingPointsText: "", mistakesText: "", planRows: [], levelPlans: {}, dayPlans: {}, published: false,
   imageAssetId: null, imageUrl: "", videoAssetId: null, videoUrl: "", diagramUrl: "",
 };
 
@@ -3535,6 +3536,7 @@ function AdminDrills({ content, updateContent }) {
     title: d.title, category: d.category, duration: d.duration,
     equipment: d.equipment, description: d.description, objective: d.objective,
     steps: parseLines(d.stepsText),
+    performText: richTextToPlain(d.performText) ? d.performText : "",
     sets: (d.sets || "").trim(),
     reps: (d.reps || "").trim(),
     rounds: (d.rounds || "").trim(),
@@ -3650,6 +3652,7 @@ function AdminDrills({ content, updateContent }) {
               <input ref={diagram.inputRef} type="file" accept="image/*" onChange={diagram.onPick} style={{ display: "none" }} />
               {diagram.error && <div className="auth-error" style={{ marginTop: 8 }}><AlertTriangle size={13} /> {diagram.error}</div>}
             </div>
+            <div className="admin-form-span2 rich-field-wrap"><span className="rich-field-label">How to perform (text, shown above the steps)</span><RichTextEditor rows={3} value={draft.performText || ""} onChange={(v) => setDraft((d) => ({ ...d, performText: v }))} placeholder="Explain the setup or anything that doesn't fit in the steps" /></div>
             <label className="admin-form-span2">Steps (one per line)<textarea rows={4} value={draft.stepsText} onChange={(e) => setDraft({ ...draft, stepsText: e.target.value })} placeholder={"Start in your stance.\nMove to the post.\n..."} /></label>
             <div className="admin-form-span2 drill-volume-fields">
               <label>Sets<input value={draft.sets || ""} onChange={(e) => setDraft({ ...draft, sets: e.target.value })} placeholder="e.g. 3" maxLength={50} /></label>
@@ -5724,7 +5727,7 @@ function backupReadableHtml(backup) {
   const drills = c.drills.map((d) => `<section><h3>${esc(d.title)}${draft(d)}</h3>${meta(d.category, d.duration, d.equipment)}
     ${img(d.imageUrl, d.title)}${d.description ? `<p>${esc(d.description)}</p>` : ""}${video(d.videoUrl)}
     ${richTextToPlain(d.objective) ? `<h4>Objective</h4>${rich(d.objective)}` : ""}${img(d.diagramUrl, "Diagram")}
-    ${d.steps?.length ? `<h4>How to perform</h4><ol>${d.steps.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>` : ""}
+    ${d.steps?.length || richTextToPlain(d.performText) ? `<h4>How to perform</h4>${rich(d.performText)}${d.steps?.length ? `<ol>${d.steps.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>` : ""}` : ""}
     ${meta(d.sets && `Sets: ${d.sets}`, d.reps && `Reps: ${d.reps}`, d.rounds && `Rounds: ${d.rounds}`)}${plans(d, "Drill Progression")}
     ${list("Coaching points", d.coachingPoints)}${list("Common mistakes", (d.mistakes || []).map((m) => m.correction ? `${m.mistake} → ${m.correction}` : m.mistake))}</section>`).join("");
   const focuses = c.focusPoints.map((f) => `<section><h3>${esc(f.title)}${draft(f)}</h3>${meta(f.category)}${img(f.imageUrl, f.title)}${video(f.videoUrl)}
@@ -6588,10 +6591,11 @@ function PrintSheet({ content, date, assignment }) {
               <div className="print-meta">{meta(drill.duration, drill.equipment).map((m) => <span key={m}>{m}</span>)}</div>
             )}
             {richTextToPlain(drill.objective) && <><PrintHeading>Objective</PrintHeading><RichText className="print-rich" value={drill.objective} /></>}
-            {drill.steps.length > 0 && (
+            {(drill.steps.length > 0 || richTextToPlain(drill.performText)) && (
               <>
                 <PrintHeading>How to perform</PrintHeading>
-                <ol className="print-steps">{drill.steps.map((st, i) => <li key={i}><span className="print-step-num">{i + 1}</span><span>{st}</span></li>)}</ol>
+                {richTextToPlain(drill.performText) && <RichText className="print-rich" value={drill.performText} />}
+                {drill.steps.length > 0 && <ol className="print-steps">{drill.steps.map((st, i) => <li key={i}><span className="print-step-num">{i + 1}</span><span>{st}</span></li>)}</ol>}
               </>
             )}
             {meta(drill.sets, drill.reps, drill.rounds).length > 0 && (
@@ -8164,6 +8168,7 @@ button:focus {
 .plan-note p:last-child { margin-bottom: 0; }
 .plan-note ul, .plan-note ol { margin: 0; padding-left: 18px; }
 .drill-volume { display: flex; flex-wrap: wrap; gap: 10px; }
+.perform-text + .steps { margin-top: 12px; }
 .drill-volume-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .drill-volume-tile { display: flex; flex-direction: column; gap: 4px; min-width: 110px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .drill-volume-label { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); }
