@@ -4424,6 +4424,29 @@ function ExerciseEditor({ exercises, setDraft, exMedia }) {
   );
 }
 
+// A set description's intensity: one of the usual levels, or your own wording (e.g. 80% or RPE 7)
+// under Custom. It can be changed or cleared at any time.
+const INTENSITY_PRESETS = ["Low", "Moderate", "High", "Max effort", "Mixed"];
+function IntensityField({ value, onChange }) {
+  const v = value || "";
+  const [custom, setCustom] = useState(() => !!v && !INTENSITY_PRESETS.includes(v));
+  const choose = (next) => {
+    if (next === "custom") { setCustom(true); if (INTENSITY_PRESETS.includes(v)) onChange(""); }
+    else { setCustom(false); onChange(next); }
+  };
+  return (
+    <div className="plan-note-intensity-field">
+      <span>Intensity</span>
+      <select value={custom ? "custom" : v} onChange={(e) => choose(e.target.value)} aria-label="Intensity">
+        <option value="">None</option>
+        {INTENSITY_PRESETS.map((p) => <option key={p} value={p}>{p}</option>)}
+        <option value="custom">Custom…</option>
+      </select>
+      {custom && <input value={v} onChange={(e) => onChange(e.target.value)} placeholder="e.g. 80% or RPE 7" maxLength={40} aria-label="Custom intensity" autoFocus />}
+    </div>
+  );
+}
+
 // The "Workout" section: a plain, ordered list of exercise rows (sets, reps, rest) and set
 // descriptions (how to run them — rounds, rest between rounds) that goalies follow like a written
 // training plan. No photos or video — that's what the exercise cards above are for.
@@ -4471,13 +4494,7 @@ function WorkoutPlanEditor({ items, setItems, toolbar, label = "Workout", hint }
                 <span className="rich-field-label">Set description</span>
                 {actions(item, i, "set description")}
               </div>
-              <label className="plan-note-intensity-field">
-                <span>Intensity</span>
-                <input
-                  value={item.intensity || ""} onChange={(e) => updateField(item.id, "intensity", e.target.value)}
-                  placeholder="e.g. 80%, RPE 7 or Moderate" maxLength={40} list="plan-intensity-options"
-                />
-              </label>
+              <IntensityField value={item.intensity} onChange={(v) => updateField(item.id, "intensity", v)} />
               <RichTextEditor
                 rows={2} value={item.text} onChange={(v) => updateField(item.id, "text", v)}
                 placeholder="e.g. Do each exercise once, then repeat for 2 more rounds (3 rounds total). Rest 90 sec between rounds."
@@ -4494,9 +4511,6 @@ function WorkoutPlanEditor({ items, setItems, toolbar, label = "Workout", hint }
           )))}
         </div>
       )}
-      <datalist id="plan-intensity-options">
-        <option value="Low" /><option value="Moderate" /><option value="High" /><option value="Max effort" />
-      </datalist>
       <div className="plan-add-buttons">
         <button type="button" className="btn btn--ghost btn--small" onClick={() => setItems((list) => [...list, blankPlanRow()])}><Plus size={13} /> Add exercise</button>
         <button type="button" className="btn btn--ghost btn--small" onClick={() => setItems((list) => [...list, blankPlanNote()])}><Plus size={13} /> Add set description</button>
@@ -8026,6 +8040,7 @@ button:focus {
 .plan-note-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 .plan-add-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
 .admin-form-grid .plan-note-intensity-field { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; margin-bottom: 8px; font-size: 12px; color: var(--text-dim); }
+.admin-form-grid .plan-note-intensity-field select { width: auto; min-width: 130px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; color: var(--text); font-size: 13px; font-family: inherit; }
 .admin-form-grid .plan-note-intensity-field input { flex: 1; width: auto; max-width: 260px; min-width: 0; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; color: var(--text); font-size: 13px; font-family: inherit; }
 .plan-note-intensity { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 4px 10px; border-radius: 999px; background: var(--accent-dim); color: var(--text); font-size: 13px; font-weight: 600; }
 .plan-note-intensity span { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
