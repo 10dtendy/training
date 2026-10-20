@@ -2164,6 +2164,7 @@ function DrillBody({ drill }) {
   // Empty sections are left out rather than shown as a heading with nothing under it.
   const sets = (drill.sets || "").trim();
   const reps = (drill.reps || "").trim();
+  const rounds = (drill.rounds || "").trim();
   return (
     <>
         {richTextToPlain(drill.objective) && <section className="detail-block"><h2>Objective</h2><RichText value={drill.objective} /></section>}
@@ -2174,10 +2175,11 @@ function DrillBody({ drill }) {
           <ol className="steps">{drill.steps.map((s, i) => <li key={i}><span className="step-num">{i + 1}</span><span>{s}</span></li>)}</ol>
         </section>
         )}
-        {(sets || reps) && (
-          <section className="detail-block drill-volume" aria-label="Sets and reps">
+        {(sets || reps || rounds) && (
+          <section className="detail-block drill-volume" aria-label="Sets, reps and rounds">
             {sets && <div className="drill-volume-tile"><span className="drill-volume-label">Sets</span><span className="drill-volume-value">{sets}</span></div>}
             {reps && <div className="drill-volume-tile"><span className="drill-volume-label">Reps</span><span className="drill-volume-value">{reps}</span></div>}
+            {rounds && <div className="drill-volume-tile"><span className="drill-volume-label">Rounds</span><span className="drill-volume-value">{rounds}</span></div>}
           </section>
         )}
         <PlanSection item={drill} heading="Drill Progression" />
@@ -3259,7 +3261,7 @@ function AdminDashboard({ content }) {
 
 const BLANK_DRILL = {
   title: "", category: "", duration: "", equipment: "",
-  description: "", objective: "", stepsText: "", sets: "", reps: "", coachingPointsText: "", mistakesText: "", planRows: [], levelPlans: {}, dayPlans: {}, published: false,
+  description: "", objective: "", stepsText: "", sets: "", reps: "", rounds: "", coachingPointsText: "", mistakesText: "", planRows: [], levelPlans: {}, dayPlans: {}, published: false,
   imageAssetId: null, imageUrl: "", videoAssetId: null, videoUrl: "", diagramUrl: "",
 };
 
@@ -3535,6 +3537,7 @@ function AdminDrills({ content, updateContent }) {
     steps: parseLines(d.stepsText),
     sets: (d.sets || "").trim(),
     reps: (d.reps || "").trim(),
+    rounds: (d.rounds || "").trim(),
     planRows: cleanPlanItems(d.planRows),
     levelPlans: Object.fromEntries(Object.entries(d.levelPlans || {}).map(([lv, list]) => [lv, cleanPlanItems(list)])),
     dayPlans: cleanDayPlans(d.dayPlans),
@@ -3648,8 +3651,11 @@ function AdminDrills({ content, updateContent }) {
               {diagram.error && <div className="auth-error" style={{ marginTop: 8 }}><AlertTriangle size={13} /> {diagram.error}</div>}
             </div>
             <label className="admin-form-span2">Steps (one per line)<textarea rows={4} value={draft.stepsText} onChange={(e) => setDraft({ ...draft, stepsText: e.target.value })} placeholder={"Start in your stance.\nMove to the post.\n..."} /></label>
-            <label>Sets<input value={draft.sets || ""} onChange={(e) => setDraft({ ...draft, sets: e.target.value })} placeholder="e.g. 3" maxLength={50} /></label>
-            <label>Reps<input value={draft.reps || ""} onChange={(e) => setDraft({ ...draft, reps: e.target.value })} placeholder="e.g. 10 each side" maxLength={50} /></label>
+            <div className="admin-form-span2 drill-volume-fields">
+              <label>Sets<input value={draft.sets || ""} onChange={(e) => setDraft({ ...draft, sets: e.target.value })} placeholder="e.g. 3" maxLength={50} /></label>
+              <label>Reps<input value={draft.reps || ""} onChange={(e) => setDraft({ ...draft, reps: e.target.value })} placeholder="e.g. 10 each side" maxLength={50} /></label>
+              <label>Rounds<input value={draft.rounds || ""} onChange={(e) => setDraft({ ...draft, rounds: e.target.value })} placeholder="e.g. 2" maxLength={50} /></label>
+            </div>
             <DayPlans
               draft={draft} setDraft={setDraft} day={planDay} setDay={setPlanDay} level={planLevel} setLevel={setPlanLevel} label="Drill Progression" noun="drill progression"
               hint="How the drill builds up, step by step, with sets, reps and rest. Add a set description wherever you need to explain a stage — for example what changes from one progression to the next — and move it above, between or below the rows."
@@ -5719,7 +5725,7 @@ function backupReadableHtml(backup) {
     ${img(d.imageUrl, d.title)}${d.description ? `<p>${esc(d.description)}</p>` : ""}${video(d.videoUrl)}
     ${richTextToPlain(d.objective) ? `<h4>Objective</h4>${rich(d.objective)}` : ""}${img(d.diagramUrl, "Diagram")}
     ${d.steps?.length ? `<h4>How to perform</h4><ol>${d.steps.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>` : ""}
-    ${meta(d.sets && `Sets: ${d.sets}`, d.reps && `Reps: ${d.reps}`)}${plans(d, "Drill Progression")}
+    ${meta(d.sets && `Sets: ${d.sets}`, d.reps && `Reps: ${d.reps}`, d.rounds && `Rounds: ${d.rounds}`)}${plans(d, "Drill Progression")}
     ${list("Coaching points", d.coachingPoints)}${list("Common mistakes", (d.mistakes || []).map((m) => m.correction ? `${m.mistake} → ${m.correction}` : m.mistake))}</section>`).join("");
   const focuses = c.focusPoints.map((f) => `<section><h3>${esc(f.title)}${draft(f)}</h3>${meta(f.category)}${img(f.imageUrl, f.title)}${video(f.videoUrl)}
     ${BLOCK_DAY_NUMBERS.filter((day) => day === 1 || f.dayVersions?.[day]).map((day) => { const v = focusForDay(f, day); const tag = f.dayVersions && Object.keys(f.dayVersions).length ? ` — Day ${day}` : ""; return `${v.cue ? `<h4>Today's cue${tag}</h4><p>${esc(v.cue)}</p>` : ""}${richTextToPlain(v.explanation) ? `<h4>Execution${tag}</h4>${rich(v.explanation)}` : ""}`; }).join("")}
@@ -6588,10 +6594,11 @@ function PrintSheet({ content, date, assignment }) {
                 <ol className="print-steps">{drill.steps.map((st, i) => <li key={i}><span className="print-step-num">{i + 1}</span><span>{st}</span></li>)}</ol>
               </>
             )}
-            {meta(drill.sets, drill.reps).length > 0 && (
+            {meta(drill.sets, drill.reps, drill.rounds).length > 0 && (
               <div className="print-pills">
                 {(drill.sets || "").trim() && <span className="print-pill"><small>Sets</small>{drill.sets.trim()}</span>}
                 {(drill.reps || "").trim() && <span className="print-pill"><small>Reps</small>{drill.reps.trim()}</span>}
+                {(drill.rounds || "").trim() && <span className="print-pill"><small>Rounds</small>{drill.rounds.trim()}</span>}
               </div>
             )}
             <PrintPlan item={drill} heading="Drill Progression" />
@@ -8157,6 +8164,7 @@ button:focus {
 .plan-note p:last-child { margin-bottom: 0; }
 .plan-note ul, .plan-note ol { margin: 0; padding-left: 18px; }
 .drill-volume { display: flex; flex-wrap: wrap; gap: 10px; }
+.drill-volume-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .drill-volume-tile { display: flex; flex-direction: column; gap: 4px; min-width: 110px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .drill-volume-label { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); }
 .drill-volume-value { font-family: 'Archivo'; font-size: 20px; font-weight: 700; color: var(--text); }
