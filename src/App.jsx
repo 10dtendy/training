@@ -34,6 +34,16 @@ import {
    choice.
    ============================================================================ */
 
+// getContent, retried a couple of times so a brief connection blip doesn't end in an error screen.
+async function loadContent() {
+  for (let attempt = 1; ; attempt++) {
+    try { return await getContent(); } catch (e) {
+      if (attempt >= 3) throw e;
+      await new Promise((r) => setTimeout(r, 700 * attempt));
+    }
+  }
+}
+
 const GAME_DAY_BANNER_SRC = "https://cylzjvrzikgakethelst.supabase.co/storage/v1/object/public/media/content/gameday-banner.jpg";
 const REST_DAY_BANNER_SRC = "https://cylzjvrzikgakethelst.supabase.co/storage/v1/object/public/media/content/restday-banner.jpg";
 
@@ -6895,11 +6905,18 @@ function AppInner() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
+  // Content that fails to load (even after a few tries) shows an error with a retry, never an
+  // empty app: saving from a list that didn't load could overwrite what is stored.
+  const [contentError, setContentError] = useState(false);
+  const reloadContent = async () => {
+    try { setContent(await loadContent()); return true; } catch { setContentError(true); return false; }
+  };
+
   const finishRecovery = async () => {
     setRecovering(false);
     window.history.replaceState(null, "", window.location.pathname + window.location.search);
     const profile = await fetchCurrentProfile();
-    if (profile && !profile.removed) { setContent(await getContent()); setUser(profile); }
+    if (profile && !profile.removed) { if (await reloadContent()) setUser(profile); }
     else await supabase.auth.signOut();
   };
 
@@ -6907,7 +6924,7 @@ function AppInner() {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       // The account and the content load side by side, so a signed-in goalie waits for one round trip, not two.
-      const contentLoad = getContent();
+      const contentLoad = loadContent().catch(() => null);
       if (session) {
         const profile = await fetchCurrentProfile();
         if (profile && !profile.removed) setUser(profile);
@@ -6919,7 +6936,8 @@ function AppInner() {
           if (error?.status === 401 || error?.status === 403) await supabase.auth.signOut({ scope: "local" });
         }
       }
-      setContent(await contentLoad);
+      const loaded = await contentLoad;
+      if (loaded) setContent(loaded); else setContentError(true);
       setAuthChecked(true);
     })();
   }, []);
@@ -7046,7 +7064,7 @@ function AppInner() {
       updateContentFields(patch, prev).then(async (ok) => {
         if (ok) return;
         setSaveFailed(true);
-        setContent(await getContent());
+        await reloadContent();
       });
       return next;
     });
@@ -7066,8 +7084,7 @@ function AppInner() {
   // Content tables are only readable once signed in, so the fetch at page load (before
   // login) comes back empty — pull it again now that there's a session.
   const onAuthed = async (u) => {
-    setContent(await getContent());
-    setUser(u);
+    if (await reloadContent()) setUser(u);
   };
   const changePassword = async (newPassword) => {
     const { error } = await supabase.auth.updateUser({ password: newPassword });
@@ -7130,6 +7147,19 @@ function AppInner() {
     return (
       <div className="app"><style>{CSS}</style>
         <ResetPasswordScreen onDone={finishRecovery} />
+      </div>
+    );
+  }
+
+  if (contentError) {
+    return (
+      <div className="app"><style>{CSS}</style>
+        <div className="main"><div className="page">
+          <div className="empty-state empty-state--hero" role="alert">
+            <p>The app couldn't load its training content. Check your connection and try again.</p>
+            <button className="btn btn--primary btn--small" onClick={() => window.location.reload()}>Try again</button>
+          </div>
+        </div></div>
       </div>
     );
   }

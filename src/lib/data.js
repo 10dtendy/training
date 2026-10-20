@@ -170,11 +170,11 @@ export async function updateUserFields(userId, patch) {
 
 const LEVELS = ["Youth", "Junior", "Pro"];
 
+// Throws if any part fails to load. It never hands back an empty list in place of one that didn't
+// arrive: the admin screens save some lists as full replacements, so an empty stand-in could
+// otherwise be saved over the real thing.
 export async function getContent() {
-  const [
-    { data: drills }, { data: focusPoints }, { data: offIceWorkouts },
-    { data: categories }, { data: trainingDays }, { data: settings },
-  ] = await Promise.all([
+  const results = await Promise.all([
     supabase.from("drills").select("*").order("created_at"),
     supabase.from("focus_points").select("*").order("created_at"),
     supabase.from("off_ice_workouts").select("*").order("created_at"),
@@ -182,6 +182,12 @@ export async function getContent() {
     supabase.from("training_days").select("*").order("position"),
     supabase.from("app_settings").select("*"),
   ]);
+  const failed = results.find((r) => r.error);
+  if (failed) throw new Error(failed.error.message || "Content couldn't be loaded");
+  const [
+    { data: drills }, { data: focusPoints }, { data: offIceWorkouts },
+    { data: categories }, { data: trainingDays }, { data: settings },
+  ] = results;
 
   const toDrillShape = (d) => ({
     id: d.id, title: d.title || "", category: d.category || "", duration: d.duration || "", equipment: d.equipment || "",
@@ -266,7 +272,9 @@ async function reconcileTable(table, nextRows, toRow, prevRows) {
 // unique(level, position) mid-write). Writes are chained one after another: two quick
 // edits running concurrently could interleave their delete and insert steps and lose rows.
 let trainingDaysWriteChain = Promise.resolve();
-async function writeTrainingDays(byLevel) {
+// prevByLevel is what the screen believed was stored; the database refuses the write if it holds
+// something else (a stale or failed load), so nothing it doesn't know about is ever replaced.
+async function writeTrainingDays(byLevel, prevByLevel) {
   let allOk = true;
   for (const level of LEVELS) {
     const list = byLevel[level];
@@ -278,7 +286,10 @@ async function writeTrainingDays(byLevel) {
       title: d.title || null, subtitle: d.subtitle || null,
       created_at: d.createdAt || new Date().toISOString(),
     }));
-    const { error } = await supabase.rpc("replace_training_days", { p_level: level, p_rows: rows });
+    const expected = prevByLevel?.[level];
+    const { error } = await supabase.rpc("replace_training_days", {
+      p_level: level, p_rows: rows, ...(Array.isArray(expected) ? { p_expected_ids: expected.map((d) => d.id) } : {}),
+    });
     if (error) allOk = false;
   }
   return allOk;
@@ -315,11 +326,13 @@ export async function updateContentFields(patch, prev = {}) {
     }
     if (patch.categories) {
       const rows = patch.categories.map((c) => ({ name: c.name, type: c.type }));
-      const { error } = await supabase.rpc("replace_categories", { p_rows: rows });
+      const { error } = await supabase.rpc("replace_categories", {
+        p_rows: rows, ...(Array.isArray(prev.categories) ? { p_expected: prev.categories.map((c) => ({ name: c.name, type: c.type })) } : {}),
+      });
       ok.push(!error);
     }
     if (patch.trainingDays) {
-      const run = trainingDaysWriteChain.then(() => writeTrainingDays(patch.trainingDays));
+      const run = trainingDaysWriteChain.then(() => writeTrainingDays(patch.trainingDays, prev.trainingDays));
       trainingDaysWriteChain = run.catch(() => {});
       ok.push(await run);
     }
