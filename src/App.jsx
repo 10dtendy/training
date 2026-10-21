@@ -2768,7 +2768,7 @@ function ProfileCalendar({ dayTypes, onSetDayType, onClose, gameLogs, restNotes,
       <div className="profile-calendar-actions">
         <span className="profile-calendar-selected">
           {selected}
-          {selectedType && <span className="chip"> {selectedType === "game" ? "Game day" : "Rest day"}</span>}
+          {selectedType && <span className={"chip chip--" + selectedType}> {selectedType === "game" ? "Game day" : "Rest day"}</span>}
         </span>
         <div className="profile-calendar-buttons">
           <button className={"btn btn--small" + (selectedType === "game" ? " btn--primary" : " btn--ghost")} onClick={() => chooseType("game")}>Game day</button>
@@ -7330,6 +7330,8 @@ const CSS = `
   --text-faint: #5C5C61;
   --accent: #BE202E;
   --accent-dim: color-mix(in srgb, var(--accent) 16%, transparent);
+  --game-color: #3d5a80;
+  --rest-color: #453a63;
   --radius: 14px;
 }
 * { box-sizing: border-box; }
@@ -7797,8 +7799,8 @@ button:focus {
 .heat-cell--none { background: var(--surface-2); }
 .heat-cell--partial { background: var(--accent-dim); }
 .heat-cell--full { background: var(--accent); }
-.heat-cell--game { background: #3d5a80; }
-.heat-cell--rest { background: #453a63; }
+.heat-cell--game { background: var(--game-color); }
+.heat-cell--rest { background: var(--rest-color); }
 .heat-legend { display: flex; gap: 18px; font-size: 12px; color: var(--text-dim); align-items: center; flex-wrap: wrap; }
 .heat-legend span { display: flex; align-items: center; gap: 6px; }
 .heat-legend i.heat-cell { width: 11px; height: 11px; display: inline-block; }
@@ -7903,8 +7905,10 @@ button:focus {
 .calendar-admin-cell.selected { outline: 2px solid var(--accent); }
 .profile-calendar { max-width: 760px; margin: 24px auto 0; text-align: left; }
 .profile-calendar-title { font-size: 16px; margin-bottom: 6px; }
-.daytype-cell--game { background: var(--accent-dim); color: var(--accent); }
-.daytype-cell--rest { background: rgba(76,199,150,0.16); color: #4cd7a3; }
+/* Game and rest days use the same colors everywhere (Games & Rest calendar, Progress calendar);
+   red stays for training. */
+.daytype-cell--game, .chip--game { background: var(--game-color); color: #dbe6f5; }
+.daytype-cell--rest, .chip--rest { background: var(--rest-color); color: #ddd5f2; }
 .calendar-admin-grid--rich .calendar-admin-cell { aspect-ratio: auto; height: 46px; flex-direction: column; justify-content: center; gap: 1px; padding: 2px; overflow: hidden; }
 .calendar-cell-day { line-height: 1; }
 .calendar-cell-caption { font-size: 8px; font-weight: 700; line-height: 1; opacity: 0.85; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
