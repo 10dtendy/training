@@ -7331,7 +7331,7 @@ const CSS = `
   --accent: #BE202E;
   --accent-dim: color-mix(in srgb, var(--accent) 16%, transparent);
   --game-color: #3d5a80;
-  --rest-color: #453a63;
+  --rest-color: rgba(61, 90, 128, 0.4); /* the game blue, faded: off-days share one hue */
   --radius: 14px;
 }
 * { box-sizing: border-box; }
@@ -7797,7 +7797,7 @@ button:focus {
 .heat-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; max-width: 340px; margin-bottom: 16px; }
 .heat-cell { width: 100%; aspect-ratio: 1; border-radius: 5px; }
 .heat-cell--none { background: var(--surface-2); }
-.heat-cell--partial { background: var(--accent-dim); }
+.heat-cell--partial { background: color-mix(in srgb, var(--accent) 35%, transparent); }
 .heat-cell--full { background: var(--accent); }
 .heat-cell--game { background: var(--game-color); }
 .heat-cell--rest { background: var(--rest-color); }
@@ -7908,7 +7908,7 @@ button:focus {
 /* Game and rest days use the same colors everywhere (Games & Rest calendar, Progress calendar);
    red stays for training. */
 .daytype-cell--game, .chip--game { background: var(--game-color); color: #dbe6f5; }
-.daytype-cell--rest, .chip--rest { background: var(--rest-color); color: #ddd5f2; }
+.daytype-cell--rest, .chip--rest { background: var(--rest-color); color: #c9d6ea; }
 .calendar-admin-grid--rich .calendar-admin-cell { aspect-ratio: auto; height: 46px; flex-direction: column; justify-content: center; gap: 1px; padding: 2px; overflow: hidden; }
 .calendar-cell-day { line-height: 1; }
 .calendar-cell-caption { font-size: 8px; font-weight: 700; line-height: 1; opacity: 0.85; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
