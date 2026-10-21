@@ -110,7 +110,7 @@ function addDays(d, n) {
   next.setDate(next.getDate() + n);
   return next;
 }
-// Goalies can only look back this many days from TODAY_DATE — older content isn't reachable.
+// Reminders cover today and this many days before it (a missed game log or rest note).
 const MAX_DAYS_BACK = 2;
 
 // The training week runs Monday to Sunday.
@@ -1299,7 +1299,7 @@ function ResetPasswordScreen({ onDone }) {
    NAV
    ============================================================================ */
 
-function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen, user, onLogout, previewLevel, setPreviewLevel, dayType, viewingToday, onGoToday, reminders, onOpenReminder, onOpenCalendar, onOpenPlan }) {
+function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen, user, onLogout, previewLevel, setPreviewLevel, dayType, onGoToday, reminders, onOpenReminder, onOpenCalendar, onOpenPlan }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const notifWrapRef = useRef(null);
   const notifButtonRef = useRef(null);
@@ -1315,7 +1315,6 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
   const items = dayType
     ? [
         { key: "today", label: "Today", view: "today" },
-        ...(viewingToday ? [] : [{ key: "day", label: dayType === "game" ? "Game Day" : "Rest Day", view: "today" }]),
         { key: "progress", label: "Progress", view: "progress" },
       ]
     : [
@@ -1326,7 +1325,7 @@ function NavBar({ view, setView, isAdmin, setIsAdmin, mobileOpen, setMobileOpen,
         { key: "progress", label: "Progress", view: "progress" },
       ];
   // On an earlier game/rest day, the day's page belongs to "Game Day"/"Rest Day", not "Today".
-  const isItemActive = (it) => !isAdmin && view === it.view && !(it.key === "today" && !viewingToday && dayType);
+  const isItemActive = (it) => !isAdmin && view === it.view;
   return (
     <header className="nav">
       <div className="nav-inner">
@@ -1463,7 +1462,7 @@ function BottomNav({ view, onToday, onGoTo, onProgress, onOpenCalendar, showCale
    TODAY PAGE
    ============================================================================ */
 
-function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoForward, onPrevDay, onNextDay, openDrill, openFocus, openOffice, onDownloadPDF, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame, onSetRestNote, onMakeRest }) {
+function TodayPage({ content, progress, viewDate, assignment, openDrill, openFocus, openOffice, onDownloadPDF, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame, onSetRestNote, onMakeRest }) {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const drill = assignment && content.drills.find((d) => d.id === assignment.drillId && d.published);
   const focus = assignment && content.focusPoints.find((f) => f.id === assignment.focusId && f.published);
@@ -1476,17 +1475,13 @@ function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoFo
   const allDone = completedCount === 3;
   const weekday = WEEKDAY_NAMES[viewDate.getDay()].toUpperCase();
   const dateStr = `${viewDate.getDate()} ${MONTH_NAMES[viewDate.getMonth()]} ${viewDate.getFullYear()}`;
-  const isToday = dateKey(viewDate) === dateKey(TODAY_DATE);
-  const dayTitle = assignment?.title || (assignment ? trainingBlockName(assignment.block) : (isToday ? "Today's training." : "Past training."));
-  const daySubtitle = assignment?.subtitle || (isToday ? "Three things to focus on today." : "What was assigned this day.");
+  const dayTitle = assignment?.title || (assignment ? trainingBlockName(assignment.block) : "Today's training.");
+  const daySubtitle = assignment?.subtitle || "Three things to focus on today.";
 
   const eyebrowRow = (
     <div className="eyebrow-row">
-      <button className="icon-btn" onClick={onPrevDay} disabled={!canGoBack} aria-label="Previous day"><ChevronLeft size={15} /></button>
       <div className="eyebrow">{weekday} · {dateStr}</div>
       {assignment?.blockDays > 1 && <span className="day-nav-badge">Day {assignment.dayInBlock} of {assignment.blockDays}</span>}
-      {!isToday && <span className="day-nav-badge">Past</span>}
-      <button className="icon-btn" onClick={onNextDay} disabled={!canGoForward} aria-label="Next day"><ChevronRight size={15} /></button>
     </div>
   );
 
@@ -1516,7 +1511,7 @@ function TodayPage({ content, progress, viewDate, assignment, canGoBack, canGoFo
           </section>
         </div>
         <div className="empty-state empty-state--hero">
-          <p>{isToday ? "Your coach hasn't assigned today's training yet." : "No training block for this day — if you weren't in the app, your list waited for you."}</p>
+          <p>Your coach hasn't assigned today's training yet.</p>
         </div>
         {calendarModal}
       </div>
@@ -1657,7 +1652,7 @@ function MonthPlanPrompt({ monthName, current, onChoose, onOpenCalendar, onLater
   );
 }
 
-function DayTypePage({ type, data, viewDate, canGoBack, canGoForward, onPrevDay, onNextDay, onClear, gameLog, onSaveGameLog, restNote, onSaveRestNote, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame, onSetRestNote, hideClear = false }) {
+function DayTypePage({ type, data, viewDate, onClear, gameLog, onSaveGameLog, restNote, onSaveRestNote, dayTypes, onSetDayType, gameLogs, restNotes, onLogGame, onSetRestNote, hideClear = false }) {
   const isGame = type === "game";
   const [logging, setLogging] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -1708,14 +1703,12 @@ function DayTypePage({ type, data, viewDate, canGoBack, canGoForward, onPrevDay,
       <section className="hero">
         <div className="hero-left">
           <div className="eyebrow-row">
-            <button className="icon-btn" onClick={onPrevDay} disabled={!canGoBack} aria-label="Previous day"><ChevronLeft size={15} /></button>
             <div className="eyebrow daytype-eyebrow-stack">
               <span>{weekday}</span>
               <span className="daytype-eyebrow-sep"> · </span>
               <span>{dateStr}</span>
             </div>
             <span className="day-nav-badge">{isGame ? "Game day" : "Rest day"}</span>
-            <button className="icon-btn" onClick={onNextDay} disabled={!canGoForward} aria-label="Next day"><ChevronRight size={15} /></button>
             <button className="icon-btn eyebrow-calendar-btn" onClick={() => setCalendarOpen(true)} aria-label="Game days & rest days calendar"><CalendarIcon size={15} /></button>
           </div>
           <h1 className="hero-title">{isGame ? "Game day." : "Rest day."}</h1>
@@ -2652,9 +2645,10 @@ function ProfilePage({ user, onLogout, onChangePassword, onUpdateProfile, onDele
 
 const MonthPlanContext = React.createContext(null);
 
-function ProfileCalendar({ dayTypes, onSetDayType, onClose, gameLogs, restNotes, onLogGame, onSetRestNote }) {
-  const [monthOffset, setMonthOffset] = useState(0);
-  const [selected, setSelected] = useState(dateKey(TODAY_DATE));
+function ProfileCalendar({ dayTypes, onSetDayType, onClose, gameLogs, restNotes, onLogGame, onSetRestNote, initialDate }) {
+  const startDate = initialDate ? dateFromKey(initialDate) : TODAY_DATE;
+  const [monthOffset, setMonthOffset] = useState((startDate.getFullYear() - TODAY_DATE.getFullYear()) * 12 + startDate.getMonth() - TODAY_DATE.getMonth());
+  const [selected, setSelected] = useState(dateKey(startDate));
   // Mirrors the dayTypes prop, but updates the instant a goalie taps Game/Rest/Clear —
   // the cell's color shouldn't wait on the round-trip that actually persists it.
   const [localDayTypes, setLocalDayTypes] = useState(dayTypes || {});
@@ -5256,7 +5250,7 @@ function AdminGameDay({ content, updateContent, saveContent }) {
 
       {previewOpen && (
         <PreviewModal label="Preview — how goalies will see Game Day (with your draft)" onClose={() => setPreviewOpen(false)}>
-          <DayTypePage hideClear type="game" data={{ ...gameDay, quote, note: gameDay.noteDraft ?? gameDay.note }} viewDate={TODAY_DATE} canGoBack={false} canGoForward={false} onPrevDay={() => {}} onNextDay={() => {}} onClear={() => true} gameLog={null} onSaveGameLog={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
+          <DayTypePage hideClear type="game" data={{ ...gameDay, quote, note: gameDay.noteDraft ?? gameDay.note }} viewDate={TODAY_DATE} onClear={() => true} gameLog={null} onSaveGameLog={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
         </PreviewModal>
       )}
     </div>
@@ -5283,7 +5277,7 @@ function AdminRestDay({ content, updateContent, saveContent }) {
 
       {previewOpen && (
         <PreviewModal label="Preview — how goalies will see Rest Day (with your draft)" onClose={() => setPreviewOpen(false)}>
-          <DayTypePage hideClear type="rest" data={{ ...restDay, note: restDay.noteDraft ?? restDay.note }} viewDate={TODAY_DATE} canGoBack={false} canGoForward={false} onPrevDay={() => {}} onNextDay={() => {}} onClear={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
+          <DayTypePage hideClear type="rest" data={{ ...restDay, note: restDay.noteDraft ?? restDay.note }} viewDate={TODAY_DATE} onClear={() => true} restNote="" onSaveRestNote={() => true} dayTypes={{}} onSetDayType={() => {}} onLogGame={() => true} />
         </PreviewModal>
       )}
     </div>
@@ -6906,16 +6900,12 @@ function AppInner() {
   // Opening the reset link from an email lands here with type=recovery in the URL.
   const [recovering, setRecovering] = useState(() => /type=recovery/.test(window.location.hash || ""));
   const [navCalendarOpen, setNavCalendarOpen] = useState(false);
+  const [navCalendarDate, setNavCalendarDate] = useState(null); // the day it opens on (default today)
   const [planOpen, setPlanOpen] = useState(false);
   const planPromptedRef = useRef(false);
 
-  // Goalies can browse today plus the MAX_DAYS_BACK days before it — nothing older, nothing in the future.
-  const [viewDate, setViewDate] = useState(TODAY_DATE);
-  const minViewDate = addDays(TODAY_DATE, -MAX_DAYS_BACK);
-  const canGoBack = viewDate.getTime() > minViewDate.getTime();
-  const canGoForward = viewDate.getTime() < TODAY_DATE.getTime();
-  const goPrevDay = () => setViewDate((d) => (d.getTime() > minViewDate.getTime() ? addDays(d, -1) : d));
-  const goNextDay = () => setViewDate((d) => (d.getTime() < TODAY_DATE.getTime() ? addDays(d, 1) : d));
+  // Goalies only ever see today; earlier days are reached through the Games & Rest calendar.
+  const viewDate = TODAY_DATE;
 
   // What the goalie ticked off for the viewed day, saved to their account.
   const progress = (user && user.dayProgress?.[dateKey(viewDate)]) || NO_PROGRESS;
@@ -7142,7 +7132,6 @@ function AppInner() {
     setUser(null);
     setIsAdmin(false);
     setView("today");
-    setViewDate(TODAY_DATE);
   };
 
   const deleteMyAccount = async () => {
@@ -7153,19 +7142,16 @@ function AppInner() {
   const acceptTerms = () => updateProfile({ termsVersion: legal.version });
 
   const goTo = (v) => { setView(v); window.scrollTo?.({ top: 0, behavior: "smooth" }); };
-  // Distinct from goTo("today"): a detail page's own "back" button means "return to
-  // the day I was already looking at", but the nav's "Today" (and the logo) mean
-  // literally today — without this, browsing a past day and clicking "Today" left
-  // you stuck on that past date since only the view changed, never viewDate.
+  // A reminder about today opens the Today page; one about an earlier day (a game to log, a rest
+  // note to add) opens the Games & Rest calendar on that day.
   const openReminderDate = (dateStr) => {
-    const [y, m, d] = dateStr.split("-").map(Number);
     setIsAdmin(false);
     setMobileOpen(false);
-    setView("today");
-    setViewDate(new Date(y, m - 1, d));
-    window.scrollTo?.({ top: 0, behavior: "smooth" });
+    if (dateStr === dateKey(TODAY_DATE)) { goToToday(); return; }
+    setNavCalendarDate(dateStr);
+    setNavCalendarOpen(true);
   };
-  const goToToday = () => { setView("today"); setViewDate(TODAY_DATE); window.scrollTo?.({ top: 0, behavior: "smooth" }); };
+  const goToToday = () => { setView("today"); window.scrollTo?.({ top: 0, behavior: "smooth" }); };
   const handlePDF = () => window.print();
 
   if (recovering) {
@@ -7236,7 +7222,7 @@ function AppInner() {
       {!isAdmin && (
         <NavBar
           view={view} setView={goTo} isAdmin={isAdmin} setIsAdmin={setIsAdmin} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen}
-          user={user} onLogout={onLogout} previewLevel={previewLevel} setPreviewLevel={setPreviewLevel} dayType={dayType} viewingToday={dateKey(viewDate) === dateKey(TODAY_DATE)} onGoToday={goToToday}
+          user={user} onLogout={onLogout} previewLevel={previewLevel} setPreviewLevel={setPreviewLevel} dayType={dayType} onGoToday={goToToday}
           reminders={reminders} onOpenReminder={openReminderDate} onOpenCalendar={() => setNavCalendarOpen(true)} onOpenPlan={() => setPlanOpen(true)}
         />
       )}
@@ -7263,7 +7249,7 @@ function AppInner() {
               const todayPage = dayType ? (
                 <DayTypePage
                   type={dayType} data={(dayType === "game" ? content.gameDay : content.restDay) || {}}
-                  viewDate={viewDate} canGoBack={canGoBack} canGoForward={canGoForward} onPrevDay={goPrevDay} onNextDay={goNextDay}
+                  viewDate={viewDate}
                   onClear={() => setDayType(dateStr, null)}
                   gameLog={(user.gameLogs || {})[dateStr]} onSaveGameLog={(log) => setGameLog(dateStr, log)}
                   restNote={(user.restNotes || {})[dateStr]} onSaveRestNote={(note) => setRestNote(dateStr, note)}
@@ -7275,7 +7261,6 @@ function AppInner() {
                 <TodayPage
                   content={content} progress={progress} viewDate={viewDate} assignment={assignment}
                   onMakeRest={!isCoach && viewDate.getDay() === 0 && (user.dayTypes || {})[dateStr] === "none" ? () => setDayType(dateStr, "rest") : undefined}
-                  canGoBack={canGoBack} canGoForward={canGoForward} onPrevDay={goPrevDay} onNextDay={goNextDay}
                   openDrill={() => goTo("drill")} openFocus={() => goTo("focus")} openOffice={() => goTo("office")} onDownloadPDF={handlePDF}
                   dayTypes={user.dayTypes || {}} onSetDayType={setDayType}
                   gameLogs={user.gameLogs || {}} restNotes={user.restNotes || {}}
@@ -7317,8 +7302,8 @@ function AppInner() {
         </PreviewModal>
       )}
       {navCalendarOpen && (
-        <PreviewModal label="Games & Rest" onClose={() => setNavCalendarOpen(false)} resizeIn>
-          <ProfileCalendar dayTypes={user.dayTypes || {}} onSetDayType={setDayType} onClose={() => setNavCalendarOpen(false)} gameLogs={user.gameLogs || {}} restNotes={user.restNotes || {}} onLogGame={setGameLog} onSetRestNote={setRestNote} />
+        <PreviewModal label="Games & Rest" onClose={() => { setNavCalendarOpen(false); setNavCalendarDate(null); }} resizeIn>
+          <ProfileCalendar initialDate={navCalendarDate} dayTypes={user.dayTypes || {}} onSetDayType={setDayType} onClose={() => { setNavCalendarOpen(false); setNavCalendarDate(null); }} gameLogs={user.gameLogs || {}} restNotes={user.restNotes || {}} onLogGame={setGameLog} onSetRestNote={setRestNote} />
         </PreviewModal>
       )}
       {welcomeOpen && <WelcomeModal label="Welcome" data={content.welcome || DEFAULT_WELCOME} onClose={markWelcomeSeen} />}
