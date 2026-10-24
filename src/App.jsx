@@ -2247,10 +2247,6 @@ function CreaseSurface({ c, ids, vbX, vbW, k, light }) {
       <path d={`M264.7 ${G} L264.7 ${G + 104.4} A140 140 0 0 0 451.3 ${G + 104.4} L451.3 ${G}`} fill="var(--accent)" fillOpacity={light ? 0.06 : 0.1} stroke="var(--accent)" strokeWidth="1.5" />
       <line x1="264.7" y1={G + 93.3} x2="274.4" y2={G + 93.3} stroke="var(--accent)" strokeWidth="1.5" />
       <line x1="451.3" y1={G + 93.3} x2="441.6" y2={G + 93.3} stroke="var(--accent)" strokeWidth="1.5" />
-      <line x1="358" y1="300" x2="288" y2={G} stroke={c.line} strokeWidth="1" strokeDasharray="3 5" />
-      <line x1="358" y1="300" x2="428" y2={G} stroke={c.line} strokeWidth="1" strokeDasharray="3 5" />
-      <ellipse cx="358" cy="302" rx="9" ry="5" fill={c.ink} />
-      <text x="374" y="306" fill={c.label} fontSize={11 * k} className="crease-text">SHOOTER</text>
       <text x={vbX + 24} y={G - 10} fill={c.label} fontSize={11 * k} className="crease-text">GOAL LINE</text>
     </>
   );
