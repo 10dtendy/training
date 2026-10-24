@@ -192,7 +192,7 @@ export async function getContent() {
   const toDrillShape = (d) => ({
     id: d.id, title: d.title || "", category: d.category || "", duration: d.duration || "", equipment: d.equipment || "",
     description: d.description || "", objective: d.objective || "",
-    steps: d.steps || [], sets: d.sets || "", reps: d.reps || "", rounds: d.rounds || "", performText: d.perform_text || "", movementMap: d.movement_map || [], coachingPoints: d.coaching_points || [], mistakes: d.mistakes || [],
+    steps: d.steps || [], sets: d.sets || "", reps: d.reps || "", rounds: d.rounds || "", performText: d.perform_text || "", movementMap: d.movement_map || [], movementMapView: d.movement_map_view || "crease", coachingPoints: d.coaching_points || [], mistakes: d.mistakes || [],
     planRows: d.plan_rows || [], levelPlans: d.level_plans || {}, dayPlans: d.day_plans || {},
     published: d.published, imageAssetId: null, imageUrl: d.image_url || "", videoAssetId: null, videoUrl: d.video_url || "",
     diagramUrl: d.diagram_url || "",
@@ -303,7 +303,7 @@ export async function updateContentFields(patch, prev = {}) {
       ok.push(await reconcileTable("drills", patch.drills, (d) => ({
         id: d.id, title: d.title, category: d.category, duration: d.duration, equipment: d.equipment,
         description: d.description, objective: d.objective,
-        steps: d.steps || [], sets: d.sets || "", reps: d.reps || "", rounds: d.rounds || "", perform_text: d.performText || "", movement_map: d.movementMap || [], coaching_points: d.coachingPoints || [], mistakes: d.mistakes || [],
+        steps: d.steps || [], sets: d.sets || "", reps: d.reps || "", rounds: d.rounds || "", perform_text: d.performText || "", movement_map: d.movementMap || [], movement_map_view: d.movementMapView === "zone" ? "zone" : "crease", coaching_points: d.coachingPoints || [], mistakes: d.mistakes || [],
         plan_rows: d.planRows || [], level_plans: d.levelPlans || {}, day_plans: d.dayPlans || {},
         published: !!d.published, image_url: d.imageUrl || null, video_url: d.videoUrl || null,
         diagram_url: d.diagramUrl || null,

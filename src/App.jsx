@@ -2204,42 +2204,122 @@ function stepBadgeClass(map, i) {
 }
 
 const CREASE_PALETTES = {
-  dark: { bg: "#0F0F12", line: "#3A3A40", net: "#5C5C61", ink: "#F3F3F1", label: "#8D8D93", fill: "#0A0A0C" },
+  dark: { bg: "#0F0F12", line: "#3A3A40", net: "#5C5C61", ink: "#F3F3F1", label: "#8D8D93", fill: "#0A0A0C", boards: "#5C5C61", blue: "#4A78B8" },
   // For the printed sheet: no dark block of ink on paper.
-  light: { bg: "#FFFFFF", line: "#D4D4D8", net: "#9A9AA0", ink: "#18181B", label: "#71717A", fill: "#FFFFFF" },
+  light: { bg: "#FFFFFF", line: "#D4D4D8", net: "#9A9AA0", ink: "#18181B", label: "#71717A", fill: "#FFFFFF", boards: "#3F3F46", blue: "#2E5A9C" },
 };
 
-function CreaseMap({ map, active, onPick, onBoardClick, editing = false, light = false }) {
+// Two views of the ice, each in its own coordinate space. The crease view is the close-up around
+// the net (23.33 units per foot); the zone view is half a rink from the end boards to the centre
+// line (8 units per foot, NHL dimensions). The net's centre on the goal line anchors both, so a
+// point keeps its spot on the ice when the view is switched.
+const MAP_VIEWS = {
+  crease: { w: CREASE_W, h: CREASE_H, perFoot: 140 / 6, netX: 358, goalY: 50, label: "Crease" },
+  zone: { w: 680, h: 800, perFoot: 8, netX: 340, goalY: 88, label: "Full zone" },
+};
+function convertMapPoints(map, from, to) {
+  const a = MAP_VIEWS[from] || MAP_VIEWS.crease, b = MAP_VIEWS[to] || MAP_VIEWS.crease;
+  if (a === b) return map;
+  const clamp = (v, max) => Math.max(20, Math.min(max - 20, Math.round(v)));
+  return (map || []).map((p) => (p ? {
+    ...p,
+    x: clamp(b.netX + ((p.x - a.netX) / a.perFoot) * b.perFoot, b.w),
+    y: clamp(b.goalY + ((p.y - a.goalY) / a.perFoot) * b.perFoot, b.h),
+  } : null));
+}
+
+function CreaseSurface({ c, ids, vbX, vbW, k, light }) {
+  return (
+    <>
+      <rect x={vbX} y="0" width={vbW} height={CREASE_H} rx="10" fill={c.bg} stroke={light ? c.line : "none"} />
+      <rect x="288" y="14" width="140" height="36" rx="6" fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="1.5" />
+      <line x1={vbX + 20} y1="50" x2={vbX + vbW - 20} y2="50" stroke="var(--accent)" strokeWidth="2" opacity="0.8" />
+      {/* NHL crease to scale with the 6 ft net: straight sides 4 ft either side of centre running
+          4.5 ft out, closed by an arc of 6 ft radius, with the small hash marks 4 ft from the goal line. */}
+      <path d="M264.7 50 L264.7 154.4 A140 140 0 0 0 451.3 154.4 L451.3 50" fill="var(--accent)" fillOpacity={light ? 0.06 : 0.1} stroke="var(--accent)" strokeWidth="1.5" />
+      <line x1="264.7" y1="143.3" x2="274.4" y2="143.3" stroke="var(--accent)" strokeWidth="1.5" />
+      <line x1="451.3" y1="143.3" x2="441.6" y2="143.3" stroke="var(--accent)" strokeWidth="1.5" />
+      <line x1="358" y1="300" x2="288" y2="50" stroke={c.line} strokeWidth="1" strokeDasharray="3 5" />
+      <line x1="358" y1="300" x2="428" y2="50" stroke={c.line} strokeWidth="1" strokeDasharray="3 5" />
+      <circle cx="288" cy="50" r="5" fill={c.ink} />
+      <circle cx="428" cy="50" r="5" fill={c.ink} />
+      <ellipse cx="358" cy="302" rx="9" ry="5" fill={c.ink} />
+      <text x="374" y="306" fill={c.label} fontSize={11 * k} className="crease-text">SHOOTER</text>
+      <text x={vbX + 24} y="40" fill={c.label} fontSize={11 * k} className="crease-text">GOAL LINE</text>
+    </>
+  );
+}
+
+// Half an NHL rink, end boards at the top: goal line 11 ft out, trapezoid, net and crease, the two
+// end-zone faceoff circles (20 ft out, 22 ft either side, 15 ft radius), blue line at 75 ft,
+// the neutral-zone dots and half of the centre circle on the centre line.
+function ZoneSurface({ c, ids }) {
+  const red = "var(--accent)";
+  const circle = (cx) => (
+    <g key={cx}>
+      <circle cx={cx} cy="248" r="120" fill="none" stroke={red} strokeWidth="2" />
+      <circle cx={cx} cy="248" r="8" fill={red} />
+      {[-1, 1].map((sx) => [-1, 1].map((sy) => (
+        <path key={sx + "" + sy} d={`M${cx + sx * 6} ${248 + sy * 50} L${cx + sx * 6} ${248 + sy * 16} L${cx + sx * 46} ${248 + sy * 16}`} fill="none" stroke={red} strokeWidth="2" />
+      )))}
+      {[-1, 1].map((sx) => [-1, 1].map((sy) => (
+        <line key={"h" + sx + sy} x1={cx + sx * 120} y1={248 + sy * 18} x2={cx + sx * 140} y2={248 + sy * 18} stroke={red} strokeWidth="2" />
+      )))}
+    </g>
+  );
+  return (
+    <>
+      <path d="M0 800 L0 224 A224 224 0 0 1 224 0 L456 0 A224 224 0 0 1 680 224 L680 800 Z" fill={c.bg} stroke={c.boards} strokeWidth="3" />
+      <line x1="46" y1="88" x2="634" y2="88" stroke={red} strokeWidth="2" />
+      <line x1="252" y1="88" x2="228" y2="0" stroke={red} strokeWidth="2" />
+      <line x1="428" y1="88" x2="452" y2="0" stroke={red} strokeWidth="2" />
+      <path d="M308 88 L308 123.8 A48 48 0 0 0 372 123.8 L372 88" fill={red} fillOpacity="0.12" stroke={red} strokeWidth="2" />
+      <rect x="316" y="61" width="48" height="27" rx="5" fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="2" />
+      <circle cx="316" cy="88" r="3" fill={c.ink} />
+      <circle cx="364" cy="88" r="3" fill={c.ink} />
+      {circle(164)}{circle(516)}
+      <rect x="0" y="596" width="680" height="9" fill={c.blue} />
+      <circle cx="164" cy="640" r="8" fill={red} />
+      <circle cx="516" cy="640" r="8" fill={red} />
+      <path d="M220 800 A120 120 0 0 1 460 800" fill="none" stroke={c.blue} strokeWidth="2" />
+      <rect x="0" y="795" width="680" height="5" fill={red} />
+    </>
+  );
+}
+
+function CreaseMap({ map, view = "crease", active, onPick, onBoardClick, editing = false, light = false }) {
   const svgRef = useRef(null);
   const ids = useId().replace(/:/g, "");
   const c = light ? CREASE_PALETTES.light : CREASE_PALETTES.dark;
+  const V = MAP_VIEWS[view] || MAP_VIEWS.crease;
+  const zone = V === MAP_VIEWS.zone;
   // On a phone the diagram is drawn small, so markers and labels grow to stay readable.
-  const [width, setWidth] = useState(CREASE_W);
+  const [width, setWidth] = useState(V.w);
   useEffect(() => {
     const el = svgRef.current;
     if (!el || light || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width || CREASE_W));
+    const ro = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width || V.w));
     ro.observe(el);
     return () => ro.disconnect();
-  }, [light]);
+  }, [light, V.w]);
   const pts = (map || []).map((p, i) => (p ? { ...p, i } : null)).filter(Boolean);
   const firstIdx = pts.length ? pts[0].i : -1;
-  // On a narrow screen, zoom in on the crease (and wherever the steps are) instead of showing the
-  // whole width, so the markers have room; whatever is still small then grows a little.
-  const narrow = !light && width < 500;
+  // On a narrow screen, the crease view zooms in on the crease (and wherever the steps are)
+  // instead of showing the whole width, so the markers have room.
+  const narrow = !light && !zone && width < 500;
   const xs = pts.map((p) => p.x);
   const vbX = narrow ? Math.max(0, Math.min(150, ...xs.map((x) => x - 45))) : 0;
-  const vbW = narrow ? Math.min(CREASE_W, Math.max(566, ...xs.map((x) => x + 45))) - vbX : CREASE_W;
-  const k = light ? 1 : Math.max(1, Math.min(1.6, (560 / CREASE_W) * vbW / width));
+  const vbW = narrow ? Math.min(V.w, Math.max(566, ...xs.map((x) => x + 45))) - vbX : V.w;
+  const k = light ? 1 : Math.max(1, Math.min(zone ? 1.4 : 1.6, (560 / CREASE_W) * vbW / width));
   const r = 17 * k;
 
   const handleClick = (e) => {
     if (!onBoardClick || !svgRef.current) return;
     const box = svgRef.current.getBoundingClientRect();
     const x = Math.round(vbX + ((e.clientX - box.left) / box.width) * vbW);
-    const y = Math.round(((e.clientY - box.top) / box.height) * CREASE_H);
+    const y = Math.round(((e.clientY - box.top) / box.height) * V.h);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return; // e.g. a keyboard "click" with no position
-    onBoardClick({ x: Math.max(20, Math.min(CREASE_W - 20, x)), y: Math.max(20, Math.min(CREASE_H - 20, y)) });
+    onBoardClick({ x: Math.max(20, Math.min(V.w - 20, x)), y: Math.max(20, Math.min(V.h - 20, y)) });
   };
   // A gently curved arrow from one point to the next, stopping short of both markers.
   const pathBetween = (a, b) => {
@@ -2258,10 +2338,10 @@ function CreaseMap({ map, active, onPick, onBoardClick, editing = false, light =
   return (
     <svg
       ref={svgRef}
-      className={"crease-svg" + (editing ? " crease-svg--editing" : "")}
-      viewBox={`${vbX} 0 ${vbW} ${CREASE_H}`}
+      className={"crease-svg" + (zone ? " crease-svg--zone" : "") + (editing ? " crease-svg--editing" : "")}
+      viewBox={`${vbX} 0 ${vbW} ${V.h}`}
       role="img"
-      aria-label="Top-down crease diagram showing where each step of the drill happens"
+      aria-label={zone ? "Top-down diagram of the defensive zone showing where each step of the drill happens" : "Top-down crease diagram showing where each step of the drill happens"}
       onClick={handleClick}
     >
       <defs>
@@ -2269,21 +2349,7 @@ function CreaseMap({ map, active, onPick, onBoardClick, editing = false, light =
         <marker id={ids + "w"} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill={c.ink} /></marker>
         <pattern id={ids + "n"} width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 0L8 8M8 0L0 8" stroke={c.line} strokeWidth="1" /></pattern>
       </defs>
-      <rect x={vbX} y="0" width={vbW} height={CREASE_H} rx="10" fill={c.bg} stroke={light ? c.line : "none"} />
-      <rect x="288" y="14" width="140" height="36" rx="6" fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="1.5" />
-      <line x1={vbX + 20} y1="50" x2={vbX + vbW - 20} y2="50" stroke="var(--accent)" strokeWidth="2" opacity="0.8" />
-      {/* NHL crease to scale with the 6 ft net: straight sides 4 ft either side of centre running
-          4.5 ft out, closed by an arc of 6 ft radius, with the small hash marks 4 ft from the goal line. */}
-      <path d="M264.7 50 L264.7 154.4 A140 140 0 0 0 451.3 154.4 L451.3 50" fill="var(--accent)" fillOpacity={light ? 0.06 : 0.1} stroke="var(--accent)" strokeWidth="1.5" />
-      <line x1="264.7" y1="143.3" x2="274.4" y2="143.3" stroke="var(--accent)" strokeWidth="1.5" />
-      <line x1="451.3" y1="143.3" x2="441.6" y2="143.3" stroke="var(--accent)" strokeWidth="1.5" />
-      <line x1="358" y1="300" x2="288" y2="50" stroke={c.line} strokeWidth="1" strokeDasharray="3 5" />
-      <line x1="358" y1="300" x2="428" y2="50" stroke={c.line} strokeWidth="1" strokeDasharray="3 5" />
-      <circle cx="288" cy="50" r="5" fill={c.ink} />
-      <circle cx="428" cy="50" r="5" fill={c.ink} />
-      <ellipse cx="358" cy="302" rx="9" ry="5" fill={c.ink} />
-      <text x="374" y="306" fill={c.label} fontSize={11 * k} className="crease-text">SHOOTER</text>
-      <text x={vbX + 24} y="40" fill={c.label} fontSize={11 * k} className="crease-text">GOAL LINE</text>
+      {zone ? <ZoneSurface c={c} ids={ids} /> : <CreaseSurface c={c} ids={ids} vbX={vbX} vbW={vbW} k={k} light={light} />}
 
       {pts.map((p, n) => {
         if (n === 0 || p.move === "rotate") return null;
@@ -2334,7 +2400,7 @@ function CreaseMapLegend() {
 }
 
 // Drill editor: pick a step, click the crease to place it, choose how the goalie gets there.
-function CreaseMapEditor({ stepsText, map, onChange }) {
+function CreaseMapEditor({ stepsText, map, view = "crease", onChange, onViewChange }) {
   const steps = parseLines(stepsText || "");
   const aligned = alignMapToSteps(map, steps);
   const [active, setActive] = useState(0);
@@ -2361,6 +2427,15 @@ function CreaseMapEditor({ stepsText, map, onChange }) {
   }
   return (
     <div className="map-editor">
+      <div className="map-view-row">
+        <span className="map-editor-hint">View</span>
+        <div className="map-move-group" role="group" aria-label="Map view">
+          {Object.entries(MAP_VIEWS).map(([key, v]) => (
+            <button type="button" key={key} className={"map-move-btn" + (view === key ? " active" : "")}
+              onClick={() => { if (view !== key) onViewChange(key, convertMapPoints(aligned, view, key)); }}>{v.label}</button>
+          ))}
+        </div>
+      </div>
       <div className="map-editor-steps">
         {steps.map((s, i) => (
           <button type="button" key={i} title={s}
@@ -2371,9 +2446,9 @@ function CreaseMapEditor({ stepsText, map, onChange }) {
           </button>
         ))}
       </div>
-      <p className="map-editor-hint">Step {activeIdx + 1} selected. Click on the crease to place it{activePoint ? " (click again to move it)" : ""}.</p>
+      <p className="map-editor-hint">Step {activeIdx + 1} selected. Click on the map to place it{activePoint ? " (click again to move it)" : ""}.</p>
       <div className="map-editor-board">
-        <CreaseMap map={aligned} active={activeIdx} editing onPick={setActive} onBoardClick={place} />
+        <CreaseMap map={aligned} view={view} active={activeIdx} editing onPick={setActive} onBoardClick={place} />
       </div>
       <div className="map-editor-controls">
         <div className="map-move-group" role="group" aria-label="How the goalie gets to this step">
@@ -2415,7 +2490,7 @@ function DrillBody({ drill }) {
                 <span className="map-card-label">MOVEMENT MAP</span>
                 <CreaseMapLegend />
               </div>
-              <CreaseMap map={map} active={activeStep} onPick={toggleStep} />
+              <CreaseMap map={map} view={drill.movementMapView} active={activeStep} onPick={toggleStep} />
             </div>
           )}
           {drill.steps.length > 0 && <ol className="steps">{drill.steps.map((s, i) => (
@@ -3514,7 +3589,7 @@ function AdminDashboard({ content }) {
 
 const BLANK_DRILL = {
   title: "", category: "", duration: "", equipment: "",
-  description: "", objective: "", stepsText: "", performText: "", movementMap: [], sets: "", reps: "", rounds: "", coachingPointsText: "", mistakesText: "", planRows: [], levelPlans: {}, dayPlans: {}, published: false,
+  description: "", objective: "", stepsText: "", performText: "", movementMap: [], movementMapView: "crease", sets: "", reps: "", rounds: "", coachingPointsText: "", mistakesText: "", planRows: [], levelPlans: {}, dayPlans: {}, published: false,
   imageAssetId: null, imageUrl: "", videoAssetId: null, videoUrl: "", diagramUrl: "",
 };
 
@@ -3790,6 +3865,7 @@ function AdminDrills({ content, updateContent }) {
     steps: parseLines(d.stepsText),
     // Saved lined up with the steps (and empty when nothing is placed).
     movementMap: (() => { const m = alignMapToSteps(d.movementMap, parseLines(d.stepsText)); return mapHasPoints(m) ? m : []; })(),
+    movementMapView: d.movementMapView === "zone" ? "zone" : "crease",
     performText: richTextToPlain(d.performText) ? d.performText : "",
     sets: (d.sets || "").trim(),
     reps: (d.reps || "").trim(),
@@ -3910,7 +3986,11 @@ function AdminDrills({ content, updateContent }) {
             <label className="admin-form-span2">Steps (one per line)<textarea rows={4} value={draft.stepsText} onChange={(e) => setDraft({ ...draft, stepsText: e.target.value })} placeholder={"Start in your stance.\nMove to the post.\n..."} /></label>
             <div className="admin-form-span2 map-editor-field">
               <span className="map-editor-title">Movement map <em>optional</em></span>
-              <CreaseMapEditor stepsText={draft.stepsText} map={draft.movementMap} onChange={(movementMap) => setDraft((d) => ({ ...d, movementMap }))} />
+              <CreaseMapEditor
+                stepsText={draft.stepsText} map={draft.movementMap} view={draft.movementMapView || "crease"}
+                onChange={(movementMap) => setDraft((d) => ({ ...d, movementMap }))}
+                onViewChange={(movementMapView, movementMap) => setDraft((d) => ({ ...d, movementMapView, movementMap }))}
+              />
             </div>
             <div className="admin-form-span2 drill-volume-fields">
               <label>Sets<input value={draft.sets || ""} onChange={(e) => setDraft({ ...draft, sets: e.target.value })} placeholder="e.g. 3" maxLength={50} /></label>
@@ -6854,7 +6934,7 @@ function PrintSheet({ content, date, assignment }) {
                 <PrintHeading>How to perform</PrintHeading>
                 {richTextToPlain(drill.performText) && <RichText className="print-rich" value={drill.performText} />}
                 {mapHasPoints(alignMapToSteps(drill.movementMap, drill.steps)) && (
-                  <div className="print-map"><CreaseMap map={alignMapToSteps(drill.movementMap, drill.steps)} light /></div>
+                  <div className={"print-map" + (drill.movementMapView === "zone" ? " print-map--zone" : "")}><CreaseMap map={alignMapToSteps(drill.movementMap, drill.steps)} view={drill.movementMapView} light /></div>
                 )}
                 {drill.steps.length > 0 && <ol className="print-steps">{drill.steps.map((st, i) => <li key={i}><span className="print-step-num">{i + 1}</span><span>{st}</span></li>)}</ol>}
               </>
@@ -8466,6 +8546,9 @@ button:focus {
 .map-move-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .map-editor-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .print-map { max-width: 340px; margin: 6px 0 8px; }
+.print-map--zone { max-width: 200px; }
+.crease-svg--zone { max-width: 460px; margin: 0 auto; }
+.map-view-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 @media (max-width: 640px) { .crease-legend { gap: 10px; font-size: 11px; } .map-card { padding: 12px; } }
 .drill-volume-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .drill-volume-tile { display: flex; flex-direction: column; gap: 4px; min-width: 110px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
