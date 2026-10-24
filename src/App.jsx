@@ -2599,19 +2599,20 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
       })}
 
       {list.filter((p) => p.kind === "line").map((p) => {
-        const d = smoothStroke(p.pts.map(([dx, dy]) => [p.x + dx, p.y + dy]));
+        const abs = p.pts.map(([dx, dy]) => [p.x + dx, p.y + dy]);
+        const d = smoothStroke(abs);
         const color = p.color === "ink" ? c.ink : "var(--accent)";
         return (
           <g key={"l" + p.i} data-idx={editing ? p.i : undefined} className={editing ? "crease-item" : undefined}>
             {active === p.i && <path d={d} fill="none" stroke="var(--accent)" strokeWidth={12} strokeLinecap="round" strokeLinejoin="round" opacity="0.3" />}
             {editing && <path d={d} fill="none" stroke="transparent" strokeWidth={16} strokeLinecap="round" />}
-            <MapLine d={d} line={p} color={color} bg={c.bg} width={2.4 * Math.min(k, 1.4)} arrow={`url(#${ids}${p.color === "ink" ? "w" : "a"})`} />
+            <MapLine pts={abs} line={p} color={color} bg={c.bg} width={2.4 * Math.min(k, 1.4)} arrow={`url(#${ids}${p.color === "ink" ? "w" : "a"})`} />
           </g>
         );
       })}
       {stroke && stroke.length > 1 && (
         <g opacity="0.8">
-          <MapLine d={smoothStroke(drawStyle.shot ? [stroke[0], stroke[stroke.length - 1]] : stroke)} line={drawStyle}
+          <MapLine pts={drawStyle.shot ? [stroke[0], stroke[stroke.length - 1]] : stroke} line={drawStyle}
             color={drawStyle.color === "ink" ? c.ink : "var(--accent)"} bg={c.bg} width={2.4 * Math.min(k, 1.4)} />
         </g>
       )}
@@ -2680,18 +2681,31 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
   );
 }
 
-// A drawn line: solid, dashed or a shot (two parallel lines, made by covering the middle of a wide
-// stroke with the ice colour), with the arrowhead (arrow: a marker url) on a plain centre line.
-function MapLine({ d, line, color, bg, width, arrow }) {
-  const head = line.arrow && arrow;
-  if (line.shot) return (<>
-    <path d={d} fill="none" stroke={color} strokeWidth={width * 2.6} strokeLinejoin="round" />
-    <path d={d} fill="none" stroke={bg} strokeWidth={width * 1.1} strokeLinejoin="round" />
-    {head && <path d={d} fill="none" stroke="transparent" strokeWidth={width} markerEnd={arrow} />}
-  </>);
+// A drawn line through pts: solid, dashed or a shot (two parallel lines, made by covering the
+// middle of a wide stroke with the ice colour). A plain line's arrowhead is the marker arrow (a url);
+// a shot gets its own, wider head, and its lines stop where the head begins so they don't show
+// either side of it.
+function MapLine({ pts, line, color, bg, width, arrow }) {
+  if (line.shot) {
+    let body = pts, head = null;
+    const [px, py] = pts[pts.length - 2], [ex, ey] = pts[pts.length - 1];
+    const seg = Math.hypot(ex - px, ey - py);
+    if (line.arrow && seg > 0) {
+      const ux = (ex - px) / seg, uy = (ey - py) / seg, len = width * 5, half = width * 2.6;
+      const bx = ex - ux * len, by = ey - uy * len;
+      head = `M${ex} ${ey} L${bx - uy * half} ${by + ux * half} L${bx + uy * half} ${by - ux * half} Z`;
+      body = [...pts.slice(0, -1), [ex - ux * len * 0.8, ey - uy * len * 0.8]];
+    }
+    const d = smoothStroke(body);
+    return (<>
+      <path d={d} fill="none" stroke={color} strokeWidth={width * 2.6} strokeLinejoin="round" />
+      <path d={d} fill="none" stroke={bg} strokeWidth={width * 1.1} strokeLinejoin="round" />
+      {head && <path d={head} fill={color} />}
+    </>);
+  }
   return (
-    <path d={d} fill="none" stroke={color} strokeWidth={width} strokeLinecap="round" strokeLinejoin="round"
-      strokeDasharray={line.dash ? "8 6" : undefined} markerEnd={head || undefined} />
+    <path d={smoothStroke(pts)} fill="none" stroke={color} strokeWidth={width} strokeLinecap="round" strokeLinejoin="round"
+      strokeDasharray={line.dash ? "8 6" : undefined} markerEnd={line.arrow && arrow ? arrow : undefined} />
   );
 }
 
