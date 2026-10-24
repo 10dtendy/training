@@ -2279,11 +2279,11 @@ function ZoneSurface({ c, ids }) {
       {/* Dark behind the rounded corners too, so the whole map is one dark panel. */}
       <rect x="0" y="0" width={W} height="470" rx="10" fill={c.bg} />
       <path d={`M1 470 L1 224 A223 223 0 0 1 224 1 L${W - 224} 1 A223 223 0 0 1 ${W - 1} 224 L${W - 1} 470`} fill="none" stroke={c.boards} strokeWidth="1.5" />
-      <line x1="46" y1="88" x2={W - 46} y2="88" stroke={red} strokeWidth="2" />
       <line x1={cx - 88} y1="88" x2={cx - 112} y2="0" stroke={red} strokeWidth="2" />
       <line x1={cx + 88} y1="88" x2={cx + 112} y2="0" stroke={red} strokeWidth="2" />
       <path d={`M${cx - 32} 88 L${cx - 32} 123.8 A48 48 0 0 0 ${cx + 32} 123.8 L${cx + 32} 88`} fill={red} fillOpacity="0.12" stroke={red} strokeWidth="2" />
       <path d={netPath(cx - 24, cx + 24, 61, 88, 5)} fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="2" />
+      <line x1="46" y1="88" x2={W - 46} y2="88" stroke={red} strokeWidth="2" />
       {circle(cx - 250)}{circle(cx + 250)}
     </>
   );
