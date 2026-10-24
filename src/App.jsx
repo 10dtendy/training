@@ -5,7 +5,7 @@ import {
   Image as ImageIcon, Settings as SettingsIcon, Download, LogOut, Mail, Lock, UploadCloud,
   FileText, Video as VideoIcon, AlertTriangle, Home, BarChart3, Tag, Search, CircleDot, Armchair,
   Copy, LayoutTemplate, Megaphone, List, Camera, Cookie, ListOrdered, Heading, Link2, Scale, Info,
-  Hand, RotateCw, Target, Gauge
+  RotateCw
 } from "lucide-react";
 // Brand images ship as separate files (cached by the browser, never inside the JS bundle).
 import LOGO_SRC from "./assets/logo.png";
@@ -2392,8 +2392,6 @@ function CreaseMapEditor({ stepsText, map, onChange }) {
   );
 }
 
-const COACH_ICONS = [Target, Hand, Gauge];
-
 function DrillBody({ drill }) {
   // Empty sections are left out rather than shown as a heading with nothing under it.
   const map = alignMapToSteps(drill.movementMap, drill.steps);
@@ -2440,10 +2438,7 @@ function DrillBody({ drill }) {
         {drill.coachingPoints.length > 0 && (
         <section className="detail-block">
           <h2>Coaching points</h2>
-          <div className="chip-grid">{drill.coachingPoints.map((c, i) => {
-            const Icon = COACH_ICONS[i % COACH_ICONS.length];
-            return <div className="cue-card cue-card--icon" key={i}><span className="cue-icon" aria-hidden="true"><Icon size={17} /></span><span>{c}</span></div>;
-          })}</div>
+          <div className="chip-grid">{drill.coachingPoints.map((c, i) => <div className="cue-card" key={i}>{c}</div>)}</div>
         </section>
         )}
         {drill.mistakes.length > 0 && (
@@ -8449,8 +8444,6 @@ button:focus {
 .step-num--push { background: var(--bg); border: 2px solid var(--accent); }
 .step-num--recover { background: var(--bg); border: 2px dashed var(--text); }
 .step-num--rotate { background: var(--bg); border: 1.5px solid var(--text); }
-.cue-card--icon { display: flex; flex-direction: column; gap: 12px; }
-.cue-icon { width: 34px; height: 34px; border-radius: 9px; background: var(--accent-dim); color: var(--accent); display: flex; align-items: center; justify-content: center; }
 .mistake-label { display: inline-flex; align-items: center; gap: 5px; }
 .mistake-label--right { color: var(--accent); }
 .map-editor-field { display: flex; flex-direction: column; gap: 8px; }
