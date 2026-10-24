@@ -2293,10 +2293,10 @@ function simplifyStroke(pts, tol = 1.5) {
   if (far <= tol) return [pts[0], pts[pts.length - 1]];
   return [...simplifyStroke(pts.slice(0, at + 1), tol).slice(0, -1), ...simplifyStroke(pts.slice(at), tol)];
 }
-// Lines the cones up: the two farthest apart stay put (straightened when the row is within 8° of
+// Lines up the cones among the items at idxs: the two farthest apart stay put (straightened when the row is within 8° of
 // level or upright) and the others go evenly spaced between them, in their order along the line.
-function lineUpCones(items) {
-  const cones = items.flatMap((p, i) => (p.kind === "cone" ? [i] : []));
+function lineUpCones(items, idxs) {
+  const cones = idxs.filter((i) => items[i]?.kind === "cone");
   if (cones.length < 2) return items;
   let a = cones[0], b = cones[1], far = -1;
   cones.forEach((i) => cones.forEach((j) => {
@@ -2455,12 +2455,14 @@ function RinkGoal({ p, s, c, ids, light }) {
 }
 
 // Draws a map. active/onPick use indexes into items. In the editor (editing), a click on empty ice
-// calls onPlace, dragging an item calls onMoveItem when it's dropped and a click on an item picks
-// it; elsewhere only the goalie steps can be picked.
-function CreaseMap({ items, view = "crease", active = null, onPick, editing = false, onPlace, onMoveItem, drawStyle = null, onDraw, light = false }) {
+// calls onPlace, a drag on empty ice draws a selection box (onBoxSelect), dragging an item (or the
+// selection it belongs to) calls onMoveItems when it's dropped and a click on an item picks it
+// (additive with Shift, Cmd or Ctrl); elsewhere only the goalie steps can be picked.
+function CreaseMap({ items, view = "crease", active = null, onPick, editing = false, onPlace, onMoveItems, onBoxSelect, drawStyle = null, onDraw, light = false }) {
   const svgRef = useRef(null);
   const press = useRef(null); // the pointer press in progress in the editor
-  const [drag, setDrag] = useState(null); // { idx, x, y } while an item is being dragged
+  const [drag, setDrag] = useState(null); // { idxs, dx, dy } while items are being dragged
+  const [box, setBox] = useState(null); // { x1, y1, x2, y2 } while a selection box is being dragged
   const [stroke, setStroke] = useState(null); // points of the line being drawn (drawStyle set)
   const ids = useId().replace(/:/g, "");
   const c = light ? CREASE_PALETTES.light : CREASE_PALETTES.dark;
@@ -2475,7 +2477,11 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
     ro.observe(el);
     return () => ro.disconnect();
   }, [light, V.w]);
-  const list = items.map((p, i) => (drag?.idx === i ? { ...p, x: drag.x, y: drag.y, i } : { ...p, i }));
+  const clampX = (x) => Math.round(Math.max(14, Math.min(V.w - 14, x)));
+  const clampY = (y) => Math.round(Math.max(14, Math.min(V.h - 14, y)));
+  const list = items.map((p, i) => (drag?.idxs.includes(i) ? { ...p, x: clampX(p.x + drag.dx), y: clampY(p.y + drag.dy), i } : { ...p, i }));
+  // active is one index (the drill page) or a list of them (the editor's selection).
+  const isActive = (i) => (Array.isArray(active) ? active.includes(i) : active === i);
   const k = light ? 1 : Math.max(1, Math.min(zone ? 1.4 : 1.6, (560 / 716) * V.w / width));
   const r = 17 * k;
   // A step shown as a goalie drawing gets the drawing's box; rad is how far its arrows stop short.
@@ -2487,21 +2493,22 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
     return { ...p, drawing, box, rad: Math.max(box.w, box.h) * 0.42 };
   });
 
-  // dx/dy keep a dragged item where it was grabbed instead of jumping its centre to the pointer.
-  const toMap = (e, dx = 0, dy = 0) => {
+  // The pointer's spot on the map; clamped keeps it inside the ice.
+  const toMap = (e, clamped = true) => {
     const ctm = svgRef.current?.getScreenCTM();
     if (!ctm) return null;
     const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(ctm.inverse());
     if (!Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return null;
-    return { x: Math.round(Math.max(14, Math.min(V.w - 14, pt.x + dx))), y: Math.round(Math.max(14, Math.min(V.h - 14, pt.y + dy))) };
+    return clamped ? { x: clampX(pt.x), y: clampY(pt.y) } : { x: pt.x, y: pt.y };
   };
   const pointer = editing ? {
     onPointerDown: (e) => {
       if (e.button) return;
       const el = e.target.closest?.("[data-idx]");
       const idx = el ? Number(el.dataset.idx) : null;
-      const at = idx !== null && toMap(e);
-      press.current = { idx, sx: e.clientX, sy: e.clientY, moved: false, dx: at ? items[idx].x - at.x : 0, dy: at ? items[idx].y - at.y : 0 };
+      // Grabbing one of several selected items drags them all.
+      const idxs = idx !== null && Array.isArray(active) && active.length > 1 && active.includes(idx) ? active : [idx];
+      press.current = { idx, idxs, sx: e.clientX, sy: e.clientY, at: toMap(e, false), moved: false, additive: e.shiftKey || e.metaKey || e.ctrlKey };
       try { svgRef.current.setPointerCapture(e.pointerId); } catch { /* not supported */ }
       // With the Draw tool, a press on empty ice starts a line.
       const start = idx === null && drawStyle && toMap(e);
@@ -2514,11 +2521,13 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
         if (pt && Math.hypot(pt.x - last[0], pt.y - last[1]) >= 3) { p.draw = [...p.draw, [pt.x, pt.y]]; setStroke(p.draw); }
         return;
       }
-      if (!p || p.idx === null) return;
+      if (!p || !p.at) return;
       if (!p.moved && Math.hypot(e.clientX - p.sx, e.clientY - p.sy) < 5) return;
       p.moved = true;
-      const pt = toMap(e, p.dx, p.dy);
-      if (pt) setDrag({ idx: p.idx, ...pt });
+      const pt = toMap(e, false);
+      if (!pt) return;
+      if (p.idx === null) setBox({ x1: p.at.x, y1: p.at.y, x2: pt.x, y2: pt.y }); // a selection box on empty ice
+      else setDrag({ idxs: p.idxs, dx: pt.x - p.at.x, dy: pt.y - p.at.y });
     },
     onPointerUp: (e) => {
       const p = press.current;
@@ -2532,16 +2541,21 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
         // A shot is drawn straight, from where the stroke starts to where it ends.
         if (len >= 12) { onDraw?.(drawStyle.shot ? [p.draw[0], p.draw[p.draw.length - 1]] : pts); return; }
       }
+      const pt = toMap(e, false);
       if (p.idx !== null) {
-        if (!p.moved) onPick?.(p.idx);
-        else { const pt = toMap(e, p.dx, p.dy); if (pt) onMoveItem?.(p.idx, pt); }
+        if (!p.moved) onPick?.(p.idx, p.additive);
+        else if (pt && p.at) onMoveItems?.(p.idxs, Math.round(pt.x - p.at.x), Math.round(pt.y - p.at.y));
         setDrag(null);
+      } else if (p.moved && pt && p.at) {
+        const [x1, x2] = [Math.min(p.at.x, pt.x), Math.max(p.at.x, pt.x)], [y1, y2] = [Math.min(p.at.y, pt.y), Math.max(p.at.y, pt.y)];
+        onBoxSelect?.(items.flatMap((q, i) => (q.x >= x1 && q.x <= x2 && q.y >= y1 && q.y <= y2 ? [i] : [])), p.additive);
+        setBox(null);
       } else if (Math.hypot(e.clientX - p.sx, e.clientY - p.sy) < 8) {
         const pt = toMap(e);
         if (pt) onPlace?.(pt);
       }
     },
-    onPointerCancel: () => { press.current = null; setDrag(null); setStroke(null); },
+    onPointerCancel: () => { press.current = null; setDrag(null); setStroke(null); setBox(null); },
   } : {};
   // A gently curved arrow from one point to the next, stopping short of both markers.
   // offset shifts the whole curve sideways (for the second line of a Double Push).
@@ -2557,7 +2571,7 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
     const cx = (sx + ex) / 2 - uy * bend, cy = (sy + ey) / 2 + ux * bend;
     return `M${sx.toFixed(1)} ${sy.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}`;
   };
-  const ring = (p, size) => active === p.i && <circle cx={p.x} cy={p.y} r={size + 8} fill="none" stroke="var(--accent)" strokeWidth="2" opacity="0.55" />;
+  const ring = (p, size) => isActive(p.i) && <circle cx={p.x} cy={p.y} r={size + 8} fill="none" stroke="var(--accent)" strokeWidth="2" opacity="0.55" />;
 
   return (
     <svg
@@ -2604,7 +2618,7 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
         const color = p.color === "ink" ? c.ink : "var(--accent)";
         return (
           <g key={"l" + p.i} data-idx={editing ? p.i : undefined} className={editing ? "crease-item" : undefined}>
-            {active === p.i && <path d={d} fill="none" stroke="var(--accent)" strokeWidth={12} strokeLinecap="round" strokeLinejoin="round" opacity="0.3" />}
+            {isActive(p.i) && <path d={d} fill="none" stroke="var(--accent)" strokeWidth={12} strokeLinecap="round" strokeLinejoin="round" opacity="0.3" />}
             {editing && <path d={d} fill="none" stroke="transparent" strokeWidth={16} strokeLinecap="round" />}
             <MapLine pts={abs} line={p} color={color} bg={c.bg} width={2.4 * Math.min(k, 1.4)} arrow={`url(#${ids}${p.color === "ink" ? "w" : "a"})`} />
           </g>
@@ -2656,7 +2670,7 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
               const { w, h } = p.box, br = 10 * Math.min(k, 1.4);
               const bx = p.x - w / 2 + br * 0.4, by = p.y - h / 2 + br * 0.4;
               return (<>
-                {active === p.i && <rect x={p.x - w / 2 - 8} y={p.y - h / 2 - 8} width={w + 16} height={h + 16} rx="10" fill="none" stroke="var(--accent)" strokeWidth="2" opacity="0.55" />}
+                {isActive(p.i) && <rect x={p.x - w / 2 - 8} y={p.y - h / 2 - 8} width={w + 16} height={h + 16} rx="10" fill="none" stroke="var(--accent)" strokeWidth="2" opacity="0.55" />}
                 <rect x={p.x - w / 2} y={p.y - h / 2} width={w} height={h} fill="transparent" />
                 <GoalieDrawing drawing={p.drawing} x={p.x} y={p.y} w={w} h={h} color={c.ink} flip={p.flip} />
                 <circle cx={bx} cy={by} r={br}
@@ -2677,6 +2691,10 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
           </g>
         );
       })}
+      {box && (
+        <rect x={Math.min(box.x1, box.x2)} y={Math.min(box.y1, box.y2)} width={Math.abs(box.x2 - box.x1)} height={Math.abs(box.y2 - box.y1)}
+          fill="var(--accent)" fillOpacity="0.08" stroke="var(--accent)" strokeWidth="1.5" strokeDasharray="5 4" />
+      )}
     </svg>
   );
 }
@@ -2776,9 +2794,15 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
   const [drawing, setDrawing] = useState(""); // goalie drawing for the next step placed, "" = circle
   const [lineStyle, setLineStyle] = useState({ color: "red", dash: false, shot: false, arrow: true }); // for the next line drawn
   const drawings = goalieDrawings();
-  const [selected, setSelected] = useState(null);
+  // The selection: indexes into items. With exactly one item selected its own options show.
+  const [selection, setSelection] = useState([]);
+  const chosen = selection.filter((i) => i < items.length);
+  const selected = chosen.length === 1 ? chosen[0] : null;
+  const setSelected = (i) => setSelection(i === null ? [] : [i]);
+  const clipboard = useRef([]);
   const [history, setHistory] = useState([]);
-  const sel = selected !== null && selected < items.length ? items[selected] : null;
+  const sel = selected !== null ? items[selected] : null;
+  const chosenCones = chosen.filter((i) => items[i].kind === "cone");
   // 1-based step number of the selected goalie step.
   const selStep = sel?.kind === "goalie" ? items.slice(0, selected + 1).filter((p) => p.kind === "goalie").length : 0;
 
@@ -2797,7 +2821,7 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
     else onChange(last.items);
   };
   const place = ({ x, y }) => {
-    if (sel) { setSelected(null); return; } // a click on empty ice first lets go of the selection
+    if (chosen.length) { setSelected(null); return; } // a click on empty ice first lets go of the selection
     if (tool === "line") return; // lines are drawn, not clicked
     const item = tool === "goalie" ? (drawing ? { kind: "goalie", x, y, move, drawing } : { kind: "goalie", x, y, move })
       : tool === "net" ? { kind: "net", x, y, rot: 0, crease: true }
@@ -2827,18 +2851,33 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
   };
   const lineOpts = sel?.kind === "line" ? sel : lineStyle;
   const remove = () => {
-    commit(items.filter((_, j) => j !== selected));
+    commit(items.filter((_, j) => !chosen.includes(j)));
     setSelected(null);
   };
+  // Adds copies of the given items, a little down and to the right, and selects the copies.
+  const V = MAP_VIEWS[view] || MAP_VIEWS.crease;
+  const clampTo = (v, max) => Math.round(Math.max(14, Math.min(max - 14, v)));
+  const paste = (src) => {
+    if (!src.length) return;
+    const copies = src.map((p) => ({ ...p, x: clampTo(p.x + 24, V.w), y: clampTo(p.y + 24, V.h) }));
+    commit([...items, ...copies]);
+    setSelection(copies.map((_, n) => items.length + n));
+  };
+  const copy = () => paste(chosen.map((i) => items[i]));
   const onKeyDown = (e) => {
-    if (!sel) return;
-    if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); remove(); }
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key.toLowerCase() === "c" && chosen.length) { e.preventDefault(); clipboard.current = chosen.map((i) => items[i]); }
+    else if (mod && e.key.toLowerCase() === "v" && clipboard.current.length) { e.preventDefault(); paste(clipboard.current); clipboard.current = clipboard.current.map((p) => ({ ...p, x: p.x + 24, y: p.y + 24 })); }
+    else if (mod && e.key.toLowerCase() === "d" && chosen.length) { e.preventDefault(); copy(); }
+    else if (!chosen.length) return;
+    else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); remove(); }
     else if (e.key === "Escape") setSelected(null);
   };
   const missing = goalies.slice(stepCount);
   const addMissingSteps = () => onAddSteps(missing.map((p, n) => (stepCount + n === 0 ? "Starting position" : MOVE_BY_ID[p.move].noLine ? "New position" : MOVE_BY_ID[p.move].label)));
 
-  const showMoves = sel ? selStep > 1 : tool === "goalie" && goalies.length > 0;
+  const multi = chosen.length > 1;
+  const showMoves = !multi && (sel ? selStep > 1 : tool === "goalie" && goalies.length > 0);
   const nextStep = goalies.length + 1;
   return (
     <div className="map-editor">
@@ -2850,10 +2889,6 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
           ))}
         </div>
         <div className="map-editor-actions">
-          {items.filter((p) => p.kind === "cone").length >= 2 && (
-            <button type="button" className="btn btn--ghost btn--small" title="Keeps the two outer cones in place and spaces the others evenly in a straight line between them"
-              onClick={() => commit(lineUpCones(items))}>Line up cones</button>
-          )}
           <button type="button" className="btn btn--ghost btn--small" disabled={!history.length} onClick={undo}><Undo2 size={13} /> Undo</button>
           <button type="button" className="btn btn--ghost btn--small" disabled={!items.length} onClick={() => { commit([]); setSelected(null); }}>Clear</button>
         </div>
@@ -2868,10 +2903,13 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
         </div>
       </div>
       <div className="map-editor-board" tabIndex={-1} onKeyDown={onKeyDown}>
-        <CreaseMap items={items} view={view} active={selected} editing
-          onPick={(i) => setSelected((s) => (s === i ? null : i))} onPlace={place}
-          onMoveItem={(i, pt) => commit(items.map((p, j) => (j === i ? { ...p, ...pt } : p)))}
-          drawStyle={tool === "line" && !sel ? lineStyle : null}
+        <CreaseMap items={items} view={view} active={chosen} editing onPlace={place}
+          onPick={(i, additive) => setSelection(additive
+            ? (chosen.includes(i) ? chosen.filter((j) => j !== i) : [...chosen, i])
+            : (selected === i ? [] : [i]))}
+          onBoxSelect={(idxs, additive) => setSelection(additive ? [...new Set([...chosen, ...idxs])] : idxs)}
+          onMoveItems={(idxs, dx, dy) => commit(items.map((p, j) => (idxs.includes(j) ? { ...p, x: clampTo(p.x + dx, V.w), y: clampTo(p.y + dy, V.h) } : p)))}
+          drawStyle={tool === "line" && !chosen.length ? lineStyle : null}
           onDraw={(pts) => commit([...items, { kind: "line", x: pts[0][0], y: pts[0][1], pts: pts.map(([x, y]) => [x - pts[0][0], y - pts[0][1]]), ...lineStyle }])} />
       </div>
       {showMoves && (
@@ -2884,7 +2922,7 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
           </div>
         </div>
       )}
-      {drawings.length > 0 && (sel ? sel.kind === "goalie" : tool === "goalie") && (
+      {drawings.length > 0 && !multi && (sel ? sel.kind === "goalie" : tool === "goalie") && (
         <div className="map-editor-row">
           <span className="map-editor-label">{sel ? `Step ${selStep} as` : `Step ${nextStep} as`}</span>
           <div className="map-move-group" role="group" aria-label="Show this step as a circle or a goalie drawing">
@@ -2900,7 +2938,7 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
           )}
         </div>
       )}
-      {(sel ? sel.kind === "line" : tool === "line") && (
+      {!multi && (sel ? sel.kind === "line" : tool === "line") && (
         <div className="map-editor-row">
           <span className="map-editor-label">{sel ? "Line" : "Draw"}</span>
           <div className="map-move-group" role="group" aria-label="Line colour">
@@ -2927,12 +2965,19 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
           )}
         </div>
       )}
-      {sel ? (
+      {chosen.length ? (
         <div className="map-editor-row map-editor-row--split">
           <span className="map-editor-hint">
-            {sel.kind === "goalie" ? `Step ${selStep}${selStep === 1 ? " (starting position)" : ""}` : sel.kind === "line" ? "Line" : MAP_OBJECT_BY_ID[sel.kind].label} selected. Drag it to move it.
+            {multi
+              ? `${chosen.length} ${chosenCones.length === chosen.length ? "cones" : "items"} selected. Drag one to move them all.`
+              : `${sel.kind === "goalie" ? `Step ${selStep}${selStep === 1 ? " (starting position)" : ""}` : sel.kind === "line" ? "Line" : MAP_OBJECT_BY_ID[sel.kind].label} selected. Drag it to move it.`}
           </span>
           <div className="map-editor-actions">
+            {chosenCones.length >= 2 && (
+              <button type="button" className="btn btn--ghost btn--small" title="Keeps the two outer selected cones in place and spaces the others evenly in a straight line between them"
+                onClick={() => commit(lineUpCones(items, chosenCones))}>Line up cones</button>
+            )}
+            <button type="button" className="btn btn--ghost btn--small" onClick={copy}><Copy size={13} /> Copy</button>
             <button type="button" className="btn btn--ghost btn--small" onClick={remove}><Trash2 size={13} /> Delete</button>
             <button type="button" className="btn btn--ghost btn--small" onClick={() => setSelected(null)}>Done</button>
           </div>
@@ -2943,7 +2988,8 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
             ? (goalies.length ? `Click the ice to add step ${nextStep}.` : "Click the ice where the goalie starts (step 1).")
             : tool === "line" ? "Draw on the ice with the mouse or your finger."
             : `Click the ice to add a ${MAP_OBJECT_BY_ID[tool].label.toLowerCase()}.`}
-          {" "}Drag anything to move it; click it to change or delete it.
+          {" "}Drag anything to move it; click it to change, copy or delete it.
+          {tool !== "line" && " Drag a box on empty ice (or Shift-click) to select several."}
         </p>
       )}
       {missing.length > 0 && (
