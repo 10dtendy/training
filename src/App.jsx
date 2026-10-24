@@ -2235,12 +2235,17 @@ function convertMapPoints(map, from, to) {
   }));
 }
 
+// The net from above: rounded at the back, straight posts down to the goal line.
+function netPath(left, right, back, goal, r) {
+  return `M${left} ${goal} L${left} ${back + r} A${r} ${r} 0 0 1 ${left + r} ${back} L${right - r} ${back} A${r} ${r} 0 0 1 ${right} ${back + r} L${right} ${goal} Z`;
+}
+
 function CreaseSurface({ c, ids, vbX, vbW, k, light }) {
   const G = MAP_VIEWS.crease.goalY; // the goal line, with room behind the net above it
   return (
     <>
       <rect x={vbX} y="0" width={vbW} height={CREASE_H} rx="10" fill={c.bg} stroke={light ? c.line : "none"} />
-      <rect x="288" y={G - 36} width="140" height="36" rx="6" fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="1.5" />
+      <path d={netPath(288, 428, G - 36, G, 6)} fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="1.5" />
       <line x1={vbX + 20} y1={G} x2={vbX + vbW - 20} y2={G} stroke="var(--accent)" strokeWidth="2" opacity="0.8" />
       {/* NHL crease to scale with the 6 ft net: straight sides 4 ft either side of centre running
           4.5 ft out, closed by an arc of 6 ft radius, with the small hash marks 4 ft from the goal line. */}
@@ -2278,7 +2283,7 @@ function ZoneSurface({ c, ids }) {
       <line x1={cx - 88} y1="88" x2={cx - 112} y2="0" stroke={red} strokeWidth="2" />
       <line x1={cx + 88} y1="88" x2={cx + 112} y2="0" stroke={red} strokeWidth="2" />
       <path d={`M${cx - 32} 88 L${cx - 32} 123.8 A48 48 0 0 0 ${cx + 32} 123.8 L${cx + 32} 88`} fill={red} fillOpacity="0.12" stroke={red} strokeWidth="2" />
-      <rect x={cx - 24} y="61" width="48" height="27" rx="5" fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="2" />
+      <path d={netPath(cx - 24, cx + 24, 61, 88, 5)} fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="2" />
       {circle(cx - 250)}{circle(cx + 250)}
     </>
   );
