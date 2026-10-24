@@ -2272,7 +2272,11 @@ function CreaseMap({ map, active, onPick, onBoardClick, editing = false, light =
       <rect x={vbX} y="0" width={vbW} height={CREASE_H} rx="10" fill={c.bg} stroke={light ? c.line : "none"} />
       <rect x="288" y="14" width="140" height="36" rx="6" fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="1.5" />
       <line x1={vbX + 20} y1="50" x2={vbX + vbW - 20} y2="50" stroke="var(--accent)" strokeWidth="2" opacity="0.8" />
-      <path d="M218 50 L218 110 A140 100 0 0 0 498 110 L498 50" fill="var(--accent)" fillOpacity={light ? 0.06 : 0.1} stroke="var(--accent)" strokeWidth="1.5" />
+      {/* NHL crease to scale with the 6 ft net: straight sides 4 ft either side of centre running
+          4.5 ft out, closed by an arc of 6 ft radius, with the small hash marks 4 ft from the goal line. */}
+      <path d="M264.7 50 L264.7 154.4 A140 140 0 0 0 451.3 154.4 L451.3 50" fill="var(--accent)" fillOpacity={light ? 0.06 : 0.1} stroke="var(--accent)" strokeWidth="1.5" />
+      <line x1="264.7" y1="143.3" x2="274.4" y2="143.3" stroke="var(--accent)" strokeWidth="1.5" />
+      <line x1="451.3" y1="143.3" x2="441.6" y2="143.3" stroke="var(--accent)" strokeWidth="1.5" />
       <line x1="358" y1="300" x2="288" y2="50" stroke={c.line} strokeWidth="1" strokeDasharray="3 5" />
       <line x1="358" y1="300" x2="428" y2="50" stroke={c.line} strokeWidth="1" strokeDasharray="3 5" />
       <circle cx="288" cy="50" r="5" fill={c.ink} />
