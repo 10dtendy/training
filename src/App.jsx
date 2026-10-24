@@ -2191,16 +2191,76 @@ const MAP_OBJECTS = [
 ];
 const MAP_OBJECT_BY_ID = Object.fromEntries(MAP_OBJECTS.map((o) => [o.id, o]));
 
+// Goalie drawings: every SVG in src/assets/goalie-drawings/, named after its file ("Butterfly.svg"
+// shows as "Butterfly"). Only the shapes are used and drawn in the map's own colour, so a drawing
+// is white on the dark map and dark on the printed sheet; filled shapes work best.
+const DRAWING_FILES = import.meta.glob("./assets/goalie-drawings/*.svg", { query: "?raw", import: "default", eager: true });
+const DRAWING_SHAPES = { path: ["d"], polygon: ["points"], polyline: ["points"], circle: ["cx", "cy", "r"], ellipse: ["cx", "cy", "rx", "ry"], rect: ["x", "y", "width", "height", "rx", "ry"], line: ["x1", "y1", "x2", "y2"] };
+function parseDrawing(raw) {
+  const svg = new DOMParser().parseFromString(raw, "image/svg+xml").documentElement;
+  if (svg.nodeName !== "svg") return null;
+  let vb = (svg.getAttribute("viewBox") || "").trim().split(/[\s,]+/).map(Number);
+  if (vb.length !== 4) vb = [0, 0, parseFloat(svg.getAttribute("width")), parseFloat(svg.getAttribute("height"))];
+  if (vb.some((n) => !Number.isFinite(n)) || vb[2] <= 0 || vb[3] <= 0) return null;
+  const shapes = [];
+  svg.querySelectorAll(Object.keys(DRAWING_SHAPES).join(",")).forEach((el) => {
+    if (el.closest("defs, clipPath, mask, symbol, pattern")) return;
+    const attrs = {};
+    DRAWING_SHAPES[el.nodeName].forEach((a) => { const v = el.getAttribute(a); if (v) attrs[a] = v; });
+    const transforms = [];
+    for (let n = el; n && n !== svg; n = n.parentNode) { const t = n.getAttribute?.("transform"); if (t) transforms.unshift(t); }
+    const stroked = el.nodeName === "line" || el.nodeName === "polyline" || el.getAttribute("fill") === "none";
+    shapes.push({ tag: el.nodeName, attrs, transform: transforms.join(" ") || undefined, stroked, strokeWidth: parseFloat(el.getAttribute("stroke-width")) || 1 });
+  });
+  return shapes.length ? { vb, shapes } : null;
+}
+let drawingsCache = null;
+function goalieDrawings() {
+  if (!drawingsCache) {
+    drawingsCache = Object.entries(DRAWING_FILES).map(([file, raw]) => {
+      const name = file.split("/").pop().replace(/\.svg$/i, "");
+      const parsed = typeof DOMParser === "undefined" ? null : parseDrawing(raw);
+      return parsed && { id: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""), label: name.replace(/[-_]+/g, " "), ...parsed };
+    }).filter(Boolean).sort((a, b) => a.label.localeCompare(b.label));
+  }
+  return drawingsCache;
+}
+const drawingById = (id) => (id ? goalieDrawings().find((d) => d.id === id) || null : null);
+
+// A drawing scaled to w×h with its centre at (x, y), mirrored left-right when flip is set.
+function GoalieDrawing({ drawing, x, y, w, h, color, flip }) {
+  const [vx, vy, vw] = drawing.vb;
+  const s = w / vw;
+  return (
+    <g transform={`translate(${flip ? x + w / 2 : x - w / 2} ${y - h / 2}) scale(${flip ? -s : s} ${s}) translate(${-vx} ${-vy})`}>
+      {drawing.shapes.map((sh, i) => React.createElement(sh.tag, {
+        key: i, ...sh.attrs, transform: sh.transform,
+        fill: sh.stroked ? "none" : color, stroke: sh.stroked ? color : undefined, strokeWidth: sh.stroked ? sh.strokeWidth : undefined,
+      }))}
+    </g>
+  );
+}
+// Width and height of a drawing on the map: its longer side is size units.
+function drawingBox(drawing, size) {
+  const [, , vw, vh] = drawing.vb;
+  return vw >= vh ? { w: size, h: (size * vh) / vw } : { w: (size * vw) / vh, h: size };
+}
+
 // Drops anything malformed. Maps saved before objects existed had one entry per step (null for a
 // step not on the map); their points become goalie steps. Nets and creases also have rot (degrees)
-// and a net has crease (whether its crease is drawn).
+// and a net has crease (whether its crease is drawn); a goalie step can have drawing (a goalie
+// drawing's id, shown instead of the numbered circle) and flip (drawing mirrored).
 function normalizeMap(map) {
   return (Array.isArray(map) ? map : [])
     .filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))
     .map((p) => {
       const kind = MAP_OBJECT_BY_ID[p.kind] ? p.kind : "goalie";
       const base = { kind, x: p.x, y: p.y };
-      if (kind === "goalie") return { ...base, move: normalizeMove(p.move) };
+      if (kind === "goalie") {
+        const step = { ...base, move: normalizeMove(p.move) };
+        if (typeof p.drawing !== "string" || !/^[a-z0-9-]{1,60}$/.test(p.drawing)) return step;
+        return p.flip ? { ...step, drawing: p.drawing, flip: true } : { ...step, drawing: p.drawing };
+      }
       if (kind !== "net" && kind !== "crease") return base;
       const rot = ((Math.round(Number(p.rot) || 0) % 360) + 360) % 360;
       return kind === "net" ? { ...base, rot, crease: p.crease !== false } : { ...base, rot };
@@ -2357,9 +2417,16 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
     return () => ro.disconnect();
   }, [light, V.w]);
   const list = items.map((p, i) => (drag?.idx === i ? { ...p, x: drag.x, y: drag.y, i } : { ...p, i }));
-  const goalies = list.filter((p) => p.kind === "goalie");
   const k = light ? 1 : Math.max(1, Math.min(zone ? 1.4 : 1.6, (560 / 716) * V.w / width));
   const r = 17 * k;
+  // A step shown as a goalie drawing gets the drawing's box; rad is how far its arrows stop short.
+  const drawSize = (zone ? 80 : 110) * Math.min(k, 1.3);
+  const goalies = list.filter((p) => p.kind === "goalie").map((p) => {
+    const drawing = drawingById(p.drawing);
+    if (!drawing) return p;
+    const box = drawingBox(drawing, drawSize);
+    return { ...p, drawing, box, rad: Math.max(box.w, box.h) * 0.42 };
+  });
 
   // dx/dy keep a dragged item where it was grabbed instead of jumping its centre to the pointer.
   const toMap = (e, dx = 0, dy = 0) => {
@@ -2406,11 +2473,11 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
   const pathBetween = (a, b, offset = 0) => {
     const dx = b.x - a.x, dy = b.y - a.y;
     const len = Math.hypot(dx, dy);
-    const trim = r + 5;
-    if (len < trim * 2 + 6) return null;
+    const ta = (a.rad || r) + 5, tb = (b.rad || r) + 5;
+    if (len < ta + tb + 6) return null;
     const ux = dx / len, uy = dy / len;
-    const sx = a.x + ux * trim - uy * offset, sy = a.y + uy * trim + ux * offset;
-    const ex = b.x - ux * (trim + 2) - uy * offset, ey = b.y - uy * (trim + 2) + ux * offset;
+    const sx = a.x + ux * ta - uy * offset, sy = a.y + uy * ta + ux * offset;
+    const ex = b.x - ux * (tb + 2) - uy * offset, ey = b.y - uy * (tb + 2) + ux * offset;
     const bend = Math.min(30, len * 0.15);
     const cx = (sx + ex) / 2 - uy * bend, cy = (sy + ey) / 2 + ux * bend;
     return `M${sx.toFixed(1)} ${sy.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}`;
@@ -2489,6 +2556,21 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
           <g key={"pt" + p.i} data-idx={editing ? p.i : undefined}
             className={editing ? "crease-item" : pick ? "crease-marker" : undefined}
             onClick={pick ? (e) => { e.stopPropagation(); onPick(p.i); } : undefined}>
+            {p.drawing ? (() => {
+              // The drawing, with a small number badge at its top-left corner.
+              const { w, h } = p.box, br = 10 * Math.min(k, 1.4);
+              const bx = p.x - w / 2 + br * 0.4, by = p.y - h / 2 + br * 0.4;
+              return (<>
+                {active === p.i && <rect x={p.x - w / 2 - 8} y={p.y - h / 2 - 8} width={w + 16} height={h + 16} rx="10" fill="none" stroke="var(--accent)" strokeWidth="2" opacity="0.55" />}
+                <rect x={p.x - w / 2} y={p.y - h / 2} width={w} height={h} fill="transparent" />
+                <GoalieDrawing drawing={p.drawing} x={p.x} y={p.y} w={w} h={h} color={c.ink} flip={p.flip} />
+                <circle cx={bx} cy={by} r={br}
+                  fill={isFirst ? "var(--accent)" : c.fill}
+                  stroke={isFirst ? "none" : (m.color === "red" ? "var(--accent)" : c.ink)}
+                  strokeWidth="1.5" strokeDasharray={!isFirst && m.dash ? "3 2" : undefined} />
+                <text x={bx} y={by + 3.8 * Math.min(k, 1.4)} textAnchor="middle" fontSize={11 * Math.min(k, 1.4)} className="crease-num" fill={isFirst ? "#FFFFFF" : c.ink}>{n + 1}</text>
+              </>);
+            })() : (<>
             {ring(p, r)}
             <circle cx={p.x} cy={p.y} r={r}
               fill={isFirst ? "var(--accent)" : c.fill}
@@ -2496,6 +2578,7 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
               strokeWidth="2"
               strokeDasharray={!isFirst && m.dash ? "4 3" : undefined} />
             <text x={p.x} y={p.y + 4.5 * k} textAnchor="middle" fontSize={13 * k} className="crease-num" fill={isFirst ? "#FFFFFF" : c.ink}>{n + 1}</text>
+            </>)}
           </g>
         );
       })}
@@ -2556,6 +2639,8 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
   const tools = MAP_OBJECTS.filter((o) => !o.zoneOnly || view === "zone");
   const tool = tools.some((o) => o.id === toolChoice) ? toolChoice : "goalie";
   const [move, setMove] = useState("shuffle"); // for the next goalie step placed
+  const [drawing, setDrawing] = useState(""); // goalie drawing for the next step placed, "" = circle
+  const drawings = goalieDrawings();
   const [selected, setSelected] = useState(null);
   const [history, setHistory] = useState([]);
   const sel = selected !== null && selected < items.length ? items[selected] : null;
@@ -2578,7 +2663,7 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
   };
   const place = ({ x, y }) => {
     if (sel) { setSelected(null); return; } // a click on empty ice first lets go of the selection
-    const item = tool === "goalie" ? { kind: "goalie", x, y, move }
+    const item = tool === "goalie" ? (drawing ? { kind: "goalie", x, y, move, drawing } : { kind: "goalie", x, y, move })
       : tool === "net" ? { kind: "net", x, y, rot: 0, crease: true }
       : tool === "crease" ? { kind: "crease", x, y, rot: 0 }
       : { kind: tool, x, y };
@@ -2594,6 +2679,11 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
     const next = items.map((p, j) => (j === selected ? { ...p, ...patch } : p));
     if (live) onChange(next);
     else commit(next);
+  };
+  const chooseDrawing = (id) => {
+    if (sel?.kind !== "goalie") { setDrawing(id); return; }
+    const { drawing: _d, flip: _f, ...rest } = sel;
+    commit(items.map((p, j) => (j === selected ? (id ? { ...rest, drawing: id, ...(sel.flip ? { flip: true } : {}) } : rest) : p)));
   };
   const remove = () => {
     commit(items.filter((_, j) => j !== selected));
@@ -2645,6 +2735,22 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
               <button type="button" key={m.id} className={"map-move-btn" + ((sel ? sel.move : move) === m.id ? " active" : "")} onClick={() => chooseMove(m.id)}>{m.label}</button>
             ))}
           </div>
+        </div>
+      )}
+      {drawings.length > 0 && (sel ? sel.kind === "goalie" : tool === "goalie") && (
+        <div className="map-editor-row">
+          <span className="map-editor-label">{sel ? `Step ${selStep} as` : `Step ${nextStep} as`}</span>
+          <div className="map-move-group" role="group" aria-label="Show this step as a circle or a goalie drawing">
+            <button type="button" className={"map-move-btn" + (!(sel ? sel.drawing : drawing) ? " active" : "")} onClick={() => chooseDrawing("")}>Circle</button>
+            {drawings.map((d) => (
+              <button type="button" key={d.id} className={"map-move-btn map-tool-btn" + ((sel ? sel.drawing : drawing) === d.id ? " active" : "")} onClick={() => chooseDrawing(d.id)}>
+                <svg width="22" height="16" viewBox={`0 0 22 16`} aria-hidden="true"><GoalieDrawing drawing={d} x={11} y={8} {...drawingBox(d, 21)} color="currentColor" /></svg> {d.label}
+              </button>
+            ))}
+          </div>
+          {sel?.drawing && (
+            <label className="map-check"><input type="checkbox" checked={!!sel.flip} onChange={(e) => updateSel({ flip: e.target.checked || undefined })} /> Mirror</label>
+          )}
         </div>
       )}
       {(sel?.kind === "net" || sel?.kind === "crease") && (
