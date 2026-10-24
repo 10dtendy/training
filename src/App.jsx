@@ -2290,6 +2290,26 @@ function simplifyStroke(pts, tol = 1.5) {
   if (far <= tol) return [pts[0], pts[pts.length - 1]];
   return [...simplifyStroke(pts.slice(0, at + 1), tol).slice(0, -1), ...simplifyStroke(pts.slice(at), tol)];
 }
+// Lines the cones up: the two farthest apart stay put (straightened when the row is within 8° of
+// level or upright) and the others go evenly spaced between them, in their order along the line.
+function lineUpCones(items) {
+  const cones = items.flatMap((p, i) => (p.kind === "cone" ? [i] : []));
+  if (cones.length < 2) return items;
+  let a = cones[0], b = cones[1], far = -1;
+  cones.forEach((i) => cones.forEach((j) => {
+    const d = Math.hypot(items[i].x - items[j].x, items[i].y - items[j].y);
+    if (d > far) { far = d; a = i; b = j; }
+  }));
+  let A = { x: items[a].x, y: items[a].y }, B = { x: items[b].x, y: items[b].y };
+  const angle = Math.abs(Math.atan2(B.y - A.y, B.x - A.x) * 180 / Math.PI) % 180;
+  if (angle < 8 || angle > 172) { const y = Math.round((A.y + B.y) / 2); A = { ...A, y }; B = { ...B, y }; }
+  else if (Math.abs(angle - 90) < 8) { const x = Math.round((A.x + B.x) / 2); A = { ...A, x }; B = { ...B, x }; }
+  const dx = B.x - A.x, dy = B.y - A.y;
+  const order = cones.slice().sort((i, j) => ((items[i].x - A.x) * dx + (items[i].y - A.y) * dy) - ((items[j].x - A.x) * dx + (items[j].y - A.y) * dy));
+  const at = new Map(order.map((i, n) => [i, n / (order.length - 1)]));
+  return items.map((p, i) => (at.has(i) ? { ...p, x: Math.round(A.x + dx * at.get(i)), y: Math.round(A.y + dy * at.get(i)) } : p));
+}
+
 // A smooth curve through a stroke's points (each point bends the curve; it ends on the last one).
 function smoothStroke(pts) {
   let d = `M${pts[0][0]} ${pts[0][1]}`;
@@ -2785,6 +2805,10 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
           ))}
         </div>
         <div className="map-editor-actions">
+          {items.filter((p) => p.kind === "cone").length >= 2 && (
+            <button type="button" className="btn btn--ghost btn--small" title="Keeps the two outer cones in place and spaces the others evenly in a straight line between them"
+              onClick={() => commit(lineUpCones(items))}>Line up cones</button>
+          )}
           <button type="button" className="btn btn--ghost btn--small" disabled={!history.length} onClick={undo}><Undo2 size={13} /> Undo</button>
           <button type="button" className="btn btn--ghost btn--small" disabled={!items.length} onClick={() => { commit([]); setSelected(null); }}>Clear</button>
         </div>
