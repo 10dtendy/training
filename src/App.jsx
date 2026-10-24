@@ -4,7 +4,8 @@ import {
   Trash2, Eye, EyeOff, Calendar as CalendarIcon, LayoutGrid, Users as UsersIcon,
   Image as ImageIcon, Settings as SettingsIcon, Download, LogOut, Mail, Lock, UploadCloud,
   FileText, Video as VideoIcon, AlertTriangle, Home, BarChart3, Tag, Search, CircleDot, Armchair,
-  Copy, LayoutTemplate, Megaphone, List, Camera, Cookie, ListOrdered, Heading, Link2, Scale, Info
+  Copy, LayoutTemplate, Megaphone, List, Camera, Cookie, ListOrdered, Heading, Link2, Scale, Info,
+  Hand, RotateCw, Target, Gauge
 } from "lucide-react";
 // Brand images ship as separate files (cached by the browser, never inside the JS bundle).
 import LOGO_SRC from "./assets/logo.png";
@@ -2153,8 +2154,248 @@ function VideoPlayer({ title, poster, src }) {
 
 // The written part of a drill (objective, steps, coaching points, common mistakes), shared by the
 // drill's own page and by the drill cards inside a practice focus.
+/* ============================================================================
+   MOVEMENT MAP (top-down crease diagram for a drill's steps)
+   drill.movementMap is lined up with drill.steps: one entry per step, either null (not on the
+   map) or { x, y, move, step }. x/y are in the diagram's own 716×330 space; move is "push"
+   (solid red), "recover" (dashed white) or "rotate" (turn in place); step is the step's text,
+   so a marker stays with its step when steps are added, removed or reordered.
+   ============================================================================ */
+
+const CREASE_W = 716, CREASE_H = 330;
+const MOVE_TYPES = [
+  { id: "push", label: "Shuffle / push" },
+  { id: "recover", label: "Recovery" },
+  { id: "rotate", label: "Rotate" },
+];
+
+// One entry per current step. A point belongs to the step with the same text; a reworded step
+// keeps the unclaimed point that sat between the same neighbouring steps as before.
+function alignMapToSteps(map, steps) {
+  const points = (Array.isArray(map) ? map : [])
+    .map((p, i) => (p && typeof p.x === "number" && typeof p.y === "number" ? { ...p, oldIndex: i } : null))
+    .filter(Boolean);
+  const used = new Set();
+  const out = steps.map(() => null);
+  steps.forEach((s, i) => {
+    const k = points.findIndex((p, j) => !used.has(j) && p.step === s);
+    if (k >= 0) { used.add(k); out[i] = points[k]; }
+  });
+  const anchors = out.slice();
+  steps.forEach((s, i) => {
+    if (out[i]) return;
+    let after = -1, before = Infinity;
+    for (let j = i - 1; j >= 0; j--) if (anchors[j]) { after = anchors[j].oldIndex; break; }
+    for (let j = i + 1; j < steps.length; j++) if (anchors[j]) { before = anchors[j].oldIndex; break; }
+    const k = points.findIndex((p, j) => !used.has(j) && p.oldIndex > after && p.oldIndex < before && !steps.includes(p.step));
+    if (k >= 0) { used.add(k); out[i] = points[k]; }
+  });
+  return out.map((p, i) => (p ? { x: p.x, y: p.y, move: MOVE_TYPES.some((m) => m.id === p.move) ? p.move : "push", step: steps[i] } : null));
+}
+function mapHasPoints(map) {
+  return Array.isArray(map) && map.some(Boolean);
+}
+// The step number badge styled like its marker on the map, so list and map read together.
+function stepBadgeClass(map, i) {
+  const p = map?.[i];
+  if (!p) return "step-num";
+  if (i === map.findIndex(Boolean)) return "step-num step-num--start";
+  return "step-num step-num--" + p.move;
+}
+
+const CREASE_PALETTES = {
+  dark: { bg: "#0F0F12", line: "#3A3A40", net: "#5C5C61", ink: "#F3F3F1", label: "#8D8D93", fill: "#0A0A0C" },
+  // For the printed sheet: no dark block of ink on paper.
+  light: { bg: "#FFFFFF", line: "#D4D4D8", net: "#9A9AA0", ink: "#18181B", label: "#71717A", fill: "#FFFFFF" },
+};
+
+function CreaseMap({ map, active, onPick, onBoardClick, editing = false, light = false }) {
+  const svgRef = useRef(null);
+  const ids = useId().replace(/:/g, "");
+  const c = light ? CREASE_PALETTES.light : CREASE_PALETTES.dark;
+  // On a phone the diagram is drawn small, so markers and labels grow to stay readable.
+  const [width, setWidth] = useState(CREASE_W);
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el || light || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width || CREASE_W));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [light]);
+  const pts = (map || []).map((p, i) => (p ? { ...p, i } : null)).filter(Boolean);
+  const firstIdx = pts.length ? pts[0].i : -1;
+  // On a narrow screen, zoom in on the crease (and wherever the steps are) instead of showing the
+  // whole width, so the markers have room; whatever is still small then grows a little.
+  const narrow = !light && width < 500;
+  const xs = pts.map((p) => p.x);
+  const vbX = narrow ? Math.max(0, Math.min(150, ...xs.map((x) => x - 45))) : 0;
+  const vbW = narrow ? Math.min(CREASE_W, Math.max(566, ...xs.map((x) => x + 45))) - vbX : CREASE_W;
+  const k = light ? 1 : Math.max(1, Math.min(1.6, (560 / CREASE_W) * vbW / width));
+  const r = 17 * k;
+
+  const handleClick = (e) => {
+    if (!onBoardClick || !svgRef.current) return;
+    const box = svgRef.current.getBoundingClientRect();
+    const x = Math.round(vbX + ((e.clientX - box.left) / box.width) * vbW);
+    const y = Math.round(((e.clientY - box.top) / box.height) * CREASE_H);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return; // e.g. a keyboard "click" with no position
+    onBoardClick({ x: Math.max(20, Math.min(CREASE_W - 20, x)), y: Math.max(20, Math.min(CREASE_H - 20, y)) });
+  };
+  // A gently curved arrow from one point to the next, stopping short of both markers.
+  const pathBetween = (a, b) => {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    const trim = r + 5;
+    if (len < trim * 2 + 6) return null;
+    const ux = dx / len, uy = dy / len;
+    const sx = a.x + ux * trim, sy = a.y + uy * trim;
+    const ex = b.x - ux * (trim + 2), ey = b.y - uy * (trim + 2);
+    const bend = Math.min(30, len * 0.15);
+    const cx = (sx + ex) / 2 - uy * bend, cy = (sy + ey) / 2 + ux * bend;
+    return `M${sx.toFixed(1)} ${sy.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}`;
+  };
+
+  return (
+    <svg
+      ref={svgRef}
+      className={"crease-svg" + (editing ? " crease-svg--editing" : "")}
+      viewBox={`${vbX} 0 ${vbW} ${CREASE_H}`}
+      role="img"
+      aria-label="Top-down crease diagram showing where each step of the drill happens"
+      onClick={handleClick}
+    >
+      <defs>
+        <marker id={ids + "a"} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--accent)" /></marker>
+        <marker id={ids + "w"} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill={c.ink} /></marker>
+        <pattern id={ids + "n"} width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 0L8 8M8 0L0 8" stroke={c.line} strokeWidth="1" /></pattern>
+      </defs>
+      <rect x={vbX} y="0" width={vbW} height={CREASE_H} rx="10" fill={c.bg} stroke={light ? c.line : "none"} />
+      <rect x="288" y="14" width="140" height="36" rx="6" fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="1.5" />
+      <line x1={vbX + 20} y1="50" x2={vbX + vbW - 20} y2="50" stroke="var(--accent)" strokeWidth="2" opacity="0.8" />
+      <path d="M218 50 L218 110 A140 100 0 0 0 498 110 L498 50" fill="var(--accent)" fillOpacity={light ? 0.06 : 0.1} stroke="var(--accent)" strokeWidth="1.5" />
+      <line x1="358" y1="300" x2="288" y2="50" stroke={c.line} strokeWidth="1" strokeDasharray="3 5" />
+      <line x1="358" y1="300" x2="428" y2="50" stroke={c.line} strokeWidth="1" strokeDasharray="3 5" />
+      <circle cx="288" cy="50" r="5" fill={c.ink} />
+      <circle cx="428" cy="50" r="5" fill={c.ink} />
+      <ellipse cx="358" cy="302" rx="9" ry="5" fill={c.ink} />
+      <text x="374" y="306" fill={c.label} fontSize={11 * k} className="crease-text">SHOOTER</text>
+      <text x={vbX + 24} y="40" fill={c.label} fontSize={11 * k} className="crease-text">GOAL LINE</text>
+
+      {pts.map((p, n) => {
+        if (n === 0 || p.move === "rotate") return null;
+        // A rotation happens in place, so the next move starts from the last real position.
+        let prev = null;
+        for (let j = n - 1; j >= 0; j--) if (pts[j].move !== "rotate" || j === 0) { prev = pts[j]; break; }
+        const d = prev && pathBetween(prev, p);
+        if (!d) return null;
+        const recover = p.move === "recover";
+        return (
+          <path key={"path" + p.i} d={d} fill="none"
+            stroke={recover ? c.ink : "var(--accent)"} strokeWidth={(recover ? 2 : 2.5) * Math.min(k, 1.4)}
+            strokeDasharray={recover ? "5 4" : undefined}
+            markerEnd={`url(#${ids}${recover ? "w" : "a"})`} />
+        );
+      })}
+
+      {pts.map((p) => {
+        const isFirst = p.i === firstIdx;
+        const isRotate = p.move === "rotate" && !isFirst;
+        const isRecover = p.move === "recover" && !isFirst;
+        const rr = isRotate ? r * 0.78 : r;
+        return (
+          <g key={"pt" + p.i} className={onPick ? "crease-marker" : undefined} onClick={onPick ? (e) => { e.stopPropagation(); onPick(p.i); } : undefined}>
+            {active === p.i && <circle cx={p.x} cy={p.y} r={r + 8} fill="none" stroke="var(--accent)" strokeWidth="2" opacity="0.55" />}
+            {isRotate && <path d={`M${p.x - r * 1.4} ${p.y + 6} A ${r * 1.45} ${r * 1.45} 0 0 0 ${p.x + r * 1.3} ${p.y + 12}`} fill="none" stroke={c.ink} strokeWidth="1.8" markerEnd={`url(#${ids}w)`} />}
+            <circle cx={p.x} cy={p.y} r={rr}
+              fill={isFirst ? "var(--accent)" : c.fill}
+              stroke={isFirst ? "none" : (isRotate || isRecover ? c.ink : "var(--accent)")}
+              strokeWidth={isRotate ? 1.5 : 2}
+              strokeDasharray={isRecover ? "4 3" : undefined} />
+            <text x={p.x} y={p.y + 4.5 * k} textAnchor="middle" fontSize={13 * k} className="crease-num" fill={isFirst ? "#FFFFFF" : c.ink}>{p.i + 1}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function CreaseMapLegend() {
+  return (
+    <div className="crease-legend">
+      <span><svg width="22" height="6" aria-hidden="true"><line x1="1" y1="3" x2="21" y2="3" stroke="var(--accent)" strokeWidth="2.5" /></svg>Shuffle / push</span>
+      <span><svg width="22" height="6" aria-hidden="true"><line x1="1" y1="3" x2="21" y2="3" stroke="#F3F3F1" strokeWidth="2" strokeDasharray="4 3" /></svg>Recovery</span>
+      <span><RotateCw size={13} aria-hidden="true" />Rotate</span>
+    </div>
+  );
+}
+
+// Drill editor: pick a step, click the crease to place it, choose how the goalie gets there.
+function CreaseMapEditor({ stepsText, map, onChange }) {
+  const steps = parseLines(stepsText || "");
+  const aligned = alignMapToSteps(map, steps);
+  const [active, setActive] = useState(0);
+  const activeIdx = Math.min(active, Math.max(0, steps.length - 1));
+  const activePoint = aligned[activeIdx] || null;
+
+  const setPoint = (i, value) => {
+    const next = aligned.slice();
+    next[i] = value ? { ...value, step: steps[i] } : null;
+    onChange(next);
+  };
+  const place = ({ x, y }) => {
+    setPoint(activeIdx, { x, y, move: activePoint?.move || "push" });
+    if (activeIdx < steps.length - 1) setActive(activeIdx + 1);
+  };
+  const clearAll = async () => {
+    if (!(await confirmDialog({ title: "Clear the whole movement map?", message: "Every step is taken off the map. The steps themselves stay.", confirmLabel: "Clear map", danger: true }))) return;
+    onChange([]);
+    setActive(0);
+  };
+
+  if (!steps.length) {
+    return <div className="map-editor map-editor--empty">Add steps above first, then place each one on the crease here.</div>;
+  }
+  return (
+    <div className="map-editor">
+      <div className="map-editor-steps">
+        {steps.map((s, i) => (
+          <button type="button" key={i} title={s}
+            className={"map-step-pill" + (i === activeIdx ? " active" : "") + (aligned[i] ? " placed" : "")}
+            onClick={() => setActive(i)}>
+            <span className={stepBadgeClass(aligned, i)}>{i + 1}</span>
+            <span className="map-step-pill-text">{s}</span>
+          </button>
+        ))}
+      </div>
+      <p className="map-editor-hint">Step {activeIdx + 1} selected. Click on the crease to place it{activePoint ? " (click again to move it)" : ""}.</p>
+      <div className="map-editor-board">
+        <CreaseMap map={aligned} active={activeIdx} editing onPick={setActive} onBoardClick={place} />
+      </div>
+      <div className="map-editor-controls">
+        <div className="map-move-group" role="group" aria-label="How the goalie gets to this step">
+          {MOVE_TYPES.map((m) => (
+            <button type="button" key={m.id} disabled={!activePoint}
+              className={"map-move-btn" + ((activePoint?.move || "push") === m.id ? " active" : "")}
+              onClick={() => setPoint(activeIdx, { ...activePoint, move: m.id })}>{m.label}</button>
+          ))}
+        </div>
+        <div className="map-editor-actions">
+          <button type="button" className="btn btn--ghost btn--small" disabled={!activePoint} onClick={() => setPoint(activeIdx, null)}>Remove step {activeIdx + 1}</button>
+          <button type="button" className="btn btn--ghost btn--small" disabled={!mapHasPoints(aligned)} onClick={clearAll}>Clear map</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const COACH_ICONS = [Target, Hand, Gauge];
+
 function DrillBody({ drill }) {
   // Empty sections are left out rather than shown as a heading with nothing under it.
+  const map = alignMapToSteps(drill.movementMap, drill.steps);
+  const showMap = mapHasPoints(map);
+  const [activeStep, setActiveStep] = useState(null);
+  const toggleStep = (i) => setActiveStep((cur) => (cur === i ? null : i));
   const sets = (drill.sets || "").trim();
   const reps = (drill.reps || "").trim();
   const rounds = (drill.rounds || "").trim();
@@ -2166,7 +2407,22 @@ function DrillBody({ drill }) {
         <section className="detail-block">
           <h2>How to perform</h2>
           {richTextToPlain(drill.performText) && <RichText value={drill.performText} className="perform-text" />}
-          {drill.steps.length > 0 && <ol className="steps">{drill.steps.map((s, i) => <li key={i}><span className="step-num">{i + 1}</span><span>{s}</span></li>)}</ol>}
+          {showMap && (
+            <div className="map-card">
+              <div className="map-card-head">
+                <span className="map-card-label">MOVEMENT MAP</span>
+                <CreaseMapLegend />
+              </div>
+              <CreaseMap map={map} active={activeStep} onPick={toggleStep} />
+            </div>
+          )}
+          {drill.steps.length > 0 && <ol className="steps">{drill.steps.map((s, i) => (
+            showMap ? (
+              <li key={i} className={"step-row" + (activeStep === i ? " step-row--active" : "")} onClick={() => toggleStep(i)}>
+                <span className={stepBadgeClass(map, i)}>{i + 1}</span><span>{s}</span>
+              </li>
+            ) : <li key={i}><span className="step-num">{i + 1}</span><span>{s}</span></li>
+          ))}</ol>}
         </section>
         )}
         {(sets || reps || rounds) && (
@@ -2180,7 +2436,10 @@ function DrillBody({ drill }) {
         {drill.coachingPoints.length > 0 && (
         <section className="detail-block">
           <h2>Coaching points</h2>
-          <div className="chip-grid">{drill.coachingPoints.map((c, i) => <div className="cue-card" key={i}>{c}</div>)}</div>
+          <div className="chip-grid">{drill.coachingPoints.map((c, i) => {
+            const Icon = COACH_ICONS[i % COACH_ICONS.length];
+            return <div className="cue-card cue-card--icon" key={i}><span className="cue-icon" aria-hidden="true"><Icon size={17} /></span><span>{c}</span></div>;
+          })}</div>
         </section>
         )}
         {drill.mistakes.length > 0 && (
@@ -2189,8 +2448,8 @@ function DrillBody({ drill }) {
           <div className="mistake-list">
             {drill.mistakes.map((m, i) => (
               <div className="mistake-row" key={i}>
-                <div className="mistake-col mistake-col--wrong"><span className="mistake-label">Mistake</span><p>{m.mistake}</p></div>
-                <div className="mistake-col mistake-col--right"><span className="mistake-label">Correction</span><p>{m.correction}</p></div>
+                <div className="mistake-col mistake-col--wrong"><span className="mistake-label"><X size={12} strokeWidth={2.6} aria-hidden="true" /> Mistake</span><p>{m.mistake}</p></div>
+                <div className="mistake-col mistake-col--right"><span className="mistake-label mistake-label--right"><Check size={12} strokeWidth={2.8} aria-hidden="true" /> Correction</span><p>{m.correction}</p></div>
               </div>
             ))}
           </div>
@@ -3256,7 +3515,7 @@ function AdminDashboard({ content }) {
 
 const BLANK_DRILL = {
   title: "", category: "", duration: "", equipment: "",
-  description: "", objective: "", stepsText: "", performText: "", sets: "", reps: "", rounds: "", coachingPointsText: "", mistakesText: "", planRows: [], levelPlans: {}, dayPlans: {}, published: false,
+  description: "", objective: "", stepsText: "", performText: "", movementMap: [], sets: "", reps: "", rounds: "", coachingPointsText: "", mistakesText: "", planRows: [], levelPlans: {}, dayPlans: {}, published: false,
   imageAssetId: null, imageUrl: "", videoAssetId: null, videoUrl: "", diagramUrl: "",
 };
 
@@ -3530,6 +3789,8 @@ function AdminDrills({ content, updateContent }) {
     title: d.title, category: d.category, duration: d.duration,
     equipment: d.equipment, description: d.description, objective: d.objective,
     steps: parseLines(d.stepsText),
+    // Saved lined up with the steps (and empty when nothing is placed).
+    movementMap: (() => { const m = alignMapToSteps(d.movementMap, parseLines(d.stepsText)); return mapHasPoints(m) ? m : []; })(),
     performText: richTextToPlain(d.performText) ? d.performText : "",
     sets: (d.sets || "").trim(),
     reps: (d.reps || "").trim(),
@@ -3648,6 +3909,10 @@ function AdminDrills({ content, updateContent }) {
             </div>
             <div className="admin-form-span2 rich-field-wrap"><span className="rich-field-label">How to perform (text, shown above the steps)</span><RichTextEditor rows={3} value={draft.performText || ""} onChange={(v) => setDraft((d) => ({ ...d, performText: v }))} placeholder="Explain the setup or anything that doesn't fit in the steps" /></div>
             <label className="admin-form-span2">Steps (one per line)<textarea rows={4} value={draft.stepsText} onChange={(e) => setDraft({ ...draft, stepsText: e.target.value })} placeholder={"Start in your stance.\nMove to the post.\n..."} /></label>
+            <div className="admin-form-span2 map-editor-field">
+              <span className="map-editor-title">Movement map <em>optional</em></span>
+              <CreaseMapEditor stepsText={draft.stepsText} map={draft.movementMap} onChange={(movementMap) => setDraft((d) => ({ ...d, movementMap }))} />
+            </div>
             <div className="admin-form-span2 drill-volume-fields">
               <label>Sets<input value={draft.sets || ""} onChange={(e) => setDraft({ ...draft, sets: e.target.value })} placeholder="e.g. 3" maxLength={50} /></label>
               <label>Reps<input value={draft.reps || ""} onChange={(e) => setDraft({ ...draft, reps: e.target.value })} placeholder="e.g. 10 each side" maxLength={50} /></label>
@@ -6589,6 +6854,9 @@ function PrintSheet({ content, date, assignment }) {
               <>
                 <PrintHeading>How to perform</PrintHeading>
                 {richTextToPlain(drill.performText) && <RichText className="print-rich" value={drill.performText} />}
+                {mapHasPoints(alignMapToSteps(drill.movementMap, drill.steps)) && (
+                  <div className="print-map"><CreaseMap map={alignMapToSteps(drill.movementMap, drill.steps)} light /></div>
+                )}
                 {drill.steps.length > 0 && <ol className="print-steps">{drill.steps.map((st, i) => <li key={i}><span className="print-step-num">{i + 1}</span><span>{st}</span></li>)}</ol>}
               </>
             )}
@@ -8158,6 +8426,50 @@ button:focus {
 .plan-note ul, .plan-note ol { margin: 0; padding-left: 18px; }
 .drill-volume { display: flex; flex-wrap: wrap; gap: 10px; }
 .perform-text + .steps { margin-top: 12px; }
+
+/* ---------------- MOVEMENT MAP ---------------- */
+.map-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px 18px; margin: 4px 0 18px; }
+.perform-text + .map-card { margin-top: 14px; }
+.map-card-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+.map-card-label { font-family: 'Archivo', sans-serif; font-size: 11px; letter-spacing: 0.10em; color: var(--text-dim); font-weight: 700; }
+.crease-legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--text-dim); }
+.crease-legend span { display: inline-flex; align-items: center; gap: 7px; }
+.crease-svg { display: block; width: 100%; height: auto; user-select: none; -webkit-user-select: none; }
+.crease-svg--editing { cursor: crosshair; }
+.crease-text { font-family: 'Inter', sans-serif; letter-spacing: 1px; }
+.crease-num { font-family: 'Archivo', sans-serif; font-weight: 700; pointer-events: none; }
+.crease-marker { cursor: pointer; }
+.steps li.step-row { cursor: pointer; border-radius: 10px; margin: -4px -8px; padding: 4px 8px; transition: background .15s ease; align-items: center; }
+.steps li.step-row--active { background: var(--surface); color: var(--text); }
+.step-num--start { background: var(--accent); border-color: var(--accent); color: #fff; }
+.step-num--push { background: var(--bg); border: 2px solid var(--accent); }
+.step-num--recover { background: var(--bg); border: 2px dashed var(--text); }
+.step-num--rotate { background: var(--bg); border: 1.5px solid var(--text); }
+.cue-card--icon { display: flex; flex-direction: column; gap: 12px; }
+.cue-icon { width: 34px; height: 34px; border-radius: 9px; background: var(--accent-dim); color: var(--accent); display: flex; align-items: center; justify-content: center; }
+.mistake-label { display: inline-flex; align-items: center; gap: 5px; }
+.mistake-label--right { color: var(--accent); }
+.map-editor-field { display: flex; flex-direction: column; gap: 8px; }
+.map-editor-title { font-size: 12px; color: var(--text-dim); }
+.map-editor-title em { font-style: normal; color: var(--text-faint); margin-left: 4px; }
+.map-editor { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.map-editor--empty { font-size: 13px; color: var(--text-dim); }
+.map-editor-steps { display: flex; flex-wrap: wrap; gap: 8px; }
+.map-step-pill { display: inline-flex; align-items: center; gap: 8px; max-width: 230px; padding: 6px 12px 6px 6px; border-radius: 30px; background: var(--surface); border: 1px solid var(--border); font-size: 12px; color: var(--text-dim); min-height: 40px; }
+.map-step-pill.active { border-color: var(--accent); color: var(--text); }
+.map-step-pill .step-num { width: 26px; height: 26px; }
+.map-step-pill:not(.placed) .step-num { opacity: 0.55; }
+.map-step-pill-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-editor-hint { margin: 0; font-size: 12px; color: var(--text-dim); }
+.map-editor-board { border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+.map-editor-controls { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; }
+.map-move-group { display: inline-flex; flex-wrap: wrap; gap: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 30px; padding: 4px; }
+.map-move-btn { padding: 8px 14px; border-radius: 26px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.map-move-btn.active { background: var(--accent); color: #fff; }
+.map-move-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.map-editor-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.print-map { max-width: 340px; margin: 6px 0 8px; }
+@media (max-width: 640px) { .crease-legend { gap: 10px; font-size: 11px; } .map-card { padding: 12px; } }
 .drill-volume-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .drill-volume-tile { display: flex; flex-direction: column; gap: 4px; min-width: 110px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .drill-volume-label { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); }
