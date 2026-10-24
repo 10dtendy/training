@@ -2215,7 +2215,7 @@ const CREASE_PALETTES = {
 // more room between the faceoff circles, and the blue line sits closer under them). The net's centre on the goal
 // line anchors both, so a point keeps its spot on the ice when the view is switched.
 const MAP_VIEWS = {
-  crease: { w: CREASE_W, h: CREASE_H, perFoot: 140 / 6, netX: 358, goalY: 50, label: "Crease" },
+  crease: { w: CREASE_W, h: CREASE_H, perFoot: 140 / 6, netX: 358, goalY: 85, label: "Crease" },
   zone: { w: 900, h: 470, perFoot: 8, netX: 450, goalY: 88, label: "Full zone" },
 };
 function convertMapPoints(map, from, to) {
@@ -2230,23 +2230,22 @@ function convertMapPoints(map, from, to) {
 }
 
 function CreaseSurface({ c, ids, vbX, vbW, k, light }) {
+  const G = MAP_VIEWS.crease.goalY; // the goal line, with room behind the net above it
   return (
     <>
       <rect x={vbX} y="0" width={vbW} height={CREASE_H} rx="10" fill={c.bg} stroke={light ? c.line : "none"} />
-      <rect x="288" y="14" width="140" height="36" rx="6" fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="1.5" />
-      <line x1={vbX + 20} y1="50" x2={vbX + vbW - 20} y2="50" stroke="var(--accent)" strokeWidth="2" opacity="0.8" />
+      <rect x="288" y={G - 36} width="140" height="36" rx="6" fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="1.5" />
+      <line x1={vbX + 20} y1={G} x2={vbX + vbW - 20} y2={G} stroke="var(--accent)" strokeWidth="2" opacity="0.8" />
       {/* NHL crease to scale with the 6 ft net: straight sides 4 ft either side of centre running
           4.5 ft out, closed by an arc of 6 ft radius, with the small hash marks 4 ft from the goal line. */}
-      <path d="M264.7 50 L264.7 154.4 A140 140 0 0 0 451.3 154.4 L451.3 50" fill="var(--accent)" fillOpacity={light ? 0.06 : 0.1} stroke="var(--accent)" strokeWidth="1.5" />
-      <line x1="264.7" y1="143.3" x2="274.4" y2="143.3" stroke="var(--accent)" strokeWidth="1.5" />
-      <line x1="451.3" y1="143.3" x2="441.6" y2="143.3" stroke="var(--accent)" strokeWidth="1.5" />
-      <line x1="358" y1="300" x2="288" y2="50" stroke={c.line} strokeWidth="1" strokeDasharray="3 5" />
-      <line x1="358" y1="300" x2="428" y2="50" stroke={c.line} strokeWidth="1" strokeDasharray="3 5" />
-      <circle cx="288" cy="50" r="5" fill={c.ink} />
-      <circle cx="428" cy="50" r="5" fill={c.ink} />
+      <path d={`M264.7 ${G} L264.7 ${G + 104.4} A140 140 0 0 0 451.3 ${G + 104.4} L451.3 ${G}`} fill="var(--accent)" fillOpacity={light ? 0.06 : 0.1} stroke="var(--accent)" strokeWidth="1.5" />
+      <line x1="264.7" y1={G + 93.3} x2="274.4" y2={G + 93.3} stroke="var(--accent)" strokeWidth="1.5" />
+      <line x1="451.3" y1={G + 93.3} x2="441.6" y2={G + 93.3} stroke="var(--accent)" strokeWidth="1.5" />
+      <line x1="358" y1="300" x2="288" y2={G} stroke={c.line} strokeWidth="1" strokeDasharray="3 5" />
+      <line x1="358" y1="300" x2="428" y2={G} stroke={c.line} strokeWidth="1" strokeDasharray="3 5" />
       <ellipse cx="358" cy="302" rx="9" ry="5" fill={c.ink} />
       <text x="374" y="306" fill={c.label} fontSize={11 * k} className="crease-text">SHOOTER</text>
-      <text x={vbX + 24} y="40" fill={c.label} fontSize={11 * k} className="crease-text">GOAL LINE</text>
+      <text x={vbX + 24} y={G - 10} fill={c.label} fontSize={11 * k} className="crease-text">GOAL LINE</text>
     </>
   );
 }
@@ -2278,8 +2277,6 @@ function ZoneSurface({ c, ids }) {
       <line x1={cx + 88} y1="88" x2={cx + 112} y2="0" stroke={red} strokeWidth="2" />
       <path d={`M${cx - 32} 88 L${cx - 32} 123.8 A48 48 0 0 0 ${cx + 32} 123.8 L${cx + 32} 88`} fill={red} fillOpacity="0.12" stroke={red} strokeWidth="2" />
       <rect x={cx - 24} y="61" width="48" height="27" rx="5" fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="2" />
-      <circle cx={cx - 24} cy="88" r="3" fill={c.ink} />
-      <circle cx={cx + 24} cy="88" r="3" fill={c.ink} />
       {circle(cx - 250)}{circle(cx + 250)}
     </>
   );
