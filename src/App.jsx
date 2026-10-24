@@ -2161,7 +2161,6 @@ function VideoPlayer({ title, poster, src }) {
    goalie gets there from the previous position. x/y are in the current view's coordinate space.
    ============================================================================ */
 
-const CREASE_W = 716, CREASE_H = 330;
 // How the goalie gets to a step. Pushes and slides are red, the lighter movements white (dark on
 // the PDF); the line pattern tells them apart, and Double Push is drawn as two lines.
 const MOVE_TYPES = [
@@ -2187,17 +2186,24 @@ const MAP_OBJECTS = [
   { id: "shooter", label: "Shooter" },
   { id: "puck", label: "Puck" },
   { id: "cone", label: "Cone" },
+  { id: "net", label: "Net", zoneOnly: true },
+  { id: "crease", label: "Crease", zoneOnly: true },
 ];
 const MAP_OBJECT_BY_ID = Object.fromEntries(MAP_OBJECTS.map((o) => [o.id, o]));
 
 // Drops anything malformed. Maps saved before objects existed had one entry per step (null for a
-// step not on the map); their points become goalie steps.
+// step not on the map); their points become goalie steps. Nets and creases also have rot (degrees)
+// and a net has crease (whether its crease is drawn).
 function normalizeMap(map) {
   return (Array.isArray(map) ? map : [])
     .filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))
     .map((p) => {
       const kind = MAP_OBJECT_BY_ID[p.kind] ? p.kind : "goalie";
-      return kind === "goalie" ? { kind, x: p.x, y: p.y, move: normalizeMove(p.move) } : { kind, x: p.x, y: p.y };
+      const base = { kind, x: p.x, y: p.y };
+      if (kind === "goalie") return { ...base, move: normalizeMove(p.move) };
+      if (kind !== "net" && kind !== "crease") return base;
+      const rot = ((Math.round(Number(p.rot) || 0) % 360) + 360) % 360;
+      return kind === "net" ? { ...base, rot, crease: p.crease !== false } : { ...base, rot };
     });
 }
 // The step number badge styled like its marker on the map, so list and map read together.
@@ -2215,13 +2221,14 @@ const CREASE_PALETTES = {
   light: { bg: "#FFFFFF", line: "#D4D4D8", net: "#9A9AA0", ink: "#18181B", label: "#71717A", fill: "#FFFFFF", boards: "#9A9AA0" },
 };
 
-// Two views of the ice, each in its own coordinate space. The crease view is the close-up around
-// the net (23.33 units per foot); the zone view is the defensive zone from the end boards to just
-// past the blue line (8 units per foot, NHL dimensions, except that the rink is drawn wider, with
-// more room between the faceoff circles, and the blue line sits closer under them). The net's centre on the goal
-// line anchors both, so a point keeps its spot on the ice when the view is switched.
+// Two views of the ice, each in its own coordinate space. The crease view is the area in front of
+// the net (16 units per foot), out far enough that the inner quarter of each faceoff circle shows
+// in the bottom corners; the zone view is the defensive zone from the end boards to just under the
+// faceoff circles (8 units per foot, NHL dimensions, except that the rink is drawn wider, with more
+// room between the circles). The net's centre on the goal line anchors both, so a point keeps its
+// spot on the ice when the view is switched.
 const MAP_VIEWS = {
-  crease: { w: CREASE_W, h: CREASE_H, perFoot: 140 / 6, netX: 358, goalY: 85, label: "Crease" },
+  crease: { w: 716, h: 384, perFoot: 16, netX: 358, goalY: 64, label: "Crease" },
   zone: { w: 900, h: 470, perFoot: 8, netX: 450, goalY: 88, label: "Full zone" },
 };
 function convertMapPoints(map, from, to) {
@@ -2239,53 +2246,83 @@ function convertMapPoints(map, from, to) {
 function netPath(left, right, back, goal, r) {
   return `M${left} ${goal} L${left} ${back + r} A${r} ${r} 0 0 1 ${left + r} ${back} L${right - r} ${back} A${r} ${r} 0 0 1 ${right} ${back + r} L${right} ${goal} Z`;
 }
+// NHL crease in front of a net centred at (x, goal), s units per foot: straight sides 4 ft either
+// side of centre running 4.5 ft out, closed by an arc of 6 ft radius.
+function creasePath(x, goal, s) {
+  return `M${x - 4 * s} ${goal} L${x - 4 * s} ${goal + 4.475 * s} A${6 * s} ${6 * s} 0 0 0 ${x + 4 * s} ${goal + 4.475 * s} L${x + 4 * s} ${goal}`;
+}
+// A faceoff circle (15 ft radius) with its dot, the L-shaped marks around the dot and the hash marks.
+function FaceoffCircle({ fx, fy, s }) {
+  const red = "var(--accent)";
+  return (
+    <g>
+      <circle cx={fx} cy={fy} r={15 * s} fill="none" stroke={red} strokeWidth="2" />
+      <circle cx={fx} cy={fy} r={s} fill={red} />
+      {[-1, 1].map((sx) => [-1, 1].map((sy) => (
+        <path key={sx + "" + sy} d={`M${fx + sx * 0.75 * s} ${fy + sy * 6.25 * s} L${fx + sx * 0.75 * s} ${fy + sy * 2 * s} L${fx + sx * 5.75 * s} ${fy + sy * 2 * s}`} fill="none" stroke={red} strokeWidth="2" />
+      )))}
+      {[-1, 1].map((sx) => [-1, 1].map((sy) => (
+        <line key={"h" + sx + sy} x1={fx + sx * 15 * s} y1={fy + sy * 2.25 * s} x2={fx + sx * 17.5 * s} y2={fy + sy * 2.25 * s} stroke={red} strokeWidth="2" />
+      )))}
+    </g>
+  );
+}
 
-function CreaseSurface({ c, ids, vbX, vbW, k, light }) {
-  const G = MAP_VIEWS.crease.goalY; // the goal line, with room behind the net above it
+function CreaseSurface({ c, ids, k, light }) {
+  const { w: W, h: H, perFoot: s, netX: N, goalY: G } = MAP_VIEWS.crease;
   return (
     <>
-      <rect x={vbX} y="0" width={vbW} height={CREASE_H} rx="10" fill={c.bg} stroke={light ? c.line : "none"} />
-      <path d={netPath(288, 428, G - 36, G, 6)} fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="1.5" />
-      <line x1={vbX + 20} y1={G} x2={vbX + vbW - 20} y2={G} stroke="var(--accent)" strokeWidth="2" opacity="0.8" />
-      {/* NHL crease to scale with the 6 ft net: straight sides 4 ft either side of centre running
-          4.5 ft out, closed by an arc of 6 ft radius, with the small hash marks 4 ft from the goal line. */}
-      <path d={`M264.7 ${G} L264.7 ${G + 104.4} A140 140 0 0 0 451.3 ${G + 104.4} L451.3 ${G}`} fill="var(--accent)" fillOpacity={light ? 0.06 : 0.1} stroke="var(--accent)" strokeWidth="1.5" />
-      <line x1="264.7" y1={G + 93.3} x2="274.4" y2={G + 93.3} stroke="var(--accent)" strokeWidth="1.5" />
-      <line x1="451.3" y1={G + 93.3} x2="441.6" y2={G + 93.3} stroke="var(--accent)" strokeWidth="1.5" />
-      <text x={vbX + 24} y={G - 10} fill={c.label} fontSize={11 * k} className="crease-text">GOAL LINE</text>
+      <defs><clipPath id={ids + "c"}><rect x="0" y="0" width={W} height={H} rx="10" /></clipPath></defs>
+      <rect x="0" y="0" width={W} height={H} rx="10" fill={c.bg} stroke={light ? c.line : "none"} />
+      {/* The faceoff circles sit 22 ft either side of the net and 20 ft out, so only their inner
+          quarter is in view. */}
+      <g clipPath={`url(#${ids}c)`}>
+        <FaceoffCircle fx={N - 22 * s} fy={G + 20 * s} s={s} />
+        <FaceoffCircle fx={N + 22 * s} fy={G + 20 * s} s={s} />
+      </g>
+      <path d={netPath(N - 3 * s, N + 3 * s, G - 1.6 * s, G, 4)} fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="1.5" />
+      <line x1="20" y1={G} x2={W - 20} y2={G} stroke="var(--accent)" strokeWidth="2" opacity="0.8" />
+      <path d={creasePath(N, G, s)} fill="var(--accent)" fillOpacity={light ? 0.06 : 0.1} stroke="var(--accent)" strokeWidth="1.5" />
+      {/* The small hash marks on the crease, 4 ft from the goal line. */}
+      <line x1={N - 4 * s} y1={G + 4 * s} x2={N - 3.58 * s} y2={G + 4 * s} stroke="var(--accent)" strokeWidth="1.5" />
+      <line x1={N + 4 * s} y1={G + 4 * s} x2={N + 3.58 * s} y2={G + 4 * s} stroke="var(--accent)" strokeWidth="1.5" />
+      <text x="24" y={G - 10} fill={c.label} fontSize={11 * k} className="crease-text">GOAL LINE</text>
     </>
   );
 }
 
 // The defensive zone of an NHL rink, end boards at the top: goal line 11 ft out, trapezoid, net and
-// crease and the two faceoff circles (20 ft out, 15 ft radius, spread wider apart than to scale).
+// crease and the two faceoff circles (20 ft out, spread wider apart than to scale).
 function ZoneSurface({ c, ids }) {
   const red = "var(--accent)";
-  const W = MAP_VIEWS.zone.w, cx = W / 2; // the net's centre
-  const circle = (fx) => (
-    <g key={fx}>
-      <circle cx={fx} cy="248" r="120" fill="none" stroke={red} strokeWidth="2" />
-      <circle cx={fx} cy="248" r="8" fill={red} />
-      {[-1, 1].map((sx) => [-1, 1].map((sy) => (
-        <path key={sx + "" + sy} d={`M${fx + sx * 6} ${248 + sy * 50} L${fx + sx * 6} ${248 + sy * 16} L${fx + sx * 46} ${248 + sy * 16}`} fill="none" stroke={red} strokeWidth="2" />
-      )))}
-      {[-1, 1].map((sx) => [-1, 1].map((sy) => (
-        <line key={"h" + sx + sy} x1={fx + sx * 120} y1={248 + sy * 18} x2={fx + sx * 140} y2={248 + sy * 18} stroke={red} strokeWidth="2" />
-      )))}
-    </g>
-  );
+  const { w: W, h: H, perFoot: s, netX: cx, goalY: G } = MAP_VIEWS.zone;
   return (
     <>
       {/* Dark behind the rounded corners too, so the whole map is one dark panel. */}
-      <rect x="0" y="0" width={W} height="470" rx="10" fill={c.bg} />
-      <path d={`M1 470 L1 224 A223 223 0 0 1 224 1 L${W - 224} 1 A223 223 0 0 1 ${W - 1} 224 L${W - 1} 470`} fill="none" stroke={c.boards} strokeWidth="1.5" />
-      <line x1={cx - 88} y1="88" x2={cx - 112} y2="0" stroke={red} strokeWidth="2" />
-      <line x1={cx + 88} y1="88" x2={cx + 112} y2="0" stroke={red} strokeWidth="2" />
-      <path d={`M${cx - 32} 88 L${cx - 32} 123.8 A48 48 0 0 0 ${cx + 32} 123.8 L${cx + 32} 88`} fill={red} fillOpacity="0.12" stroke={red} strokeWidth="2" />
-      <path d={netPath(cx - 24, cx + 24, 61, 88, 5)} fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="2" />
-      <line x1="46" y1="88" x2={W - 46} y2="88" stroke={red} strokeWidth="2" />
-      {circle(cx - 250)}{circle(cx + 250)}
+      <rect x="0" y="0" width={W} height={H} rx="10" fill={c.bg} />
+      <path d={`M1 ${H} L1 224 A223 223 0 0 1 224 1 L${W - 224} 1 A223 223 0 0 1 ${W - 1} 224 L${W - 1} ${H}`} fill="none" stroke={c.boards} strokeWidth="1.5" />
+      <line x1={cx - 88} y1={G} x2={cx - 112} y2="0" stroke={red} strokeWidth="2" />
+      <line x1={cx + 88} y1={G} x2={cx + 112} y2="0" stroke={red} strokeWidth="2" />
+      <path d={creasePath(cx, G, s)} fill={red} fillOpacity="0.12" stroke={red} strokeWidth="2" />
+      <path d={netPath(cx - 3 * s, cx + 3 * s, G - 3.375 * s, G, 5)} fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="2" />
+      <line x1="46" y1={G} x2={W - 46} y2={G} stroke={red} strokeWidth="2" />
+      <FaceoffCircle fx={cx - 250} fy={G + 20 * s} s={s} />
+      <FaceoffCircle fx={cx + 250} fy={G + 20 * s} s={s} />
     </>
+  );
+}
+
+// An extra net or crease placed on the map, drawn to the view's scale and turned by p.rot degrees
+// around the centre of its goal line (0 = facing out from the end boards, like the main net).
+function RinkGoal({ p, s, c, ids, light }) {
+  const red = "var(--accent)";
+  const net = p.kind === "net";
+  return (
+    <g transform={p.rot ? `rotate(${p.rot} ${p.x} ${p.y})` : undefined}>
+      {(!net || p.crease) && <path d={creasePath(p.x, p.y, s)} fill={red} fillOpacity={light ? 0.06 : 0.12} stroke={red} strokeWidth="2" />}
+      {net && <path d={netPath(p.x - 3 * s, p.x + 3 * s, p.y - 3.375 * s, p.y, 0.6 * s)} fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="2" />}
+      <line x1={p.x - 5 * s} y1={p.y} x2={p.x + 5 * s} y2={p.y} stroke={red} strokeWidth="2" />
+    </g>
   );
 }
 
@@ -2311,27 +2348,24 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
   }, [light, V.w]);
   const list = items.map((p, i) => (drag?.idx === i ? { ...p, x: drag.x, y: drag.y, i } : { ...p, i }));
   const goalies = list.filter((p) => p.kind === "goalie");
-  // On a narrow screen, the crease view zooms in on the crease (and wherever the markers are)
-  // instead of showing the whole width, so the markers have room.
-  const narrow = !light && !zone && width < 500;
-  const xs = items.map((p) => p.x);
-  const vbX = narrow ? Math.max(0, Math.min(150, ...xs.map((x) => x - 45))) : 0;
-  const vbW = narrow ? Math.min(V.w, Math.max(566, ...xs.map((x) => x + 45))) - vbX : V.w;
-  const k = light ? 1 : Math.max(1, Math.min(zone ? 1.4 : 1.6, (560 / CREASE_W) * vbW / width));
+  const k = light ? 1 : Math.max(1, Math.min(zone ? 1.4 : 1.6, (560 / 716) * V.w / width));
   const r = 17 * k;
 
-  const toMap = (e) => {
+  // dx/dy keep a dragged item where it was grabbed instead of jumping its centre to the pointer.
+  const toMap = (e, dx = 0, dy = 0) => {
     const ctm = svgRef.current?.getScreenCTM();
     if (!ctm) return null;
     const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(ctm.inverse());
     if (!Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return null;
-    return { x: Math.round(Math.max(vbX + 14, Math.min(vbX + vbW - 14, pt.x))), y: Math.round(Math.max(14, Math.min(V.h - 14, pt.y))) };
+    return { x: Math.round(Math.max(14, Math.min(V.w - 14, pt.x + dx))), y: Math.round(Math.max(14, Math.min(V.h - 14, pt.y + dy))) };
   };
   const pointer = editing ? {
     onPointerDown: (e) => {
       if (e.button) return;
       const el = e.target.closest?.("[data-idx]");
-      press.current = { idx: el ? Number(el.dataset.idx) : null, sx: e.clientX, sy: e.clientY, moved: false };
+      const idx = el ? Number(el.dataset.idx) : null;
+      const at = idx !== null && toMap(e);
+      press.current = { idx, sx: e.clientX, sy: e.clientY, moved: false, dx: at ? items[idx].x - at.x : 0, dy: at ? items[idx].y - at.y : 0 };
       try { svgRef.current.setPointerCapture(e.pointerId); } catch { /* not supported */ }
     },
     onPointerMove: (e) => {
@@ -2339,7 +2373,7 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
       if (!p || p.idx === null) return;
       if (!p.moved && Math.hypot(e.clientX - p.sx, e.clientY - p.sy) < 5) return;
       p.moved = true;
-      const pt = toMap(e);
+      const pt = toMap(e, p.dx, p.dy);
       if (pt) setDrag({ idx: p.idx, ...pt });
     },
     onPointerUp: (e) => {
@@ -2348,7 +2382,7 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
       if (!p) return;
       if (p.idx !== null) {
         if (!p.moved) onPick?.(p.idx);
-        else { const pt = toMap(e); if (pt) onMoveItem?.(p.idx, pt); }
+        else { const pt = toMap(e, p.dx, p.dy); if (pt) onMoveItem?.(p.idx, pt); }
         setDrag(null);
       } else if (Math.hypot(e.clientX - p.sx, e.clientY - p.sy) < 8) {
         const pt = toMap(e);
@@ -2377,7 +2411,7 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
     <svg
       ref={svgRef}
       className={"crease-svg" + (zone ? " crease-svg--zone" : "") + (editing ? " crease-svg--editing" : "")}
-      viewBox={`${vbX} 0 ${vbW} ${V.h}`}
+      viewBox={`0 0 ${V.w} ${V.h}`}
       role="img"
       aria-label={zone ? "Top-down diagram of the defensive zone showing where each step of the drill happens" : "Top-down crease diagram showing where each step of the drill happens"}
       {...pointer}
@@ -2387,9 +2421,16 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
         <marker id={ids + "w"} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill={c.ink} /></marker>
         <pattern id={ids + "n"} width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 0L8 8M8 0L0 8" stroke={c.line} strokeWidth="1" /></pattern>
       </defs>
-      {zone ? <ZoneSurface c={c} ids={ids} /> : <CreaseSurface c={c} ids={ids} vbX={vbX} vbW={vbW} k={k} light={light} />}
+      {zone ? <ZoneSurface c={c} ids={ids} /> : <CreaseSurface c={c} ids={ids} k={k} light={light} />}
 
-      {list.filter((p) => p.kind !== "goalie").map((p) => {
+      {list.filter((p) => p.kind === "net" || p.kind === "crease").map((p) => (
+        <g key={"g" + p.i} data-idx={editing ? p.i : undefined} className={editing ? "crease-item" : undefined}>
+          {ring(p, 6 * V.perFoot)}
+          <RinkGoal p={p} s={V.perFoot} c={c} ids={ids} light={light} />
+        </g>
+      ))}
+
+      {list.filter((p) => p.kind === "shooter" || p.kind === "puck" || p.kind === "cone").map((p) => {
         const s = 12 * k;
         return (
           <g key={"o" + p.i} data-idx={editing ? p.i : undefined} className={editing ? "crease-item" : undefined}>
@@ -2461,6 +2502,8 @@ function MapObjectIcon({ kind, size = 14 }) {
       {kind === "shooter" && <><circle cx="7" cy="7" r="6.5" fill="#5C5C61" /><text x="7" y="10" textAnchor="middle" fontSize="8" fontWeight="700" fill="#F3F3F1">S</text></>}
       {kind === "puck" && <circle cx="7" cy="7" r="3.5" fill={ink} />}
       {kind === "cone" && <path d="M7 1.5 L12.5 12 L1.5 12 Z" fill="#8D8D93" />}
+      {kind === "net" && <path d="M2.5 11 L2.5 5 Q2.5 3 4.5 3 L9.5 3 Q11.5 3 11.5 5 L11.5 11 Z" fill="none" stroke={ink} strokeWidth="1.5" />}
+      {kind === "crease" && <path d="M2.5 2.5 L2.5 6.5 A4.5 4.5 0 0 0 11.5 6.5 L11.5 2.5" fill="none" stroke={ink} strokeWidth="1.5" />}
     </svg>
   );
 }
@@ -2470,7 +2513,7 @@ function MapObjectIcon({ kind, size = 14 }) {
 function CreaseMapLegend({ items }) {
   const goalies = items.filter((p) => p.kind === "goalie");
   const used = MOVE_TYPES.filter((m) => goalies.slice(1).some((p) => p.move === m.id));
-  const objects = MAP_OBJECTS.filter((o) => o.id !== "goalie" && items.some((p) => p.kind === o.id));
+  const objects = MAP_OBJECTS.filter((o) => o.id !== "goalie" && !o.zoneOnly && items.some((p) => p.kind === o.id));
   if (!used.length && !objects.length) return null;
   return (
     <div className="crease-legend">
@@ -2498,7 +2541,10 @@ function CreaseMapLegend({ items }) {
 function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onViewChange, onAddSteps }) {
   const items = normalizeMap(map);
   const goalies = items.filter((p) => p.kind === "goalie");
-  const [tool, setTool] = useState("goalie");
+  const [toolChoice, setTool] = useState("goalie");
+  // Extra nets and creases are only offered in the full zone view.
+  const tools = MAP_OBJECTS.filter((o) => !o.zoneOnly || view === "zone");
+  const tool = tools.some((o) => o.id === toolChoice) ? toolChoice : "goalie";
   const [move, setMove] = useState("shuffle"); // for the next goalie step placed
   const [selected, setSelected] = useState(null);
   const [history, setHistory] = useState([]);
@@ -2506,8 +2552,9 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
   // 1-based step number of the selected goalie step.
   const selStep = sel?.kind === "goalie" ? items.slice(0, selected + 1).filter((p) => p.kind === "goalie").length : 0;
 
+  const remember = () => setHistory((h) => [...h.slice(-49), { items, view }]);
   const commit = (next, nextView = view) => {
-    setHistory((h) => [...h.slice(-49), { items, view }]);
+    remember();
     if (nextView !== view) onViewChange(nextView, next);
     else onChange(next);
   };
@@ -2521,11 +2568,22 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
   };
   const place = ({ x, y }) => {
     if (sel) { setSelected(null); return; } // a click on empty ice first lets go of the selection
-    commit([...items, tool === "goalie" ? { kind: "goalie", x, y, move } : { kind: tool, x, y }]);
+    const item = tool === "goalie" ? { kind: "goalie", x, y, move }
+      : tool === "net" ? { kind: "net", x, y, rot: 0, crease: true }
+      : tool === "crease" ? { kind: "crease", x, y, rot: 0 }
+      : { kind: tool, x, y };
+    commit([...items, item]);
   };
   const chooseMove = (id) => {
     if (sel?.kind === "goalie") commit(items.map((p, j) => (j === selected ? { ...p, move: id } : p)));
     else setMove(id);
+  };
+  // Changes the selected item. live: no undo step of its own (the turn slider records one when
+  // it's grabbed, not one per degree).
+  const updateSel = (patch, live = false) => {
+    const next = items.map((p, j) => (j === selected ? { ...p, ...patch } : p));
+    if (live) onChange(next);
+    else commit(next);
   };
   const remove = () => {
     commit(items.filter((_, j) => j !== selected));
@@ -2558,7 +2616,7 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
       <div className="map-editor-row">
         <span className="map-editor-label">Add</span>
         <div className="map-move-group" role="group" aria-label="What a click on the ice adds">
-          {MAP_OBJECTS.map((o) => (
+          {tools.map((o) => (
             <button type="button" key={o.id} className={"map-move-btn map-tool-btn" + (tool === o.id ? " active" : "")}
               onClick={() => { setTool(o.id); setSelected(null); }}><MapObjectIcon kind={o.id} /> {o.label}</button>
           ))}
@@ -2577,6 +2635,18 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
               <button type="button" key={m.id} className={"map-move-btn" + ((sel ? sel.move : move) === m.id ? " active" : "")} onClick={() => chooseMove(m.id)}>{m.label}</button>
             ))}
           </div>
+        </div>
+      )}
+      {(sel?.kind === "net" || sel?.kind === "crease") && (
+        <div className="map-editor-row">
+          <span className="map-editor-label">Turn</span>
+          <input type="range" className="map-turn" min="0" max="355" step="5" value={sel.rot} aria-label="Turn"
+            onPointerDown={remember} onKeyDown={remember} onChange={(e) => updateSel({ rot: Number(e.target.value) }, true)} />
+          <span className="map-turn-value">{sel.rot}°</span>
+          <button type="button" className="btn btn--ghost btn--small" onClick={() => updateSel({ rot: (sel.rot + 180) % 360 })}>Turn around</button>
+          {sel.kind === "net" && (
+            <label className="map-check"><input type="checkbox" checked={sel.crease} onChange={(e) => updateSel({ crease: e.target.checked })} /> Crease</label>
+          )}
         </div>
       )}
       {sel ? (
@@ -8684,6 +8754,10 @@ button:focus {
 .map-editor-row--split { justify-content: space-between; }
 .map-editor-label { font-size: 12px; color: var(--text-dim); min-width: 64px; }
 .map-tool-btn { display: inline-flex; align-items: center; gap: 6px; }
+.map-turn { flex: 1; min-width: 120px; max-width: 260px; accent-color: var(--accent); }
+.map-turn-value { font-size: 12px; color: var(--text); min-width: 36px; font-variant-numeric: tabular-nums; }
+.map-editor .map-check { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; margin: 0; font-size: 12px; color: var(--text-dim); cursor: pointer; }
+.map-check input { width: auto; margin: 0; accent-color: var(--accent); }
 .map-editor-note { font-size: 12px; color: var(--text-dim); padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; }
 .map-move-group { display: inline-flex; flex-wrap: wrap; gap: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 30px; padding: 4px; }
 .map-move-btn { padding: 7px 12px; border-radius: 26px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
