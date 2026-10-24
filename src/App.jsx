@@ -4,7 +4,7 @@ import {
   Trash2, Eye, EyeOff, Calendar as CalendarIcon, LayoutGrid, Users as UsersIcon,
   Image as ImageIcon, Settings as SettingsIcon, Download, LogOut, Mail, Lock, UploadCloud,
   FileText, Video as VideoIcon, AlertTriangle, Home, BarChart3, Tag, Search, CircleDot, Armchair,
-  Copy, LayoutTemplate, Megaphone, List, Camera, Cookie, ListOrdered, Heading, Link2, Scale, Info
+  Copy, LayoutTemplate, Megaphone, List, Camera, Cookie, ListOrdered, Heading, Link2, Scale, Info, Undo2
 } from "lucide-react";
 // Brand images ship as separate files (cached by the browser, never inside the JS bundle).
 import LOGO_SRC from "./assets/logo.png";
@@ -2154,11 +2154,11 @@ function VideoPlayer({ title, poster, src }) {
 // The written part of a drill (objective, steps, coaching points, common mistakes), shared by the
 // drill's own page and by the drill cards inside a practice focus.
 /* ============================================================================
-   MOVEMENT MAP (top-down crease diagram for a drill's steps)
-   drill.movementMap is lined up with drill.steps: one entry per step, either null (not on the
-   map) or { x, y, move, step }. x/y are in the diagram's own 716×330 space; move is "push"
-   (solid red), "recover" (dashed white) or "rotate" (turn in place); step is the step's text,
-   so a marker stays with its step when steps are added, removed or reordered.
+   MOVEMENT MAP (top-down diagram of a drill)
+   drill.movementMap is a list of things placed on the ice: { kind, x, y, move? }. kind is
+   "goalie" (a numbered goalie position), "shooter", "puck" or "cone". Goalie positions are
+   numbered in list order and number n goes with step n of the drill's Steps; move says how the
+   goalie gets there from the previous position. x/y are in the current view's coordinate space.
    ============================================================================ */
 
 const CREASE_W = 716, CREASE_H = 330;
@@ -2180,38 +2180,32 @@ function normalizeMove(move) {
   return MOVE_BY_ID[move] ? move : LEGACY_MOVES[move] || "shuffle";
 }
 
-// One entry per current step. A point belongs to the step with the same text; a reworded step
-// keeps the unclaimed point that sat between the same neighbouring steps as before.
-function alignMapToSteps(map, steps) {
-  const points = (Array.isArray(map) ? map : [])
-    .map((p, i) => (p && typeof p.x === "number" && typeof p.y === "number" ? { ...p, oldIndex: i } : null))
-    .filter(Boolean);
-  const used = new Set();
-  const out = steps.map(() => null);
-  steps.forEach((s, i) => {
-    const k = points.findIndex((p, j) => !used.has(j) && p.step === s);
-    if (k >= 0) { used.add(k); out[i] = points[k]; }
-  });
-  const anchors = out.slice();
-  steps.forEach((s, i) => {
-    if (out[i]) return;
-    let after = -1, before = Infinity;
-    for (let j = i - 1; j >= 0; j--) if (anchors[j]) { after = anchors[j].oldIndex; break; }
-    for (let j = i + 1; j < steps.length; j++) if (anchors[j]) { before = anchors[j].oldIndex; break; }
-    const k = points.findIndex((p, j) => !used.has(j) && p.oldIndex > after && p.oldIndex < before && !steps.includes(p.step));
-    if (k >= 0) { used.add(k); out[i] = points[k]; }
-  });
-  return out.map((p, i) => (p ? { x: p.x, y: p.y, move: normalizeMove(p.move), step: steps[i] } : null));
-}
-function mapHasPoints(map) {
-  return Array.isArray(map) && map.some(Boolean);
+
+// What a click on the ice can add.
+const MAP_OBJECTS = [
+  { id: "goalie", label: "Goalie step" },
+  { id: "shooter", label: "Shooter" },
+  { id: "puck", label: "Puck" },
+  { id: "cone", label: "Cone" },
+];
+const MAP_OBJECT_BY_ID = Object.fromEntries(MAP_OBJECTS.map((o) => [o.id, o]));
+
+// Drops anything malformed. Maps saved before objects existed had one entry per step (null for a
+// step not on the map); their points become goalie steps.
+function normalizeMap(map) {
+  return (Array.isArray(map) ? map : [])
+    .filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))
+    .map((p) => {
+      const kind = MAP_OBJECT_BY_ID[p.kind] ? p.kind : "goalie";
+      return kind === "goalie" ? { kind, x: p.x, y: p.y, move: normalizeMove(p.move) } : { kind, x: p.x, y: p.y };
+    });
 }
 // The step number badge styled like its marker on the map, so list and map read together.
-function stepBadgeClass(map, i) {
-  const p = map?.[i];
+function stepBadgeClass(goalies, i) {
+  const p = goalies[i];
   if (!p) return "step-num";
-  if (i === map.findIndex(Boolean)) return "step-num step-num--start";
-  const m = MOVE_BY_ID[normalizeMove(p.move)];
+  if (i === 0) return "step-num step-num--start";
+  const m = MOVE_BY_ID[p.move];
   return "step-num step-num--" + m.color + (m.dash ? " step-num--dashed" : "");
 }
 
@@ -2234,11 +2228,11 @@ function convertMapPoints(map, from, to) {
   const a = MAP_VIEWS[from] || MAP_VIEWS.crease, b = MAP_VIEWS[to] || MAP_VIEWS.crease;
   if (a === b) return map;
   const clamp = (v, max) => Math.max(20, Math.min(max - 20, Math.round(v)));
-  return (map || []).map((p) => (p ? {
+  return map.map((p) => ({
     ...p,
     x: clamp(b.netX + ((p.x - a.netX) / a.perFoot) * b.perFoot, b.w),
     y: clamp(b.goalY + ((p.y - a.goalY) / a.perFoot) * b.perFoot, b.h),
-  } : null));
+  }));
 }
 
 function CreaseSurface({ c, ids, vbX, vbW, k, light }) {
@@ -2294,8 +2288,13 @@ function ZoneSurface({ c, ids }) {
   );
 }
 
-function CreaseMap({ map, view = "crease", active, onPick, onBoardClick, editing = false, light = false }) {
+// Draws a map. active/onPick use indexes into items. In the editor (editing), a click on empty ice
+// calls onPlace, dragging an item calls onMoveItem when it's dropped and a click on an item picks
+// it; elsewhere only the goalie steps can be picked.
+function CreaseMap({ items, view = "crease", active = null, onPick, editing = false, onPlace, onMoveItem, light = false }) {
   const svgRef = useRef(null);
+  const press = useRef(null); // the pointer press in progress in the editor
+  const [drag, setDrag] = useState(null); // { idx, x, y } while an item is being dragged
   const ids = useId().replace(/:/g, "");
   const c = light ? CREASE_PALETTES.light : CREASE_PALETTES.dark;
   const V = MAP_VIEWS[view] || MAP_VIEWS.crease;
@@ -2309,25 +2308,54 @@ function CreaseMap({ map, view = "crease", active, onPick, onBoardClick, editing
     ro.observe(el);
     return () => ro.disconnect();
   }, [light, V.w]);
-  const pts = (map || []).map((p, i) => (p ? { ...p, i } : null)).filter(Boolean);
-  const firstIdx = pts.length ? pts[0].i : -1;
-  // On a narrow screen, the crease view zooms in on the crease (and wherever the steps are)
+  const list = items.map((p, i) => (drag?.idx === i ? { ...p, x: drag.x, y: drag.y, i } : { ...p, i }));
+  const goalies = list.filter((p) => p.kind === "goalie");
+  // On a narrow screen, the crease view zooms in on the crease (and wherever the markers are)
   // instead of showing the whole width, so the markers have room.
   const narrow = !light && !zone && width < 500;
-  const xs = pts.map((p) => p.x);
+  const xs = items.map((p) => p.x);
   const vbX = narrow ? Math.max(0, Math.min(150, ...xs.map((x) => x - 45))) : 0;
   const vbW = narrow ? Math.min(V.w, Math.max(566, ...xs.map((x) => x + 45))) - vbX : V.w;
   const k = light ? 1 : Math.max(1, Math.min(zone ? 1.4 : 1.6, (560 / CREASE_W) * vbW / width));
   const r = 17 * k;
 
-  const handleClick = (e) => {
-    if (!onBoardClick || !svgRef.current) return;
-    const box = svgRef.current.getBoundingClientRect();
-    const x = Math.round(vbX + ((e.clientX - box.left) / box.width) * vbW);
-    const y = Math.round(((e.clientY - box.top) / box.height) * V.h);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return; // e.g. a keyboard "click" with no position
-    onBoardClick({ x: Math.max(20, Math.min(V.w - 20, x)), y: Math.max(20, Math.min(V.h - 20, y)) });
+  const toMap = (e) => {
+    const ctm = svgRef.current?.getScreenCTM();
+    if (!ctm) return null;
+    const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(ctm.inverse());
+    if (!Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return null;
+    return { x: Math.round(Math.max(vbX + 14, Math.min(vbX + vbW - 14, pt.x))), y: Math.round(Math.max(14, Math.min(V.h - 14, pt.y))) };
   };
+  const pointer = editing ? {
+    onPointerDown: (e) => {
+      if (e.button) return;
+      const el = e.target.closest?.("[data-idx]");
+      press.current = { idx: el ? Number(el.dataset.idx) : null, sx: e.clientX, sy: e.clientY, moved: false };
+      try { svgRef.current.setPointerCapture(e.pointerId); } catch { /* not supported */ }
+    },
+    onPointerMove: (e) => {
+      const p = press.current;
+      if (!p || p.idx === null) return;
+      if (!p.moved && Math.hypot(e.clientX - p.sx, e.clientY - p.sy) < 5) return;
+      p.moved = true;
+      const pt = toMap(e);
+      if (pt) setDrag({ idx: p.idx, ...pt });
+    },
+    onPointerUp: (e) => {
+      const p = press.current;
+      press.current = null;
+      if (!p) return;
+      if (p.idx !== null) {
+        if (!p.moved) onPick?.(p.idx);
+        else { const pt = toMap(e); if (pt) onMoveItem?.(p.idx, pt); }
+        setDrag(null);
+      } else if (Math.hypot(e.clientX - p.sx, e.clientY - p.sy) < 8) {
+        const pt = toMap(e);
+        if (pt) onPlace?.(pt);
+      }
+    },
+    onPointerCancel: () => { press.current = null; setDrag(null); },
+  } : {};
   // A gently curved arrow from one point to the next, stopping short of both markers.
   // offset shifts the whole curve sideways (for the second line of a Double Push).
   const pathBetween = (a, b, offset = 0) => {
@@ -2342,6 +2370,7 @@ function CreaseMap({ map, view = "crease", active, onPick, onBoardClick, editing
     const cx = (sx + ex) / 2 - uy * bend, cy = (sy + ey) / 2 + ux * bend;
     return `M${sx.toFixed(1)} ${sy.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}`;
   };
+  const ring = (p, size) => active === p.i && <circle cx={p.x} cy={p.y} r={size + 8} fill="none" stroke="var(--accent)" strokeWidth="2" opacity="0.55" />;
 
   return (
     <svg
@@ -2350,7 +2379,7 @@ function CreaseMap({ map, view = "crease", active, onPick, onBoardClick, editing
       viewBox={`${vbX} 0 ${vbW} ${V.h}`}
       role="img"
       aria-label={zone ? "Top-down diagram of the defensive zone showing where each step of the drill happens" : "Top-down crease diagram showing where each step of the drill happens"}
-      onClick={handleClick}
+      {...pointer}
     >
       <defs>
         <marker id={ids + "a"} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--accent)" /></marker>
@@ -2359,43 +2388,62 @@ function CreaseMap({ map, view = "crease", active, onPick, onBoardClick, editing
       </defs>
       {zone ? <ZoneSurface c={c} ids={ids} /> : <CreaseSurface c={c} ids={ids} vbX={vbX} vbW={vbW} k={k} light={light} />}
 
-      {pts.map((p, n) => {
+      {list.filter((p) => p.kind !== "goalie").map((p) => {
+        const s = 12 * k;
+        return (
+          <g key={"o" + p.i} data-idx={editing ? p.i : undefined} className={editing ? "crease-item" : undefined}>
+            {ring(p, s)}
+            {editing && <circle cx={p.x} cy={p.y} r={s + 6} fill="transparent" />}
+            {p.kind === "shooter" && (<>
+              <circle cx={p.x} cy={p.y} r={s} fill={c.net} />
+              <text x={p.x} y={p.y + 4 * k} textAnchor="middle" fontSize={12 * k} className="crease-num" fill={c.ink}>S</text>
+            </>)}
+            {p.kind === "puck" && <circle cx={p.x} cy={p.y} r={6 * k} fill={c.ink} stroke={c.bg} strokeWidth="1.5" />}
+            {p.kind === "cone" && <path d={`M${p.x} ${p.y - s} L${p.x + s * 0.9} ${p.y + s * 0.75} L${p.x - s * 0.9} ${p.y + s * 0.75} Z`} fill={c.label} stroke={c.bg} strokeWidth="1.5" strokeLinejoin="round" />}
+          </g>
+        );
+      })}
+
+      {goalies.map((p, n) => {
         if (n === 0) return null;
-        const m = MOVE_BY_ID[normalizeMove(p.move)];
+        const m = MOVE_BY_ID[p.move];
         const color = m.color === "red" ? "var(--accent)" : c.ink;
         const width = 2.4 * Math.min(k, 1.4);
         const arrow = `url(#${ids}${m.color === "red" ? "a" : "w"})`;
+        const d = pathBetween(goalies[n - 1], p);
+        if (!d) return null;
         if (m.double) {
           // Two parallel lines, with the arrowhead on an invisible centre line.
           const off = 3 * Math.min(k, 1.4);
           return (
             <g key={"path" + p.i}>
-              <path d={pathBetween(pts[n - 1], p, -off)} fill="none" stroke={color} strokeWidth={width * 0.7} />
-              <path d={pathBetween(pts[n - 1], p, off)} fill="none" stroke={color} strokeWidth={width * 0.7} />
-              <path d={pathBetween(pts[n - 1], p)} fill="none" stroke="transparent" strokeWidth={width} markerEnd={arrow} />
+              <path d={pathBetween(goalies[n - 1], p, -off)} fill="none" stroke={color} strokeWidth={width * 0.7} />
+              <path d={pathBetween(goalies[n - 1], p, off)} fill="none" stroke={color} strokeWidth={width * 0.7} />
+              <path d={d} fill="none" stroke="transparent" strokeWidth={width} markerEnd={arrow} />
             </g>
           );
         }
-        const d = pathBetween(pts[n - 1], p);
-        if (!d) return null;
         return (
           <path key={"path" + p.i} d={d} fill="none" stroke={color} strokeWidth={width}
             strokeDasharray={m.dash} strokeLinecap={m.id === "step" ? "round" : undefined} markerEnd={arrow} />
         );
       })}
 
-      {pts.map((p) => {
-        const isFirst = p.i === firstIdx;
-        const m = MOVE_BY_ID[normalizeMove(p.move)];
+      {goalies.map((p, n) => {
+        const isFirst = n === 0;
+        const m = MOVE_BY_ID[p.move];
+        const pick = !editing && onPick;
         return (
-          <g key={"pt" + p.i} className={onPick ? "crease-marker" : undefined} onClick={onPick ? (e) => { e.stopPropagation(); onPick(p.i); } : undefined}>
-            {active === p.i && <circle cx={p.x} cy={p.y} r={r + 8} fill="none" stroke="var(--accent)" strokeWidth="2" opacity="0.55" />}
+          <g key={"pt" + p.i} data-idx={editing ? p.i : undefined}
+            className={editing ? "crease-item" : pick ? "crease-marker" : undefined}
+            onClick={pick ? (e) => { e.stopPropagation(); onPick(p.i); } : undefined}>
+            {ring(p, r)}
             <circle cx={p.x} cy={p.y} r={r}
               fill={isFirst ? "var(--accent)" : c.fill}
               stroke={isFirst ? "none" : (m.color === "red" ? "var(--accent)" : c.ink)}
               strokeWidth="2"
               strokeDasharray={!isFirst && m.dash ? "4 3" : undefined} />
-            <text x={p.x} y={p.y + 4.5 * k} textAnchor="middle" fontSize={13 * k} className="crease-num" fill={isFirst ? "#FFFFFF" : c.ink}>{p.i + 1}</text>
+            <text x={p.x} y={p.y + 4.5 * k} textAnchor="middle" fontSize={13 * k} className="crease-num" fill={isFirst ? "#FFFFFF" : c.ink}>{n + 1}</text>
           </g>
         );
       })}
@@ -2403,11 +2451,26 @@ function CreaseMap({ map, view = "crease", active, onPick, onBoardClick, editing
   );
 }
 
-// Only the movements this drill uses (the first step is the starting position, not a movement).
-function CreaseMapLegend({ map }) {
-  const placed = (map || []).filter(Boolean);
-  const used = MOVE_TYPES.filter((m) => placed.slice(1).some((p) => normalizeMove(p.move) === m.id));
-  if (!used.length) return null;
+// Small icon for an object, for the legend and the editor's buttons.
+function MapObjectIcon({ kind, size = 14 }) {
+  const ink = "currentColor";
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" aria-hidden="true">
+      {kind === "goalie" && <><circle cx="7" cy="7" r="6" fill="none" stroke={ink} strokeWidth="1.6" /><text x="7" y="10" textAnchor="middle" fontSize="8" fontWeight="700" fill={ink}>1</text></>}
+      {kind === "shooter" && <><circle cx="7" cy="7" r="6.5" fill="#5C5C61" /><text x="7" y="10" textAnchor="middle" fontSize="8" fontWeight="700" fill="#F3F3F1">S</text></>}
+      {kind === "puck" && <circle cx="7" cy="7" r="3.5" fill={ink} />}
+      {kind === "cone" && <path d="M7 1.5 L12.5 12 L1.5 12 Z" fill="#8D8D93" />}
+    </svg>
+  );
+}
+
+// Only the movements and objects this drill uses (the first goalie step is the starting
+// position, not a movement).
+function CreaseMapLegend({ items }) {
+  const goalies = items.filter((p) => p.kind === "goalie");
+  const used = MOVE_TYPES.filter((m) => goalies.slice(1).some((p) => p.move === m.id));
+  const objects = MAP_OBJECTS.filter((o) => o.id !== "goalie" && items.some((p) => p.kind === o.id));
+  if (!used.length && !objects.length) return null;
   return (
     <div className="crease-legend">
       {used.map((m) => (
@@ -2424,114 +2487,134 @@ function CreaseMapLegend({ map }) {
           {m.label}
         </span>
       ))}
+      {objects.map((o) => <span key={o.id}><MapObjectIcon kind={o.id} size={12} />{o.label}</span>)}
     </div>
   );
 }
 
-// Drill editor: pick a step (or add one right here), click the map to place it, and choose how the
-// goalie gets there. Steps added here are added to the drill's Steps list too.
-function CreaseMapEditor({ stepsText, map, view = "crease", onChange, onViewChange, onAddStep }) {
-  const steps = parseLines(stepsText || "");
-  const aligned = alignMapToSteps(map, steps);
-  const [active, setActive] = useState(0);
-  const [move, setMove] = useState("shuffle"); // used for the next step placed
-  const [newStep, setNewStep] = useState("");
-  const activeIdx = Math.min(active, Math.max(0, steps.length - 1));
-  const activePoint = aligned[activeIdx] || null;
-  const activeMove = activePoint ? normalizeMove(activePoint.move) : move;
+// Drill editor: pick what to add, click the ice to place it, drag anything to move it, click it to
+// change its movement or delete it. Undo takes back the last change, including a view switch.
+function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onViewChange, onAddSteps }) {
+  const items = normalizeMap(map);
+  const goalies = items.filter((p) => p.kind === "goalie");
+  const [tool, setTool] = useState("goalie");
+  const [move, setMove] = useState("shuffle"); // for the next goalie step placed
+  const [selected, setSelected] = useState(null);
+  const [history, setHistory] = useState([]);
+  const sel = selected !== null && selected < items.length ? items[selected] : null;
+  // 1-based step number of the selected goalie step.
+  const selStep = sel?.kind === "goalie" ? items.slice(0, selected + 1).filter((p) => p.kind === "goalie").length : 0;
 
-  const setPoint = (i, value) => {
-    const next = aligned.slice();
-    next[i] = value ? { ...value, step: steps[i] } : null;
-    onChange(next);
+  const commit = (next, nextView = view) => {
+    setHistory((h) => [...h.slice(-49), { items, view }]);
+    if (nextView !== view) onViewChange(nextView, next);
+    else onChange(next);
+  };
+  const undo = () => {
+    const last = history[history.length - 1];
+    if (!last) return;
+    setHistory((h) => h.slice(0, -1));
+    setSelected(null);
+    if (last.view !== view) onViewChange(last.view, last.items);
+    else onChange(last.items);
   };
   const place = ({ x, y }) => {
-    if (!steps.length) return;
-    setPoint(activeIdx, { x, y, move: activeMove });
-    if (activeIdx < steps.length - 1) setActive(activeIdx + 1);
+    if (sel) { setSelected(null); return; } // a click on empty ice first lets go of the selection
+    commit([...items, tool === "goalie" ? { kind: "goalie", x, y, move } : { kind: tool, x, y }]);
   };
   const chooseMove = (id) => {
-    setMove(id);
-    if (activePoint) setPoint(activeIdx, { ...activePoint, move: id });
+    if (sel?.kind === "goalie") commit(items.map((p, j) => (j === selected ? { ...p, move: id } : p)));
+    else setMove(id);
   };
-  // A blank name uses the movement's name, e.g. "T-Push".
-  const addStep = () => {
-    const text = newStep.trim() || MOVE_BY_ID[move].label;
-    onAddStep(text);
-    setNewStep("");
-    setActive(steps.length);
+  const remove = () => {
+    commit(items.filter((_, j) => j !== selected));
+    setSelected(null);
   };
-  const clearAll = async () => {
-    if (!(await confirmDialog({ title: "Clear the whole movement map?", message: "Every step is taken off the map. The steps themselves stay.", confirmLabel: "Clear map", danger: true }))) return;
-    onChange([]);
-    setActive(0);
+  const onKeyDown = (e) => {
+    if (!sel) return;
+    if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); remove(); }
+    else if (e.key === "Escape") setSelected(null);
   };
+  const missing = goalies.slice(stepCount);
+  const addMissingSteps = () => onAddSteps(missing.map((p, n) => (stepCount + n === 0 ? "Starting position" : MOVE_BY_ID[p.move].label)));
 
-  const moveButtons = (
-    <div className="map-move-group" role="group" aria-label="How the goalie gets to this step">
-      {MOVE_TYPES.map((m) => (
-        <button type="button" key={m.id} className={"map-move-btn" + (activeMove === m.id ? " active" : "")} onClick={() => chooseMove(m.id)}>{m.label}</button>
-      ))}
-    </div>
-  );
-  const addRow = (
-    <div className="map-add-step">
-      <input value={newStep} onChange={(e) => setNewStep(e.target.value)} maxLength={120}
-        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addStep(); } }}
-        placeholder={`New step, e.g. "${MOVE_BY_ID[move].label} to the left post" (blank = ${MOVE_BY_ID[move].label})`} aria-label="New step" />
-      <button type="button" className="btn btn--ghost btn--small" onClick={addStep}><Plus size={13} /> Add step</button>
-    </div>
-  );
-
+  const showMoves = sel ? selStep > 1 : tool === "goalie" && goalies.length > 0;
+  const nextStep = goalies.length + 1;
   return (
     <div className="map-editor">
-      <div className="map-view-row">
-        <span className="map-editor-hint">View</span>
+      <div className="map-editor-row map-editor-row--split">
         <div className="map-move-group" role="group" aria-label="Map view">
           {Object.entries(MAP_VIEWS).map(([key, v]) => (
             <button type="button" key={key} className={"map-move-btn" + (view === key ? " active" : "")}
-              onClick={() => { if (view !== key) onViewChange(key, convertMapPoints(aligned, view, key)); }}>{v.label}</button>
+              onClick={() => { if (view !== key) commit(convertMapPoints(items, view, key), key); }}>{v.label}</button>
+          ))}
+        </div>
+        <div className="map-editor-actions">
+          <button type="button" className="btn btn--ghost btn--small" disabled={!history.length} onClick={undo}><Undo2 size={13} /> Undo</button>
+          <button type="button" className="btn btn--ghost btn--small" disabled={!items.length} onClick={() => { commit([]); setSelected(null); }}>Clear</button>
+        </div>
+      </div>
+      <div className="map-editor-row">
+        <span className="map-editor-label">Add</span>
+        <div className="map-move-group" role="group" aria-label="What a click on the ice adds">
+          {MAP_OBJECTS.map((o) => (
+            <button type="button" key={o.id} className={"map-move-btn map-tool-btn" + (tool === o.id ? " active" : "")}
+              onClick={() => { setTool(o.id); setSelected(null); }}><MapObjectIcon kind={o.id} /> {o.label}</button>
           ))}
         </div>
       </div>
-      {steps.length > 0 && (
-        <div className="map-editor-steps">
-          {steps.map((s, i) => (
-            <button type="button" key={i} title={s}
-              className={"map-step-pill" + (i === activeIdx ? " active" : "") + (aligned[i] ? " placed" : "")}
-              onClick={() => setActive(i)}>
-              <span className={stepBadgeClass(aligned, i)}>{i + 1}</span>
-              <span className="map-step-pill-text">{s}</span>
-            </button>
-          ))}
+      <div className="map-editor-board" tabIndex={-1} onKeyDown={onKeyDown}>
+        <CreaseMap items={items} view={view} active={selected} editing
+          onPick={(i) => setSelected((s) => (s === i ? null : i))} onPlace={place}
+          onMoveItem={(i, pt) => commit(items.map((p, j) => (j === i ? { ...p, ...pt } : p)))} />
+      </div>
+      {showMoves && (
+        <div className="map-editor-row">
+          <span className="map-editor-label">{sel ? `Step ${selStep} by` : `Step ${nextStep} by`}</span>
+          <div className="map-move-group" role="group" aria-label="How the goalie gets to this step">
+            {MOVE_TYPES.map((m) => (
+              <button type="button" key={m.id} className={"map-move-btn" + ((sel ? sel.move : move) === m.id ? " active" : "")} onClick={() => chooseMove(m.id)}>{m.label}</button>
+            ))}
+          </div>
         </div>
       )}
-      {addRow}
-      <p className="map-editor-hint">
-        {steps.length
-          ? <>Step {activeIdx + 1} selected. Pick its movement below and click on the map to place it{activePoint ? " (click again to move it)" : ""}.</>
-          : <>Add the first step above (or in Steps), then click on the map to place it.</>}
-      </p>
-      <div className="map-editor-board">
-        <CreaseMap map={aligned} view={view} active={steps.length ? activeIdx : null} editing onPick={setActive} onBoardClick={place} />
-      </div>
-      <div className="map-editor-controls">
-        {moveButtons}
-        <div className="map-editor-actions">
-          <button type="button" className="btn btn--ghost btn--small" disabled={!activePoint} onClick={() => setPoint(activeIdx, null)}>Remove step {activeIdx + 1} from map</button>
-          <button type="button" className="btn btn--ghost btn--small" disabled={!mapHasPoints(aligned)} onClick={clearAll}>Clear map</button>
+      {sel ? (
+        <div className="map-editor-row map-editor-row--split">
+          <span className="map-editor-hint">
+            {sel.kind === "goalie" ? `Step ${selStep}${selStep === 1 ? " (starting position)" : ""}` : MAP_OBJECT_BY_ID[sel.kind].label} selected. Drag it to move it.
+          </span>
+          <div className="map-editor-actions">
+            <button type="button" className="btn btn--ghost btn--small" onClick={remove}><Trash2 size={13} /> Delete</button>
+            <button type="button" className="btn btn--ghost btn--small" onClick={() => setSelected(null)}>Done</button>
+          </div>
         </div>
-      </div>
+      ) : (
+        <p className="map-editor-hint">
+          {tool === "goalie"
+            ? (goalies.length ? `Click the ice to add step ${nextStep}.` : "Click the ice where the goalie starts (step 1).")
+            : `Click the ice to add a ${MAP_OBJECT_BY_ID[tool].label.toLowerCase()}.`}
+          {" "}Drag anything to move it; click it to change or delete it.
+        </p>
+      )}
+      {missing.length > 0 && (
+        <div className="map-editor-row map-editor-note">
+          <span>{missing.length === 1 ? `Step ${stepCount + 1} on the map has` : `Steps ${stepCount + 1}–${goalies.length} on the map have`} no text in Steps yet.</span>
+          <button type="button" className="btn btn--ghost btn--small" onClick={addMissingSteps}><Plus size={13} /> Add to Steps</button>
+        </div>
+      )}
     </div>
   );
 }
 
 function DrillBody({ drill }) {
   // Empty sections are left out rather than shown as a heading with nothing under it.
-  const map = alignMapToSteps(drill.movementMap, drill.steps);
-  const showMap = mapHasPoints(map);
+  const items = normalizeMap(drill.movementMap);
+  const showMap = items.length > 0;
+  // Goalie step n on the map goes with step n of the list.
+  const stepItems = items.flatMap((p, i) => (p.kind === "goalie" ? [i] : []));
+  const goalies = stepItems.map((i) => items[i]);
   const [activeStep, setActiveStep] = useState(null);
-  const toggleStep = (i) => setActiveStep((cur) => (cur === i ? null : i));
+  const toggleStep = (n) => setActiveStep((cur) => (cur === n ? null : n));
   const sets = (drill.sets || "").trim();
   const reps = (drill.reps || "").trim();
   const rounds = (drill.rounds || "").trim();
@@ -2547,15 +2630,15 @@ function DrillBody({ drill }) {
             <div className="map-card">
               <div className="map-card-head">
                 <span className="map-card-label">MOVEMENT MAP</span>
-                <CreaseMapLegend map={map} />
+                <CreaseMapLegend items={items} />
               </div>
-              <CreaseMap map={map} view={drill.movementMapView} active={activeStep} onPick={toggleStep} />
+              <CreaseMap items={items} view={drill.movementMapView} active={activeStep === null ? null : stepItems[activeStep]} onPick={(i) => toggleStep(stepItems.indexOf(i))} />
             </div>
           )}
           {drill.steps.length > 0 && <ol className="steps">{drill.steps.map((s, i) => (
-            showMap ? (
+            goalies[i] ? (
               <li key={i} className={"step-row" + (activeStep === i ? " step-row--active" : "")} onClick={() => toggleStep(i)}>
-                <span className={stepBadgeClass(map, i)}>{i + 1}</span><span>{s}</span>
+                <span className={stepBadgeClass(goalies, i)}>{i + 1}</span><span>{s}</span>
               </li>
             ) : <li key={i}><span className="step-num">{i + 1}</span><span>{s}</span></li>
           ))}</ol>}
@@ -3923,7 +4006,7 @@ function AdminDrills({ content, updateContent }) {
     equipment: d.equipment, description: d.description, objective: d.objective,
     steps: parseLines(d.stepsText),
     // Saved lined up with the steps (and empty when nothing is placed).
-    movementMap: (() => { const m = alignMapToSteps(d.movementMap, parseLines(d.stepsText)); return mapHasPoints(m) ? m : []; })(),
+    movementMap: normalizeMap(d.movementMap),
     movementMapView: d.movementMapView === "zone" ? "zone" : "crease",
     performText: richTextToPlain(d.performText) ? d.performText : "",
     sets: (d.sets || "").trim(),
@@ -4046,10 +4129,10 @@ function AdminDrills({ content, updateContent }) {
             <div className="admin-form-span2 map-editor-field">
               <span className="map-editor-title">Movement map <em>optional</em></span>
               <CreaseMapEditor
-                stepsText={draft.stepsText} map={draft.movementMap} view={draft.movementMapView || "crease"}
+                map={draft.movementMap} view={draft.movementMapView || "crease"} stepCount={parseLines(draft.stepsText || "").length}
                 onChange={(movementMap) => setDraft((d) => ({ ...d, movementMap }))}
                 onViewChange={(movementMapView, movementMap) => setDraft((d) => ({ ...d, movementMapView, movementMap }))}
-                onAddStep={(text) => setDraft((d) => ({ ...d, stepsText: (d.stepsText || "").replace(/\s+$/, "") ? d.stepsText.replace(/\s+$/, "") + "\n" + text : text }))}
+                onAddSteps={(lines) => setDraft((d) => ({ ...d, stepsText: [...parseLines(d.stepsText || ""), ...lines].join("\n") }))}
               />
             </div>
             <div className="admin-form-span2 drill-volume-fields">
@@ -6993,8 +7076,8 @@ function PrintSheet({ content, date, assignment }) {
               <>
                 <PrintHeading>How to perform</PrintHeading>
                 {richTextToPlain(drill.performText) && <RichText className="print-rich" value={drill.performText} />}
-                {mapHasPoints(alignMapToSteps(drill.movementMap, drill.steps)) && (
-                  <div className={"print-map" + (drill.movementMapView === "zone" ? " print-map--zone" : "")}><CreaseMap map={alignMapToSteps(drill.movementMap, drill.steps)} view={drill.movementMapView} light /></div>
+                {normalizeMap(drill.movementMap).length > 0 && (
+                  <div className={"print-map" + (drill.movementMapView === "zone" ? " print-map--zone" : "")}><CreaseMap items={normalizeMap(drill.movementMap)} view={drill.movementMapView} light /></div>
                 )}
                 {drill.steps.length > 0 && <ol className="print-steps">{drill.steps.map((st, i) => <li key={i}><span className="print-step-num">{i + 1}</span><span>{st}</span></li>)}</ol>}
               </>
@@ -8584,24 +8667,23 @@ button:focus {
 .step-num--red { background: var(--bg); border: 2px solid var(--accent); }
 .step-num--ink { background: var(--bg); border: 2px solid var(--text); }
 .step-num--dashed { border-style: dashed; }
-.map-add-step { display: flex; gap: 8px; }
-.map-add-step input { flex: 1; min-width: 0; }
 .mistake-label { display: inline-flex; align-items: center; gap: 5px; }
 .mistake-label--right { color: var(--accent); }
 .map-editor-field { display: flex; flex-direction: column; gap: 8px; }
 .map-editor-title { font-size: 12px; color: var(--text-dim); }
 .map-editor-title em { font-style: normal; color: var(--text-faint); margin-left: 4px; }
 .map-editor { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
-.map-editor--empty { font-size: 13px; color: var(--text-dim); }
-.map-editor-steps { display: flex; flex-wrap: wrap; gap: 8px; }
-.map-step-pill { display: inline-flex; align-items: center; gap: 8px; max-width: 230px; padding: 6px 12px 6px 6px; border-radius: 30px; background: var(--surface); border: 1px solid var(--border); font-size: 12px; color: var(--text-dim); min-height: 40px; }
-.map-step-pill.active { border-color: var(--accent); color: var(--text); }
-.map-step-pill .step-num { width: 26px; height: 26px; }
-.map-step-pill:not(.placed) .step-num { opacity: 0.55; }
-.map-step-pill-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .map-editor-hint { margin: 0; font-size: 12px; color: var(--text-dim); }
 .map-editor-board { border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
-.map-editor-controls { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; }
+.map-editor-board:focus { outline: none; }
+.map-editor-board .crease-svg--editing { touch-action: none; }
+.crease-item { cursor: grab; }
+.crease-item:active { cursor: grabbing; }
+.map-editor-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.map-editor-row--split { justify-content: space-between; }
+.map-editor-label { font-size: 12px; color: var(--text-dim); min-width: 64px; }
+.map-tool-btn { display: inline-flex; align-items: center; gap: 6px; }
+.map-editor-note { font-size: 12px; color: var(--text-dim); padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; }
 .map-move-group { display: inline-flex; flex-wrap: wrap; gap: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 30px; padding: 4px; }
 .map-move-btn { padding: 7px 12px; border-radius: 26px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
 .map-move-btn.active { background: var(--accent); color: #fff; }
@@ -8610,7 +8692,6 @@ button:focus {
 .print-map { max-width: 340px; margin: 6px 0 8px; }
 .print-map--zone { max-width: 340px; }
 .crease-svg--zone { width: 100%; }
-.map-view-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 @media (max-width: 640px) { .crease-legend { gap: 10px; font-size: 11px; } .map-card { padding: 12px; } }
 .drill-volume-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .drill-volume-tile { display: flex; flex-direction: column; gap: 4px; min-width: 110px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
