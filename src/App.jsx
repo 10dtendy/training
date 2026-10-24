@@ -2210,12 +2210,13 @@ const CREASE_PALETTES = {
 };
 
 // Two views of the ice, each in its own coordinate space. The crease view is the close-up around
-// the net (23.33 units per foot); the zone view is half a rink from the end boards to the centre
-// line (8 units per foot, NHL dimensions). The net's centre on the goal line anchors both, so a
-// point keeps its spot on the ice when the view is switched.
+// the net (23.33 units per foot); the zone view is the defensive zone from the end boards to just
+// past the blue line (8 units per foot, NHL dimensions, except that the gap between the faceoff
+// circles and the blue line is shortened so the zone shows wider). The net's centre on the goal
+// line anchors both, so a point keeps its spot on the ice when the view is switched.
 const MAP_VIEWS = {
   crease: { w: CREASE_W, h: CREASE_H, perFoot: 140 / 6, netX: 358, goalY: 50, label: "Crease" },
-  zone: { w: 680, h: 800, perFoot: 8, netX: 340, goalY: 88, label: "Full zone" },
+  zone: { w: 680, h: 470, perFoot: 8, netX: 340, goalY: 88, label: "Full zone" },
 };
 function convertMapPoints(map, from, to) {
   const a = MAP_VIEWS[from] || MAP_VIEWS.crease, b = MAP_VIEWS[to] || MAP_VIEWS.crease;
@@ -2250,9 +2251,9 @@ function CreaseSurface({ c, ids, vbX, vbW, k, light }) {
   );
 }
 
-// Half an NHL rink, end boards at the top: goal line 11 ft out, trapezoid, net and crease, the two
-// end-zone faceoff circles (20 ft out, 22 ft either side, 15 ft radius), blue line at 75 ft,
-// the neutral-zone dots and half of the centre circle on the centre line.
+// The defensive zone of an NHL rink, end boards at the top: goal line 11 ft out, trapezoid, net and
+// crease, the two faceoff circles (20 ft out, 22 ft either side, 15 ft radius) and the blue line a
+// short way below them.
 function ZoneSurface({ c, ids }) {
   const red = "var(--accent)";
   const circle = (cx) => (
@@ -2269,7 +2270,7 @@ function ZoneSurface({ c, ids }) {
   );
   return (
     <>
-      <path d="M0 800 L0 224 A224 224 0 0 1 224 0 L456 0 A224 224 0 0 1 680 224 L680 800 Z" fill={c.bg} stroke={c.boards} strokeWidth="3" />
+      <path d="M0 470 L0 224 A224 224 0 0 1 224 0 L456 0 A224 224 0 0 1 680 224 L680 470" fill={c.bg} stroke={c.boards} strokeWidth="3" />
       <line x1="46" y1="88" x2="634" y2="88" stroke={red} strokeWidth="2" />
       <line x1="252" y1="88" x2="228" y2="0" stroke={red} strokeWidth="2" />
       <line x1="428" y1="88" x2="452" y2="0" stroke={red} strokeWidth="2" />
@@ -2278,11 +2279,7 @@ function ZoneSurface({ c, ids }) {
       <circle cx="316" cy="88" r="3" fill={c.ink} />
       <circle cx="364" cy="88" r="3" fill={c.ink} />
       {circle(164)}{circle(516)}
-      <rect x="0" y="596" width="680" height="9" fill={c.blue} />
-      <circle cx="164" cy="640" r="8" fill={red} />
-      <circle cx="516" cy="640" r="8" fill={red} />
-      <path d="M220 800 A120 120 0 0 1 460 800" fill="none" stroke={c.blue} strokeWidth="2" />
-      <rect x="0" y="795" width="680" height="5" fill={red} />
+      <rect x="0" y="420" width="680" height="9" fill={c.blue} />
     </>
   );
 }
@@ -8546,8 +8543,8 @@ button:focus {
 .map-move-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .map-editor-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .print-map { max-width: 340px; margin: 6px 0 8px; }
-.print-map--zone { max-width: 200px; }
-.crease-svg--zone { max-width: 460px; margin: 0 auto; }
+.print-map--zone { max-width: 280px; }
+.crease-svg--zone { max-width: 620px; margin: 0 auto; }
 .map-view-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 @media (max-width: 640px) { .crease-legend { gap: 10px; font-size: 11px; } .map-card { padding: 12px; } }
 .drill-volume-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
