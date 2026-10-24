@@ -2204,19 +2204,19 @@ function stepBadgeClass(map, i) {
 }
 
 const CREASE_PALETTES = {
-  dark: { bg: "#0F0F12", line: "#3A3A40", net: "#5C5C61", ink: "#F3F3F1", label: "#8D8D93", fill: "#0A0A0C", boards: "#5C5C61", blue: "#4A78B8" },
+  dark: { bg: "#0F0F12", line: "#3A3A40", net: "#5C5C61", ink: "#F3F3F1", label: "#8D8D93", fill: "#0A0A0C", boards: "#5C5C61" },
   // For the printed sheet: no dark block of ink on paper.
-  light: { bg: "#FFFFFF", line: "#D4D4D8", net: "#9A9AA0", ink: "#18181B", label: "#71717A", fill: "#FFFFFF", boards: "#3F3F46", blue: "#2E5A9C" },
+  light: { bg: "#FFFFFF", line: "#D4D4D8", net: "#9A9AA0", ink: "#18181B", label: "#71717A", fill: "#FFFFFF", boards: "#9A9AA0" },
 };
 
 // Two views of the ice, each in its own coordinate space. The crease view is the close-up around
 // the net (23.33 units per foot); the zone view is the defensive zone from the end boards to just
-// past the blue line (8 units per foot, NHL dimensions, except that the gap between the faceoff
-// circles and the blue line is shortened so the zone shows wider). The net's centre on the goal
+// past the blue line (8 units per foot, NHL dimensions, except that the rink is drawn wider, with
+// more room between the faceoff circles, and the blue line sits closer under them). The net's centre on the goal
 // line anchors both, so a point keeps its spot on the ice when the view is switched.
 const MAP_VIEWS = {
   crease: { w: CREASE_W, h: CREASE_H, perFoot: 140 / 6, netX: 358, goalY: 50, label: "Crease" },
-  zone: { w: 680, h: 470, perFoot: 8, netX: 340, goalY: 88, label: "Full zone" },
+  zone: { w: 900, h: 470, perFoot: 8, netX: 450, goalY: 88, label: "Full zone" },
 };
 function convertMapPoints(map, from, to) {
   const a = MAP_VIEWS[from] || MAP_VIEWS.crease, b = MAP_VIEWS[to] || MAP_VIEWS.crease;
@@ -2256,30 +2256,32 @@ function CreaseSurface({ c, ids, vbX, vbW, k, light }) {
 // short way below them.
 function ZoneSurface({ c, ids }) {
   const red = "var(--accent)";
-  const circle = (cx) => (
-    <g key={cx}>
-      <circle cx={cx} cy="248" r="120" fill="none" stroke={red} strokeWidth="2" />
-      <circle cx={cx} cy="248" r="8" fill={red} />
+  const W = MAP_VIEWS.zone.w, cx = W / 2; // the net's centre
+  const circle = (fx) => (
+    <g key={fx}>
+      <circle cx={fx} cy="248" r="120" fill="none" stroke={red} strokeWidth="2" />
+      <circle cx={fx} cy="248" r="8" fill={red} />
       {[-1, 1].map((sx) => [-1, 1].map((sy) => (
-        <path key={sx + "" + sy} d={`M${cx + sx * 6} ${248 + sy * 50} L${cx + sx * 6} ${248 + sy * 16} L${cx + sx * 46} ${248 + sy * 16}`} fill="none" stroke={red} strokeWidth="2" />
+        <path key={sx + "" + sy} d={`M${fx + sx * 6} ${248 + sy * 50} L${fx + sx * 6} ${248 + sy * 16} L${fx + sx * 46} ${248 + sy * 16}`} fill="none" stroke={red} strokeWidth="2" />
       )))}
       {[-1, 1].map((sx) => [-1, 1].map((sy) => (
-        <line key={"h" + sx + sy} x1={cx + sx * 120} y1={248 + sy * 18} x2={cx + sx * 140} y2={248 + sy * 18} stroke={red} strokeWidth="2" />
+        <line key={"h" + sx + sy} x1={fx + sx * 120} y1={248 + sy * 18} x2={fx + sx * 140} y2={248 + sy * 18} stroke={red} strokeWidth="2" />
       )))}
     </g>
   );
   return (
     <>
-      <path d="M0 470 L0 224 A224 224 0 0 1 224 0 L456 0 A224 224 0 0 1 680 224 L680 470" fill={c.bg} stroke={c.boards} strokeWidth="3" />
-      <line x1="46" y1="88" x2="634" y2="88" stroke={red} strokeWidth="2" />
-      <line x1="252" y1="88" x2="228" y2="0" stroke={red} strokeWidth="2" />
-      <line x1="428" y1="88" x2="452" y2="0" stroke={red} strokeWidth="2" />
-      <path d="M308 88 L308 123.8 A48 48 0 0 0 372 123.8 L372 88" fill={red} fillOpacity="0.12" stroke={red} strokeWidth="2" />
-      <rect x="316" y="61" width="48" height="27" rx="5" fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="2" />
-      <circle cx="316" cy="88" r="3" fill={c.ink} />
-      <circle cx="364" cy="88" r="3" fill={c.ink} />
-      {circle(164)}{circle(516)}
-      <rect x="0" y="420" width="680" height="9" fill={c.blue} />
+      <path d={`M0 470 L0 224 A224 224 0 0 1 224 0 L${W - 224} 0 A224 224 0 0 1 ${W} 224 L${W} 470`} fill={c.bg} stroke={c.boards} strokeWidth="3" />
+      <line x1="46" y1="88" x2={W - 46} y2="88" stroke={red} strokeWidth="2" />
+      <line x1={cx - 88} y1="88" x2={cx - 112} y2="0" stroke={red} strokeWidth="2" />
+      <line x1={cx + 88} y1="88" x2={cx + 112} y2="0" stroke={red} strokeWidth="2" />
+      <path d={`M${cx - 32} 88 L${cx - 32} 123.8 A48 48 0 0 0 ${cx + 32} 123.8 L${cx + 32} 88`} fill={red} fillOpacity="0.12" stroke={red} strokeWidth="2" />
+      <rect x={cx - 24} y="61" width="48" height="27" rx="5" fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="2" />
+      <circle cx={cx - 24} cy="88" r="3" fill={c.ink} />
+      <circle cx={cx + 24} cy="88" r="3" fill={c.ink} />
+      {circle(cx - 250)}{circle(cx + 250)}
+      {/* The blue line in the app's neutral grey, so the map keeps to red, grey and white. */}
+      <rect x="0" y="420" width={W} height="9" fill={c.boards} />
     </>
   );
 }
@@ -8543,8 +8545,8 @@ button:focus {
 .map-move-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .map-editor-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .print-map { max-width: 340px; margin: 6px 0 8px; }
-.print-map--zone { max-width: 280px; }
-.crease-svg--zone { max-width: 620px; margin: 0 auto; }
+.print-map--zone { max-width: 340px; }
+.crease-svg--zone { width: 100%; }
 .map-view-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 @media (max-width: 640px) { .crease-legend { gap: 10px; font-size: 11px; } .map-card { padding: 12px; } }
 .drill-volume-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
