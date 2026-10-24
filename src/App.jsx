@@ -2182,12 +2182,13 @@ function normalizeMove(move) {
 
 // What a click on the ice can add.
 const MAP_OBJECTS = [
-  { id: "goalie", label: "Goalie step" },
+  { id: "goalie", label: "Goalie step", legend: false },
   { id: "shooter", label: "Shooter" },
   { id: "puck", label: "Puck" },
   { id: "cone", label: "Cone" },
-  { id: "net", label: "Net", zoneOnly: true },
-  { id: "crease", label: "Crease", zoneOnly: true },
+  { id: "line", label: "Draw", legend: false },
+  { id: "net", label: "Net", zoneOnly: true, legend: false },
+  { id: "crease", label: "Crease", zoneOnly: true, legend: false },
 ];
 const MAP_OBJECT_BY_ID = Object.fromEntries(MAP_OBJECTS.map((o) => [o.id, o]));
 
@@ -2248,7 +2249,8 @@ function drawingBox(drawing, size) {
 
 // Drops anything malformed. Maps saved before objects existed had one entry per step (null for a
 // step not on the map); their points become goalie steps. Nets and creases also have rot (degrees)
-// and a net has crease (whether its crease is drawn); a goalie step can have drawing (a goalie
+// and a net has crease (whether its crease is drawn); a drawn line has pts (its points as offsets
+// from x/y, which is its first point), color ("red" or "ink"), dash and arrow; a goalie step can have drawing (a goalie
 // drawing's id, shown instead of the numbered circle) and flip (drawing mirrored).
 function normalizeMap(map) {
   return (Array.isArray(map) ? map : [])
@@ -2261,10 +2263,41 @@ function normalizeMap(map) {
         if (typeof p.drawing !== "string" || !/^[a-z0-9-]{1,60}$/.test(p.drawing)) return step;
         return p.flip ? { ...step, drawing: p.drawing, flip: true } : { ...step, drawing: p.drawing };
       }
+      if (kind === "line") {
+        const pts = (Array.isArray(p.pts) ? p.pts : [])
+          .filter((q) => Array.isArray(q) && Number.isFinite(q[0]) && Number.isFinite(q[1])).slice(0, 400)
+          .map((q) => [Math.round(q[0]), Math.round(q[1])]);
+        if (pts.length < 2) return null;
+        return { ...base, pts, color: p.color === "ink" ? "ink" : "red", dash: !!p.dash, arrow: !!p.arrow };
+      }
       if (kind !== "net" && kind !== "crease") return base;
       const rot = ((Math.round(Number(p.rot) || 0) % 360) + 360) % 360;
       return kind === "net" ? { ...base, rot, crease: p.crease !== false } : { ...base, rot };
-    });
+    })
+    .filter(Boolean);
+}
+
+// Thins a hand-drawn stroke to the points that matter (Ramer-Douglas-Peucker, tolerance in units).
+function simplifyStroke(pts, tol = 1.5) {
+  if (pts.length < 3) return pts;
+  const [ax, ay] = pts[0], [bx, by] = pts[pts.length - 1];
+  const len = Math.hypot(bx - ax, by - ay) || 1;
+  let far = 0, at = 0;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const d = Math.abs((bx - ax) * (ay - pts[i][1]) - (ax - pts[i][0]) * (by - ay)) / len;
+    if (d > far) { far = d; at = i; }
+  }
+  if (far <= tol) return [pts[0], pts[pts.length - 1]];
+  return [...simplifyStroke(pts.slice(0, at + 1), tol).slice(0, -1), ...simplifyStroke(pts.slice(at), tol)];
+}
+// A smooth curve through a stroke's points (each point bends the curve; it ends on the last one).
+function smoothStroke(pts) {
+  let d = `M${pts[0][0]} ${pts[0][1]}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    d += ` Q${pts[i][0]} ${pts[i][1]} ${(pts[i][0] + pts[i + 1][0]) / 2} ${(pts[i][1] + pts[i + 1][1]) / 2}`;
+  }
+  const last = pts[pts.length - 1];
+  return d + ` L${last[0]} ${last[1]}`;
 }
 // The step number badge styled like its marker on the map, so list and map read together.
 function stepBadgeClass(goalies, i) {
@@ -2295,10 +2328,12 @@ function convertMapPoints(map, from, to) {
   const a = MAP_VIEWS[from] || MAP_VIEWS.crease, b = MAP_VIEWS[to] || MAP_VIEWS.crease;
   if (a === b) return map;
   const clamp = (v, max) => Math.max(20, Math.min(max - 20, Math.round(v)));
+  const f = b.perFoot / a.perFoot;
   return map.map((p) => ({
     ...p,
-    x: clamp(b.netX + ((p.x - a.netX) / a.perFoot) * b.perFoot, b.w),
-    y: clamp(b.goalY + ((p.y - a.goalY) / a.perFoot) * b.perFoot, b.h),
+    x: clamp(b.netX + (p.x - a.netX) * f, b.w),
+    y: clamp(b.goalY + (p.y - a.goalY) * f, b.h),
+    ...(p.pts ? { pts: p.pts.map(([dx, dy]) => [Math.round(dx * f), Math.round(dy * f)]) } : {}),
   }));
 }
 
@@ -2399,10 +2434,11 @@ function RinkGoal({ p, s, c, ids, light }) {
 // Draws a map. active/onPick use indexes into items. In the editor (editing), a click on empty ice
 // calls onPlace, dragging an item calls onMoveItem when it's dropped and a click on an item picks
 // it; elsewhere only the goalie steps can be picked.
-function CreaseMap({ items, view = "crease", active = null, onPick, editing = false, onPlace, onMoveItem, light = false }) {
+function CreaseMap({ items, view = "crease", active = null, onPick, editing = false, onPlace, onMoveItem, drawStyle = null, onDraw, light = false }) {
   const svgRef = useRef(null);
   const press = useRef(null); // the pointer press in progress in the editor
   const [drag, setDrag] = useState(null); // { idx, x, y } while an item is being dragged
+  const [stroke, setStroke] = useState(null); // points of the line being drawn (drawStyle set)
   const ids = useId().replace(/:/g, "");
   const c = light ? CREASE_PALETTES.light : CREASE_PALETTES.dark;
   const V = MAP_VIEWS[view] || MAP_VIEWS.crease;
@@ -2444,9 +2480,17 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
       const at = idx !== null && toMap(e);
       press.current = { idx, sx: e.clientX, sy: e.clientY, moved: false, dx: at ? items[idx].x - at.x : 0, dy: at ? items[idx].y - at.y : 0 };
       try { svgRef.current.setPointerCapture(e.pointerId); } catch { /* not supported */ }
+      // With the Draw tool, a press on empty ice starts a line.
+      const start = idx === null && drawStyle && toMap(e);
+      if (start) { press.current.draw = [[start.x, start.y]]; setStroke(press.current.draw); }
     },
     onPointerMove: (e) => {
       const p = press.current;
+      if (p?.draw) {
+        const pt = toMap(e), last = p.draw[p.draw.length - 1];
+        if (pt && Math.hypot(pt.x - last[0], pt.y - last[1]) >= 3) { p.draw = [...p.draw, [pt.x, pt.y]]; setStroke(p.draw); }
+        return;
+      }
       if (!p || p.idx === null) return;
       if (!p.moved && Math.hypot(e.clientX - p.sx, e.clientY - p.sy) < 5) return;
       p.moved = true;
@@ -2457,6 +2501,13 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
       const p = press.current;
       press.current = null;
       if (!p) return;
+      if (p.draw) {
+        setStroke(null);
+        const pts = simplifyStroke(p.draw);
+        let len = 0;
+        for (let i = 1; i < p.draw.length; i++) len += Math.hypot(p.draw[i][0] - p.draw[i - 1][0], p.draw[i][1] - p.draw[i - 1][1]);
+        if (len >= 12) { onDraw?.(pts); return; }
+      }
       if (p.idx !== null) {
         if (!p.moved) onPick?.(p.idx);
         else { const pt = toMap(e, p.dx, p.dy); if (pt) onMoveItem?.(p.idx, pt); }
@@ -2466,7 +2517,7 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
         if (pt) onPlace?.(pt);
       }
     },
-    onPointerCancel: () => { press.current = null; setDrag(null); },
+    onPointerCancel: () => { press.current = null; setDrag(null); setStroke(null); },
   } : {};
   // A gently curved arrow from one point to the next, stopping short of both markers.
   // offset shifts the whole curve sideways (for the second line of a Double Push).
@@ -2522,6 +2573,23 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
           </g>
         );
       })}
+
+      {list.filter((p) => p.kind === "line").map((p) => {
+        const d = smoothStroke(p.pts.map(([dx, dy]) => [p.x + dx, p.y + dy]));
+        const color = p.color === "ink" ? c.ink : "var(--accent)";
+        return (
+          <g key={"l" + p.i} data-idx={editing ? p.i : undefined} className={editing ? "crease-item" : undefined}>
+            {active === p.i && <path d={d} fill="none" stroke="var(--accent)" strokeWidth={12} strokeLinecap="round" strokeLinejoin="round" opacity="0.3" />}
+            {editing && <path d={d} fill="none" stroke="transparent" strokeWidth={16} strokeLinecap="round" />}
+            <path d={d} fill="none" stroke={color} strokeWidth={2.4 * Math.min(k, 1.4)} strokeLinecap="round" strokeLinejoin="round"
+              strokeDasharray={p.dash ? "8 6" : undefined} markerEnd={p.arrow ? `url(#${ids}${p.color === "ink" ? "w" : "a"})` : undefined} />
+          </g>
+        );
+      })}
+      {stroke && stroke.length > 1 && (
+        <path d={smoothStroke(stroke)} fill="none" stroke={drawStyle.color === "ink" ? c.ink : "var(--accent)"} strokeWidth={2.4 * Math.min(k, 1.4)}
+          strokeLinecap="round" strokeLinejoin="round" strokeDasharray={drawStyle.dash ? "8 6" : undefined} opacity="0.8" />
+      )}
 
       {goalies.map((p, n) => {
         if (n === 0) return null;
@@ -2595,6 +2663,7 @@ function MapObjectIcon({ kind, size = 14 }) {
       {kind === "shooter" && <><circle cx="7" cy="7" r="6.5" fill="#5C5C61" /><text x="7" y="10" textAnchor="middle" fontSize="8" fontWeight="700" fill="#F3F3F1">S</text></>}
       {kind === "puck" && <circle cx="7" cy="7" r="3.5" fill={ink} />}
       {kind === "cone" && <path d="M7 1.5 L12.5 12 L1.5 12 Z" fill="#8D8D93" />}
+      {kind === "line" && <path d="M1.5 10.5 C4 2, 7 13, 12.5 3.5" fill="none" stroke={ink} strokeWidth="1.6" strokeLinecap="round" />}
       {kind === "net" && <path d="M2.5 11 L2.5 5 Q2.5 3 4.5 3 L9.5 3 Q11.5 3 11.5 5 L11.5 11 Z" fill="none" stroke={ink} strokeWidth="1.5" />}
       {kind === "crease" && <path d="M2.5 2.5 L2.5 6.5 A4.5 4.5 0 0 0 11.5 6.5 L11.5 2.5" fill="none" stroke={ink} strokeWidth="1.5" />}
     </svg>
@@ -2606,7 +2675,7 @@ function MapObjectIcon({ kind, size = 14 }) {
 function CreaseMapLegend({ items }) {
   const goalies = items.filter((p) => p.kind === "goalie");
   const used = MOVE_TYPES.filter((m) => goalies.slice(1).some((p) => p.move === m.id));
-  const objects = MAP_OBJECTS.filter((o) => o.id !== "goalie" && !o.zoneOnly && items.some((p) => p.kind === o.id));
+  const objects = MAP_OBJECTS.filter((o) => o.legend !== false && items.some((p) => p.kind === o.id));
   if (!used.length && !objects.length) return null;
   return (
     <div className="crease-legend">
@@ -2640,6 +2709,7 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
   const tool = tools.some((o) => o.id === toolChoice) ? toolChoice : "goalie";
   const [move, setMove] = useState("shuffle"); // for the next goalie step placed
   const [drawing, setDrawing] = useState(""); // goalie drawing for the next step placed, "" = circle
+  const [lineStyle, setLineStyle] = useState({ color: "red", dash: false, arrow: true }); // for the next line drawn
   const drawings = goalieDrawings();
   const [selected, setSelected] = useState(null);
   const [history, setHistory] = useState([]);
@@ -2663,6 +2733,7 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
   };
   const place = ({ x, y }) => {
     if (sel) { setSelected(null); return; } // a click on empty ice first lets go of the selection
+    if (tool === "line") return; // lines are drawn, not clicked
     const item = tool === "goalie" ? (drawing ? { kind: "goalie", x, y, move, drawing } : { kind: "goalie", x, y, move })
       : tool === "net" ? { kind: "net", x, y, rot: 0, crease: true }
       : tool === "crease" ? { kind: "crease", x, y, rot: 0 }
@@ -2685,6 +2756,11 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
     const { drawing: _d, flip: _f, ...rest } = sel;
     commit(items.map((p, j) => (j === selected ? (id ? { ...rest, drawing: id, ...(sel.flip ? { flip: true } : {}) } : rest) : p)));
   };
+  const styleLine = (patch) => {
+    if (sel?.kind === "line") updateSel(patch);
+    else setLineStyle((st) => ({ ...st, ...patch }));
+  };
+  const lineOpts = sel?.kind === "line" ? sel : lineStyle;
   const remove = () => {
     commit(items.filter((_, j) => j !== selected));
     setSelected(null);
@@ -2725,7 +2801,9 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
       <div className="map-editor-board" tabIndex={-1} onKeyDown={onKeyDown}>
         <CreaseMap items={items} view={view} active={selected} editing
           onPick={(i) => setSelected((s) => (s === i ? null : i))} onPlace={place}
-          onMoveItem={(i, pt) => commit(items.map((p, j) => (j === i ? { ...p, ...pt } : p)))} />
+          onMoveItem={(i, pt) => commit(items.map((p, j) => (j === i ? { ...p, ...pt } : p)))}
+          drawStyle={tool === "line" && !sel ? lineStyle : null}
+          onDraw={(pts) => commit([...items, { kind: "line", x: pts[0][0], y: pts[0][1], pts: pts.map(([x, y]) => [x - pts[0][0], y - pts[0][1]]), ...lineStyle }])} />
       </div>
       {showMoves && (
         <div className="map-editor-row">
@@ -2753,6 +2831,20 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
           )}
         </div>
       )}
+      {(sel ? sel.kind === "line" : tool === "line") && (
+        <div className="map-editor-row">
+          <span className="map-editor-label">{sel ? "Line" : "Draw"}</span>
+          <div className="map-move-group" role="group" aria-label="Line colour">
+            <button type="button" className={"map-move-btn" + (lineOpts.color === "red" ? " active" : "")} onClick={() => styleLine({ color: "red" })}>Red</button>
+            <button type="button" className={"map-move-btn" + (lineOpts.color === "ink" ? " active" : "")} onClick={() => styleLine({ color: "ink" })}>White</button>
+          </div>
+          <div className="map-move-group" role="group" aria-label="Line pattern">
+            <button type="button" className={"map-move-btn" + (!lineOpts.dash ? " active" : "")} onClick={() => styleLine({ dash: false })}>Solid</button>
+            <button type="button" className={"map-move-btn" + (lineOpts.dash ? " active" : "")} onClick={() => styleLine({ dash: true })}>Dashed</button>
+          </div>
+          <label className="map-check"><input type="checkbox" checked={lineOpts.arrow} onChange={(e) => styleLine({ arrow: e.target.checked })} /> Arrow</label>
+        </div>
+      )}
       {(sel?.kind === "net" || sel?.kind === "crease") && (
         <div className="map-editor-row">
           <span className="map-editor-label">Turn</span>
@@ -2768,7 +2860,7 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
       {sel ? (
         <div className="map-editor-row map-editor-row--split">
           <span className="map-editor-hint">
-            {sel.kind === "goalie" ? `Step ${selStep}${selStep === 1 ? " (starting position)" : ""}` : MAP_OBJECT_BY_ID[sel.kind].label} selected. Drag it to move it.
+            {sel.kind === "goalie" ? `Step ${selStep}${selStep === 1 ? " (starting position)" : ""}` : sel.kind === "line" ? "Line" : MAP_OBJECT_BY_ID[sel.kind].label} selected. Drag it to move it.
           </span>
           <div className="map-editor-actions">
             <button type="button" className="btn btn--ghost btn--small" onClick={remove}><Trash2 size={13} /> Delete</button>
@@ -2779,6 +2871,7 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
         <p className="map-editor-hint">
           {tool === "goalie"
             ? (goalies.length ? `Click the ice to add step ${nextStep}.` : "Click the ice where the goalie starts (step 1).")
+            : tool === "line" ? "Draw on the ice with the mouse or your finger."
             : `Click the ice to add a ${MAP_OBJECT_BY_ID[tool].label.toLowerCase()}.`}
           {" "}Drag anything to move it; click it to change or delete it.
         </p>
