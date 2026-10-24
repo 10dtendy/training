@@ -2252,8 +2252,7 @@ function CreaseSurface({ c, ids, vbX, vbW, k, light }) {
 }
 
 // The defensive zone of an NHL rink, end boards at the top: goal line 11 ft out, trapezoid, net and
-// crease, the two faceoff circles (20 ft out, 22 ft either side, 15 ft radius) and the blue line a
-// short way below them.
+// crease and the two faceoff circles (20 ft out, 15 ft radius, spread wider apart than to scale).
 function ZoneSurface({ c, ids }) {
   const red = "var(--accent)";
   const W = MAP_VIEWS.zone.w, cx = W / 2; // the net's centre
@@ -2271,7 +2270,9 @@ function ZoneSurface({ c, ids }) {
   );
   return (
     <>
-      <path d={`M0 470 L0 224 A224 224 0 0 1 224 0 L${W - 224} 0 A224 224 0 0 1 ${W} 224 L${W} 470`} fill={c.bg} stroke={c.boards} strokeWidth="3" />
+      {/* Dark behind the rounded corners too, so the whole map is one dark panel. */}
+      <rect x="0" y="0" width={W} height="470" rx="10" fill={c.bg} />
+      <path d={`M1 470 L1 224 A223 223 0 0 1 224 1 L${W - 224} 1 A223 223 0 0 1 ${W - 1} 224 L${W - 1} 470`} fill="none" stroke={c.boards} strokeWidth="1.5" />
       <line x1="46" y1="88" x2={W - 46} y2="88" stroke={red} strokeWidth="2" />
       <line x1={cx - 88} y1="88" x2={cx - 112} y2="0" stroke={red} strokeWidth="2" />
       <line x1={cx + 88} y1="88" x2={cx + 112} y2="0" stroke={red} strokeWidth="2" />
@@ -2280,8 +2281,6 @@ function ZoneSurface({ c, ids }) {
       <circle cx={cx - 24} cy="88" r="3" fill={c.ink} />
       <circle cx={cx + 24} cy="88" r="3" fill={c.ink} />
       {circle(cx - 250)}{circle(cx + 250)}
-      {/* The blue line in the app's neutral grey, so the map keeps to red, grey and white. */}
-      <rect x="0" y="420" width={W} height="9" fill={c.boards} />
     </>
   );
 }
