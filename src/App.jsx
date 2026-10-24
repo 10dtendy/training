@@ -2242,9 +2242,13 @@ function convertMapPoints(map, from, to) {
   }));
 }
 
-// The net from above: rounded at the back, straight posts down to the goal line.
+// The red ice markings (goal lines, creases, circles, trapezoid) are drawn faded as one layer, so
+// the movements on top stand out.
+const ICE_LINE_OPACITY = 0.5;
+
+// The net from above: rounded at the back, straight posts down to the goal line, open at the mouth.
 function netPath(left, right, back, goal, r) {
-  return `M${left} ${goal} L${left} ${back + r} A${r} ${r} 0 0 1 ${left + r} ${back} L${right - r} ${back} A${r} ${r} 0 0 1 ${right} ${back + r} L${right} ${goal} Z`;
+  return `M${left} ${goal} L${left} ${back + r} A${r} ${r} 0 0 1 ${left + r} ${back} L${right - r} ${back} A${r} ${r} 0 0 1 ${right} ${back + r} L${right} ${goal}`;
 }
 // NHL crease in front of a net centred at (x, goal), s units per foot: straight sides 4 ft either
 // side of centre running 4.5 ft out, closed by an arc of 6 ft radius.
@@ -2276,16 +2280,18 @@ function CreaseSurface({ c, ids, k, light }) {
       <rect x="0" y="0" width={W} height={H} rx="10" fill={c.bg} stroke={light ? c.line : "none"} />
       {/* The faceoff circles sit 22 ft either side of the net and 20 ft out, so only their inner
           quarter is in view. */}
-      <g clipPath={`url(#${ids}c)`}>
-        <FaceoffCircle fx={N - 22 * s} fy={G + 20 * s} s={s} />
-        <FaceoffCircle fx={N + 22 * s} fy={G + 20 * s} s={s} />
-      </g>
       <path d={netPath(N - 3 * s, N + 3 * s, G - 1.6 * s, G, 4)} fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="1.5" />
-      <line x1="20" y1={G} x2={W - 20} y2={G} stroke="var(--accent)" strokeWidth="2" opacity="0.8" />
-      <path d={creasePath(N, G, s)} fill="var(--accent)" fillOpacity={light ? 0.06 : 0.1} stroke="var(--accent)" strokeWidth="1.5" />
-      {/* The small hash marks on the crease, 4 ft from the goal line. */}
-      <line x1={N - 4 * s} y1={G + 4 * s} x2={N - 3.58 * s} y2={G + 4 * s} stroke="var(--accent)" strokeWidth="1.5" />
-      <line x1={N + 4 * s} y1={G + 4 * s} x2={N + 3.58 * s} y2={G + 4 * s} stroke="var(--accent)" strokeWidth="1.5" />
+      <g opacity={ICE_LINE_OPACITY}>
+        <g clipPath={`url(#${ids}c)`}>
+          <FaceoffCircle fx={N - 22 * s} fy={G + 20 * s} s={s} />
+          <FaceoffCircle fx={N + 22 * s} fy={G + 20 * s} s={s} />
+        </g>
+        <line x1="20" y1={G} x2={W - 20} y2={G} stroke="var(--accent)" strokeWidth="2" />
+        <path d={creasePath(N, G, s)} fill="var(--accent)" fillOpacity={light ? 0.1 : 0.18} stroke="var(--accent)" strokeWidth="1.5" />
+        {/* The small hash marks on the crease, 4 ft from the goal line. */}
+        <line x1={N - 4 * s} y1={G + 4 * s} x2={N - 3.58 * s} y2={G + 4 * s} stroke="var(--accent)" strokeWidth="1.5" />
+        <line x1={N + 4 * s} y1={G + 4 * s} x2={N + 3.58 * s} y2={G + 4 * s} stroke="var(--accent)" strokeWidth="1.5" />
+      </g>
       <text x="24" y={G - 10} fill={c.label} fontSize={11 * k} className="crease-text">GOAL LINE</text>
     </>
   );
@@ -2301,13 +2307,15 @@ function ZoneSurface({ c, ids }) {
       {/* Dark behind the rounded corners too, so the whole map is one dark panel. */}
       <rect x="0" y="0" width={W} height={H} rx="10" fill={c.bg} />
       <path d={`M1 ${H} L1 224 A223 223 0 0 1 224 1 L${W - 224} 1 A223 223 0 0 1 ${W - 1} 224 L${W - 1} ${H}`} fill="none" stroke={c.boards} strokeWidth="1.5" />
-      <line x1={cx - 88} y1={G} x2={cx - 112} y2="0" stroke={red} strokeWidth="2" />
-      <line x1={cx + 88} y1={G} x2={cx + 112} y2="0" stroke={red} strokeWidth="2" />
-      <path d={creasePath(cx, G, s)} fill={red} fillOpacity="0.12" stroke={red} strokeWidth="2" />
       <path d={netPath(cx - 3 * s, cx + 3 * s, G - 3.375 * s, G, 5)} fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="2" />
-      <line x1="46" y1={G} x2={W - 46} y2={G} stroke={red} strokeWidth="2" />
-      <FaceoffCircle fx={cx - 250} fy={G + 20 * s} s={s} />
-      <FaceoffCircle fx={cx + 250} fy={G + 20 * s} s={s} />
+      <g opacity={ICE_LINE_OPACITY}>
+        <line x1={cx - 88} y1={G} x2={cx - 112} y2="0" stroke={red} strokeWidth="2" />
+        <line x1={cx + 88} y1={G} x2={cx + 112} y2="0" stroke={red} strokeWidth="2" />
+        <path d={creasePath(cx, G, s)} fill={red} fillOpacity="0.2" stroke={red} strokeWidth="2" />
+        <line x1="46" y1={G} x2={W - 46} y2={G} stroke={red} strokeWidth="2" />
+        <FaceoffCircle fx={cx - 250} fy={G + 20 * s} s={s} />
+        <FaceoffCircle fx={cx + 250} fy={G + 20 * s} s={s} />
+      </g>
     </>
   );
 }
@@ -2319,9 +2327,11 @@ function RinkGoal({ p, s, c, ids, light }) {
   const net = p.kind === "net";
   return (
     <g transform={p.rot ? `rotate(${p.rot} ${p.x} ${p.y})` : undefined}>
-      {(!net || p.crease) && <path d={creasePath(p.x, p.y, s)} fill={red} fillOpacity={light ? 0.06 : 0.12} stroke={red} strokeWidth="2" />}
       {net && <path d={netPath(p.x - 3 * s, p.x + 3 * s, p.y - 3.375 * s, p.y, 0.6 * s)} fill={`url(#${ids}n)`} stroke={c.net} strokeWidth="2" />}
-      <line x1={p.x - 5 * s} y1={p.y} x2={p.x + 5 * s} y2={p.y} stroke={red} strokeWidth="2" />
+      <g opacity={ICE_LINE_OPACITY}>
+        {(!net || p.crease) && <path d={creasePath(p.x, p.y, s)} fill={red} fillOpacity={light ? 0.1 : 0.2} stroke={red} strokeWidth="2" />}
+        <line x1={p.x - 5 * s} y1={p.y} x2={p.x + 5 * s} y2={p.y} stroke={red} strokeWidth="2" />
+      </g>
     </g>
   );
 }
