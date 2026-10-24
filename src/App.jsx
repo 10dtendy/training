@@ -4,8 +4,7 @@ import {
   Trash2, Eye, EyeOff, Calendar as CalendarIcon, LayoutGrid, Users as UsersIcon,
   Image as ImageIcon, Settings as SettingsIcon, Download, LogOut, Mail, Lock, UploadCloud,
   FileText, Video as VideoIcon, AlertTriangle, Home, BarChart3, Tag, Search, CircleDot, Armchair,
-  Copy, LayoutTemplate, Megaphone, List, Camera, Cookie, ListOrdered, Heading, Link2, Scale, Info,
-  RotateCw
+  Copy, LayoutTemplate, Megaphone, List, Camera, Cookie, ListOrdered, Heading, Link2, Scale, Info
 } from "lucide-react";
 // Brand images ship as separate files (cached by the browser, never inside the JS bundle).
 import LOGO_SRC from "./assets/logo.png";
@@ -2163,11 +2162,23 @@ function VideoPlayer({ title, poster, src }) {
    ============================================================================ */
 
 const CREASE_W = 716, CREASE_H = 330;
+// How the goalie gets to a step. Pushes and slides are red, the lighter movements white (dark on
+// the PDF); the line pattern tells them apart, and Double Push is drawn as two lines.
 const MOVE_TYPES = [
-  { id: "push", label: "Shuffle / push" },
-  { id: "recover", label: "Recovery" },
-  { id: "rotate", label: "Rotate" },
+  { id: "shuffle", label: "Shuffle", color: "red", dash: "7 4" },
+  { id: "step", label: "Step", color: "ink", dash: "1 6" },
+  { id: "tpush", label: "T-Push", color: "red" },
+  { id: "backside", label: "Backside push", color: "ink" },
+  { id: "slide", label: "Slide", color: "red", dash: "16 6" },
+  { id: "doublepush", label: "Double Push", color: "red", double: true },
+  { id: "bwalk", label: "Butterfly Walk", color: "ink", dash: "7 4" },
 ];
+const MOVE_BY_ID = Object.fromEntries(MOVE_TYPES.map((m) => [m.id, m]));
+// Maps saved before these movements existed.
+const LEGACY_MOVES = { push: "shuffle", recover: "step", rotate: "shuffle" };
+function normalizeMove(move) {
+  return MOVE_BY_ID[move] ? move : LEGACY_MOVES[move] || "shuffle";
+}
 
 // One entry per current step. A point belongs to the step with the same text; a reworded step
 // keeps the unclaimed point that sat between the same neighbouring steps as before.
@@ -2190,7 +2201,7 @@ function alignMapToSteps(map, steps) {
     const k = points.findIndex((p, j) => !used.has(j) && p.oldIndex > after && p.oldIndex < before && !steps.includes(p.step));
     if (k >= 0) { used.add(k); out[i] = points[k]; }
   });
-  return out.map((p, i) => (p ? { x: p.x, y: p.y, move: MOVE_TYPES.some((m) => m.id === p.move) ? p.move : "push", step: steps[i] } : null));
+  return out.map((p, i) => (p ? { x: p.x, y: p.y, move: normalizeMove(p.move), step: steps[i] } : null));
 }
 function mapHasPoints(map) {
   return Array.isArray(map) && map.some(Boolean);
@@ -2200,7 +2211,8 @@ function stepBadgeClass(map, i) {
   const p = map?.[i];
   if (!p) return "step-num";
   if (i === map.findIndex(Boolean)) return "step-num step-num--start";
-  return "step-num step-num--" + p.move;
+  const m = MOVE_BY_ID[normalizeMove(p.move)];
+  return "step-num step-num--" + m.color + (m.dash ? " step-num--dashed" : "");
 }
 
 const CREASE_PALETTES = {
@@ -2317,14 +2329,15 @@ function CreaseMap({ map, view = "crease", active, onPick, onBoardClick, editing
     onBoardClick({ x: Math.max(20, Math.min(V.w - 20, x)), y: Math.max(20, Math.min(V.h - 20, y)) });
   };
   // A gently curved arrow from one point to the next, stopping short of both markers.
-  const pathBetween = (a, b) => {
+  // offset shifts the whole curve sideways (for the second line of a Double Push).
+  const pathBetween = (a, b, offset = 0) => {
     const dx = b.x - a.x, dy = b.y - a.y;
     const len = Math.hypot(dx, dy);
     const trim = r + 5;
     if (len < trim * 2 + 6) return null;
     const ux = dx / len, uy = dy / len;
-    const sx = a.x + ux * trim, sy = a.y + uy * trim;
-    const ex = b.x - ux * (trim + 2), ey = b.y - uy * (trim + 2);
+    const sx = a.x + ux * trim - uy * offset, sy = a.y + uy * trim + ux * offset;
+    const ex = b.x - ux * (trim + 2) - uy * offset, ey = b.y - uy * (trim + 2) + ux * offset;
     const bend = Math.min(30, len * 0.15);
     const cx = (sx + ex) / 2 - uy * bend, cy = (sy + ey) / 2 + ux * bend;
     return `M${sx.toFixed(1)} ${sy.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}`;
@@ -2347,35 +2360,41 @@ function CreaseMap({ map, view = "crease", active, onPick, onBoardClick, editing
       {zone ? <ZoneSurface c={c} ids={ids} /> : <CreaseSurface c={c} ids={ids} vbX={vbX} vbW={vbW} k={k} light={light} />}
 
       {pts.map((p, n) => {
-        if (n === 0 || p.move === "rotate") return null;
-        // A rotation happens in place, so the next move starts from the last real position.
-        let prev = null;
-        for (let j = n - 1; j >= 0; j--) if (pts[j].move !== "rotate" || j === 0) { prev = pts[j]; break; }
-        const d = prev && pathBetween(prev, p);
+        if (n === 0) return null;
+        const m = MOVE_BY_ID[normalizeMove(p.move)];
+        const color = m.color === "red" ? "var(--accent)" : c.ink;
+        const width = 2.4 * Math.min(k, 1.4);
+        const arrow = `url(#${ids}${m.color === "red" ? "a" : "w"})`;
+        if (m.double) {
+          // Two parallel lines, with the arrowhead on an invisible centre line.
+          const off = 3 * Math.min(k, 1.4);
+          return (
+            <g key={"path" + p.i}>
+              <path d={pathBetween(pts[n - 1], p, -off)} fill="none" stroke={color} strokeWidth={width * 0.7} />
+              <path d={pathBetween(pts[n - 1], p, off)} fill="none" stroke={color} strokeWidth={width * 0.7} />
+              <path d={pathBetween(pts[n - 1], p)} fill="none" stroke="transparent" strokeWidth={width} markerEnd={arrow} />
+            </g>
+          );
+        }
+        const d = pathBetween(pts[n - 1], p);
         if (!d) return null;
-        const recover = p.move === "recover";
         return (
-          <path key={"path" + p.i} d={d} fill="none"
-            stroke={recover ? c.ink : "var(--accent)"} strokeWidth={(recover ? 2 : 2.5) * Math.min(k, 1.4)}
-            strokeDasharray={recover ? "5 4" : undefined}
-            markerEnd={`url(#${ids}${recover ? "w" : "a"})`} />
+          <path key={"path" + p.i} d={d} fill="none" stroke={color} strokeWidth={width}
+            strokeDasharray={m.dash} strokeLinecap={m.id === "step" ? "round" : undefined} markerEnd={arrow} />
         );
       })}
 
       {pts.map((p) => {
         const isFirst = p.i === firstIdx;
-        const isRotate = p.move === "rotate" && !isFirst;
-        const isRecover = p.move === "recover" && !isFirst;
-        const rr = isRotate ? r * 0.78 : r;
+        const m = MOVE_BY_ID[normalizeMove(p.move)];
         return (
           <g key={"pt" + p.i} className={onPick ? "crease-marker" : undefined} onClick={onPick ? (e) => { e.stopPropagation(); onPick(p.i); } : undefined}>
             {active === p.i && <circle cx={p.x} cy={p.y} r={r + 8} fill="none" stroke="var(--accent)" strokeWidth="2" opacity="0.55" />}
-            {isRotate && <path d={`M${p.x - r * 1.4} ${p.y + 6} A ${r * 1.45} ${r * 1.45} 0 0 0 ${p.x + r * 1.3} ${p.y + 12}`} fill="none" stroke={c.ink} strokeWidth="1.8" markerEnd={`url(#${ids}w)`} />}
-            <circle cx={p.x} cy={p.y} r={rr}
+            <circle cx={p.x} cy={p.y} r={r}
               fill={isFirst ? "var(--accent)" : c.fill}
-              stroke={isFirst ? "none" : (isRotate || isRecover ? c.ink : "var(--accent)")}
-              strokeWidth={isRotate ? 1.5 : 2}
-              strokeDasharray={isRecover ? "4 3" : undefined} />
+              stroke={isFirst ? "none" : (m.color === "red" ? "var(--accent)" : c.ink)}
+              strokeWidth="2"
+              strokeDasharray={!isFirst && m.dash ? "4 3" : undefined} />
             <text x={p.x} y={p.y + 4.5 * k} textAnchor="middle" fontSize={13 * k} className="crease-num" fill={isFirst ? "#FFFFFF" : c.ink}>{p.i + 1}</text>
           </g>
         );
@@ -2384,23 +2403,42 @@ function CreaseMap({ map, view = "crease", active, onPick, onBoardClick, editing
   );
 }
 
-function CreaseMapLegend() {
+// Only the movements this drill uses (the first step is the starting position, not a movement).
+function CreaseMapLegend({ map }) {
+  const placed = (map || []).filter(Boolean);
+  const used = MOVE_TYPES.filter((m) => placed.slice(1).some((p) => normalizeMove(p.move) === m.id));
+  if (!used.length) return null;
   return (
     <div className="crease-legend">
-      <span><svg width="22" height="6" aria-hidden="true"><line x1="1" y1="3" x2="21" y2="3" stroke="var(--accent)" strokeWidth="2.5" /></svg>Shuffle / push</span>
-      <span><svg width="22" height="6" aria-hidden="true"><line x1="1" y1="3" x2="21" y2="3" stroke="#F3F3F1" strokeWidth="2" strokeDasharray="4 3" /></svg>Recovery</span>
-      <span><RotateCw size={13} aria-hidden="true" />Rotate</span>
+      {used.map((m) => (
+        <span key={m.id}>
+          <svg width="24" height="8" aria-hidden="true">
+            {m.double ? (<>
+              <line x1="1" y1="2" x2="23" y2="2" stroke={m.color === "red" ? "var(--accent)" : "#F3F3F1"} strokeWidth="1.6" />
+              <line x1="1" y1="6" x2="23" y2="6" stroke={m.color === "red" ? "var(--accent)" : "#F3F3F1"} strokeWidth="1.6" />
+            </>) : (
+              <line x1="2" y1="4" x2="22" y2="4" stroke={m.color === "red" ? "var(--accent)" : "#F3F3F1"} strokeWidth="2.4"
+                strokeDasharray={m.dash ? m.dash.split(" ").map((v) => Math.max(1, Number(v) * 0.6)).join(" ") : undefined} strokeLinecap={m.id === "step" ? "round" : undefined} />
+            )}
+          </svg>
+          {m.label}
+        </span>
+      ))}
     </div>
   );
 }
 
-// Drill editor: pick a step, click the crease to place it, choose how the goalie gets there.
-function CreaseMapEditor({ stepsText, map, view = "crease", onChange, onViewChange }) {
+// Drill editor: pick a step (or add one right here), click the map to place it, and choose how the
+// goalie gets there. Steps added here are added to the drill's Steps list too.
+function CreaseMapEditor({ stepsText, map, view = "crease", onChange, onViewChange, onAddStep }) {
   const steps = parseLines(stepsText || "");
   const aligned = alignMapToSteps(map, steps);
   const [active, setActive] = useState(0);
+  const [move, setMove] = useState("shuffle"); // used for the next step placed
+  const [newStep, setNewStep] = useState("");
   const activeIdx = Math.min(active, Math.max(0, steps.length - 1));
   const activePoint = aligned[activeIdx] || null;
+  const activeMove = activePoint ? normalizeMove(activePoint.move) : move;
 
   const setPoint = (i, value) => {
     const next = aligned.slice();
@@ -2408,8 +2446,20 @@ function CreaseMapEditor({ stepsText, map, view = "crease", onChange, onViewChan
     onChange(next);
   };
   const place = ({ x, y }) => {
-    setPoint(activeIdx, { x, y, move: activePoint?.move || "push" });
+    if (!steps.length) return;
+    setPoint(activeIdx, { x, y, move: activeMove });
     if (activeIdx < steps.length - 1) setActive(activeIdx + 1);
+  };
+  const chooseMove = (id) => {
+    setMove(id);
+    if (activePoint) setPoint(activeIdx, { ...activePoint, move: id });
+  };
+  // A blank name uses the movement's name, e.g. "T-Push".
+  const addStep = () => {
+    const text = newStep.trim() || MOVE_BY_ID[move].label;
+    onAddStep(text);
+    setNewStep("");
+    setActive(steps.length);
   };
   const clearAll = async () => {
     if (!(await confirmDialog({ title: "Clear the whole movement map?", message: "Every step is taken off the map. The steps themselves stay.", confirmLabel: "Clear map", danger: true }))) return;
@@ -2417,9 +2467,22 @@ function CreaseMapEditor({ stepsText, map, view = "crease", onChange, onViewChan
     setActive(0);
   };
 
-  if (!steps.length) {
-    return <div className="map-editor map-editor--empty">Add steps above first, then place each one on the crease here.</div>;
-  }
+  const moveButtons = (
+    <div className="map-move-group" role="group" aria-label="How the goalie gets to this step">
+      {MOVE_TYPES.map((m) => (
+        <button type="button" key={m.id} className={"map-move-btn" + (activeMove === m.id ? " active" : "")} onClick={() => chooseMove(m.id)}>{m.label}</button>
+      ))}
+    </div>
+  );
+  const addRow = (
+    <div className="map-add-step">
+      <input value={newStep} onChange={(e) => setNewStep(e.target.value)} maxLength={120}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addStep(); } }}
+        placeholder={`New step, e.g. "${MOVE_BY_ID[move].label} to the left post" (blank = ${MOVE_BY_ID[move].label})`} aria-label="New step" />
+      <button type="button" className="btn btn--ghost btn--small" onClick={addStep}><Plus size={13} /> Add step</button>
+    </div>
+  );
+
   return (
     <div className="map-editor">
       <div className="map-view-row">
@@ -2431,30 +2494,31 @@ function CreaseMapEditor({ stepsText, map, view = "crease", onChange, onViewChan
           ))}
         </div>
       </div>
-      <div className="map-editor-steps">
-        {steps.map((s, i) => (
-          <button type="button" key={i} title={s}
-            className={"map-step-pill" + (i === activeIdx ? " active" : "") + (aligned[i] ? " placed" : "")}
-            onClick={() => setActive(i)}>
-            <span className={stepBadgeClass(aligned, i)}>{i + 1}</span>
-            <span className="map-step-pill-text">{s}</span>
-          </button>
-        ))}
-      </div>
-      <p className="map-editor-hint">Step {activeIdx + 1} selected. Click on the map to place it{activePoint ? " (click again to move it)" : ""}.</p>
-      <div className="map-editor-board">
-        <CreaseMap map={aligned} view={view} active={activeIdx} editing onPick={setActive} onBoardClick={place} />
-      </div>
-      <div className="map-editor-controls">
-        <div className="map-move-group" role="group" aria-label="How the goalie gets to this step">
-          {MOVE_TYPES.map((m) => (
-            <button type="button" key={m.id} disabled={!activePoint}
-              className={"map-move-btn" + ((activePoint?.move || "push") === m.id ? " active" : "")}
-              onClick={() => setPoint(activeIdx, { ...activePoint, move: m.id })}>{m.label}</button>
+      {steps.length > 0 && (
+        <div className="map-editor-steps">
+          {steps.map((s, i) => (
+            <button type="button" key={i} title={s}
+              className={"map-step-pill" + (i === activeIdx ? " active" : "") + (aligned[i] ? " placed" : "")}
+              onClick={() => setActive(i)}>
+              <span className={stepBadgeClass(aligned, i)}>{i + 1}</span>
+              <span className="map-step-pill-text">{s}</span>
+            </button>
           ))}
         </div>
+      )}
+      {addRow}
+      <p className="map-editor-hint">
+        {steps.length
+          ? <>Step {activeIdx + 1} selected. Pick its movement below and click on the map to place it{activePoint ? " (click again to move it)" : ""}.</>
+          : <>Add the first step above (or in Steps), then click on the map to place it.</>}
+      </p>
+      <div className="map-editor-board">
+        <CreaseMap map={aligned} view={view} active={steps.length ? activeIdx : null} editing onPick={setActive} onBoardClick={place} />
+      </div>
+      <div className="map-editor-controls">
+        {moveButtons}
         <div className="map-editor-actions">
-          <button type="button" className="btn btn--ghost btn--small" disabled={!activePoint} onClick={() => setPoint(activeIdx, null)}>Remove step {activeIdx + 1}</button>
+          <button type="button" className="btn btn--ghost btn--small" disabled={!activePoint} onClick={() => setPoint(activeIdx, null)}>Remove step {activeIdx + 1} from map</button>
           <button type="button" className="btn btn--ghost btn--small" disabled={!mapHasPoints(aligned)} onClick={clearAll}>Clear map</button>
         </div>
       </div>
@@ -2483,7 +2547,7 @@ function DrillBody({ drill }) {
             <div className="map-card">
               <div className="map-card-head">
                 <span className="map-card-label">MOVEMENT MAP</span>
-                <CreaseMapLegend />
+                <CreaseMapLegend map={map} />
               </div>
               <CreaseMap map={map} view={drill.movementMapView} active={activeStep} onPick={toggleStep} />
             </div>
@@ -3985,6 +4049,7 @@ function AdminDrills({ content, updateContent }) {
                 stepsText={draft.stepsText} map={draft.movementMap} view={draft.movementMapView || "crease"}
                 onChange={(movementMap) => setDraft((d) => ({ ...d, movementMap }))}
                 onViewChange={(movementMapView, movementMap) => setDraft((d) => ({ ...d, movementMapView, movementMap }))}
+                onAddStep={(text) => setDraft((d) => ({ ...d, stepsText: (d.stepsText || "").replace(/\s+$/, "") ? d.stepsText.replace(/\s+$/, "") + "\n" + text : text }))}
               />
             </div>
             <div className="admin-form-span2 drill-volume-fields">
@@ -8516,9 +8581,11 @@ button:focus {
 .steps li.step-row { cursor: pointer; border-radius: 10px; margin: -4px -8px; padding: 4px 8px; transition: background .15s ease; align-items: center; }
 .steps li.step-row--active { background: var(--surface); color: var(--text); }
 .step-num--start { background: var(--accent); border-color: var(--accent); color: #fff; }
-.step-num--push { background: var(--bg); border: 2px solid var(--accent); }
-.step-num--recover { background: var(--bg); border: 2px dashed var(--text); }
-.step-num--rotate { background: var(--bg); border: 1.5px solid var(--text); }
+.step-num--red { background: var(--bg); border: 2px solid var(--accent); }
+.step-num--ink { background: var(--bg); border: 2px solid var(--text); }
+.step-num--dashed { border-style: dashed; }
+.map-add-step { display: flex; gap: 8px; }
+.map-add-step input { flex: 1; min-width: 0; }
 .mistake-label { display: inline-flex; align-items: center; gap: 5px; }
 .mistake-label--right { color: var(--accent); }
 .map-editor-field { display: flex; flex-direction: column; gap: 8px; }
@@ -8536,7 +8603,7 @@ button:focus {
 .map-editor-board { border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
 .map-editor-controls { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; }
 .map-move-group { display: inline-flex; flex-wrap: wrap; gap: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 30px; padding: 4px; }
-.map-move-btn { padding: 8px 14px; border-radius: 26px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.map-move-btn { padding: 7px 12px; border-radius: 26px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
 .map-move-btn.active { background: var(--accent); color: #fff; }
 .map-move-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .map-editor-actions { display: flex; flex-wrap: wrap; gap: 8px; }
