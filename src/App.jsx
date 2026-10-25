@@ -2252,8 +2252,8 @@ function drawingBox(drawing, size) {
 // Drops anything malformed. Maps saved before objects existed had one entry per step (null for a
 // step not on the map); their points become goalie steps. Nets and creases also have rot (degrees)
 // and a net has crease (whether its crease is drawn); a drawn line has pts (its points as offsets
-// from x/y, which is its first point), color ("red" or "ink"), dash, shot (a straight double line)
-// and arrow; a goalie step can have drawing (a goalie
+// from x/y, which is its first point), color ("red" or "ink"), dash, shot (a straight double line),
+// arrow (arrowhead at the end) and arrowStart (one at the start too); a goalie step can have drawing (a goalie
 // drawing's id, shown instead of the numbered circle) and flip (drawing mirrored).
 function normalizeMap(map) {
   return (Array.isArray(map) ? map : [])
@@ -2271,7 +2271,7 @@ function normalizeMap(map) {
           .filter((q) => Array.isArray(q) && Number.isFinite(q[0]) && Number.isFinite(q[1])).slice(0, 400)
           .map((q) => [Math.round(q[0]), Math.round(q[1])]);
         if (pts.length < 2) return null;
-        return { ...base, pts, color: p.color === "ink" ? "ink" : "red", dash: !p.shot && !!p.dash, shot: !!p.shot, arrow: !!p.arrow };
+        return { ...base, pts, color: p.color === "ink" ? "ink" : "red", dash: !p.shot && !!p.dash, shot: !!p.shot, arrow: !!p.arrow, arrowStart: !!p.arrowStart };
       }
       if (kind !== "net" && kind !== "crease") return base;
       const rot = ((Math.round(Number(p.rot) || 0) % 360) + 360) % 360;
@@ -2538,8 +2538,8 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
         const pts = simplifyStroke(p.draw);
         let len = 0;
         for (let i = 1; i < p.draw.length; i++) len += Math.hypot(p.draw[i][0] - p.draw[i - 1][0], p.draw[i][1] - p.draw[i - 1][1]);
-        // A shot is drawn straight, from where the stroke starts to where it ends.
-        if (len >= 12) { onDraw?.(drawStyle.shot ? [p.draw[0], p.draw[p.draw.length - 1]] : pts); return; }
+        // A shot or straight line goes from where the stroke starts to where it ends.
+        if (len >= 12) { onDraw?.(drawStyle.shot || drawStyle.straight ? [p.draw[0], p.draw[p.draw.length - 1]] : pts); return; }
       }
       const pt = toMap(e, false);
       if (p.idx !== null) {
@@ -2583,8 +2583,8 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
       {...pointer}
     >
       <defs>
-        <marker id={ids + "a"} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--accent)" /></marker>
-        <marker id={ids + "w"} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill={c.ink} /></marker>
+        <marker id={ids + "a"} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--accent)" /></marker>
+        <marker id={ids + "w"} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill={c.ink} /></marker>
         <pattern id={ids + "n"} width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 0L8 8M8 0L0 8" stroke={c.line} strokeWidth="1" /></pattern>
       </defs>
       {zone ? <ZoneSurface c={c} ids={ids} /> : <CreaseSurface c={c} ids={ids} k={k} light={light} />}
@@ -2626,7 +2626,7 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
       })}
       {stroke && stroke.length > 1 && (
         <g opacity="0.8">
-          <MapLine pts={drawStyle.shot ? [stroke[0], stroke[stroke.length - 1]] : stroke} line={drawStyle}
+          <MapLine pts={drawStyle.shot || drawStyle.straight ? [stroke[0], stroke[stroke.length - 1]] : stroke} line={drawStyle}
             color={drawStyle.color === "ink" ? c.ink : "var(--accent)"} bg={c.bg} width={2.4 * Math.min(k, 1.4)} />
         </g>
       )}
@@ -2702,30 +2702,36 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
 }
 
 // A drawn line through pts: solid, dashed or a shot (two parallel lines, made by covering the
-// middle of a wide stroke with the ice colour). A plain line's arrowhead is the marker arrow (a url);
-// a shot gets its own, wider head, and its lines stop where the head begins so they don't show
-// either side of it.
+// middle of a wide stroke with the ice colour), with an arrowhead at the end (line.arrow) and/or the
+// start (line.arrowStart). A plain line's arrowheads are the marker arrow (a url); a shot gets its
+// own, wider heads, and its lines stop where a head begins so they don't show either side of it.
 function MapLine({ pts, line, color, bg, width, arrow }) {
   if (line.shot) {
-    let body = pts, head = null;
-    const [px, py] = pts[pts.length - 2], [ex, ey] = pts[pts.length - 1];
-    const seg = Math.hypot(ex - px, ey - py);
-    if (line.arrow && seg > 0) {
-      const ux = (ex - px) / seg, uy = (ey - py) / seg, len = width * 5, half = width * 2.6;
-      const bx = ex - ux * len, by = ey - uy * len;
-      head = `M${ex} ${ey} L${bx - uy * half} ${by + ux * half} L${bx + uy * half} ${by - ux * half} Z`;
-      body = [...pts.slice(0, -1), [ex - ux * len * 0.8, ey - uy * len * 0.8]];
-    }
+    const len = width * 5, half = width * 2.6;
+    let body = pts;
+    const heads = [];
+    // The head at `tip`, pointing away from `from`; the body is pulled back to just inside it.
+    const addHead = (from, tip) => {
+      const seg = Math.hypot(tip[0] - from[0], tip[1] - from[1]);
+      if (!seg) return null;
+      const ux = (tip[0] - from[0]) / seg, uy = (tip[1] - from[1]) / seg;
+      const bx = tip[0] - ux * len, by = tip[1] - uy * len;
+      heads.push(`M${tip[0]} ${tip[1]} L${bx - uy * half} ${by + ux * half} L${bx + uy * half} ${by - ux * half} Z`);
+      return [tip[0] - ux * len * 0.8, tip[1] - uy * len * 0.8];
+    };
+    if (line.arrow) { const end = addHead(body[body.length - 2], body[body.length - 1]); if (end) body = [...body.slice(0, -1), end]; }
+    if (line.arrowStart) { const start = addHead(body[1], body[0]); if (start) body = [start, ...body.slice(1)]; }
     const d = smoothStroke(body);
     return (<>
       <path d={d} fill="none" stroke={color} strokeWidth={width * 2.6} strokeLinejoin="round" />
       <path d={d} fill="none" stroke={bg} strokeWidth={width * 1.1} strokeLinejoin="round" />
-      {head && <path d={head} fill={color} />}
+      {heads.map((h, i) => <path key={i} d={h} fill={color} />)}
     </>);
   }
   return (
     <path d={smoothStroke(pts)} fill="none" stroke={color} strokeWidth={width} strokeLinecap="round" strokeLinejoin="round"
-      strokeDasharray={line.dash ? "8 6" : undefined} markerEnd={line.arrow && arrow ? arrow : undefined} />
+      strokeDasharray={line.dash ? "8 6" : undefined}
+      markerEnd={line.arrow && arrow ? arrow : undefined} markerStart={line.arrowStart && arrow ? arrow : undefined} />
   );
 }
 
@@ -2794,7 +2800,7 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
   const tool = tools.some((o) => o.id === toolChoice) ? toolChoice : "goalie";
   const [move, setMove] = useState("shuffle"); // for the next goalie step placed
   const [drawing, setDrawing] = useState(""); // goalie drawing for the next step placed, "" = circle
-  const [lineStyle, setLineStyle] = useState({ color: "red", dash: false, shot: false, arrow: true }); // for the next line drawn
+  const [lineStyle, setLineStyle] = useState({ color: "red", dash: false, shot: false, straight: false, arrow: true, arrowStart: false }); // for the next line drawn
   const drawings = goalieDrawings();
   // The selection: indexes into items. With exactly one item selected its own options show.
   const [selection, setSelection] = useState([]);
@@ -2952,7 +2958,17 @@ function CreaseMapEditor({ map, view = "crease", stepCount = 0, onChange, onView
             <button type="button" className={"map-move-btn" + (lineOpts.dash ? " active" : "")} onClick={() => styleLine({ dash: true, shot: false })}>Dashed</button>
             <button type="button" className={"map-move-btn" + (lineOpts.shot ? " active" : "")} onClick={() => styleLine({ shot: true, dash: false })}>Shot</button>
           </div>
-          <label className="map-check"><input type="checkbox" checked={lineOpts.arrow} onChange={(e) => styleLine({ arrow: e.target.checked })} /> Arrow</label>
+          {!sel && !lineOpts.shot && (
+            <div className="map-move-group" role="group" aria-label="Line shape">
+              <button type="button" className={"map-move-btn" + (!lineOpts.straight ? " active" : "")} onClick={() => styleLine({ straight: false })}>Freehand</button>
+              <button type="button" className={"map-move-btn" + (lineOpts.straight ? " active" : "")} onClick={() => styleLine({ straight: true })}>Straight</button>
+            </div>
+          )}
+          <div className="map-move-group" role="group" aria-label="Arrows">
+            <button type="button" className={"map-move-btn" + (!lineOpts.arrow && !lineOpts.arrowStart ? " active" : "")} onClick={() => styleLine({ arrow: false, arrowStart: false })}>No arrow</button>
+            <button type="button" className={"map-move-btn" + (lineOpts.arrow && !lineOpts.arrowStart ? " active" : "")} onClick={() => styleLine({ arrow: true, arrowStart: false })}>Arrow</button>
+            <button type="button" className={"map-move-btn" + (lineOpts.arrow && lineOpts.arrowStart ? " active" : "")} onClick={() => styleLine({ arrow: true, arrowStart: true })}>Both ends</button>
+          </div>
         </div>
       )}
       {(sel?.kind === "net" || sel?.kind === "crease") && (
