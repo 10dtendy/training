@@ -159,6 +159,9 @@ export async function updateUserFields(userId, patch) {
       const rows = Object.entries(patch.restNotes).map(([date, note]) => ({ user_id: userId, date, note }));
       ops.push(supabase.from("rest_notes").upsert(rows));
     }
+    // Dates whose game log / rest note is deleted (the day is no longer a game / rest day).
+    if (patch.removeGameLogs?.length) ops.push(supabase.from("game_logs").delete().eq("user_id", userId).in("date", patch.removeGameLogs));
+    if (patch.removeRestNotes?.length) ops.push(supabase.from("rest_notes").delete().eq("user_id", userId).in("date", patch.removeRestNotes));
     // password changes go through supabase.auth.updateUser, handled by the caller,
     // not through this table-patch path.
     const results = await Promise.all(ops);

@@ -3560,12 +3560,15 @@ function ProfileCalendar({ dayTypes, onSetDayType, onClose, gameLogs, restNotes,
 
   const [saveError, setSaveError] = useState("");
   const chooseType = async (type) => {
-    setLocalDayTypes((prev) => ({ ...prev, [selected]: type || "none" }));
+    const day = selected, before = localDayTypes[day];
+    setLocalDayTypes((prev) => ({ ...prev, [day]: type || "none" }));
     setSaveError("");
     setLoggingGame(false);
     setNotingRest(false);
-    const ok = await onSetDayType(selected, type);
-    if (ok === false) setSaveError("Couldn't save that — check your connection and try again.");
+    const ok = await onSetDayType(day, type);
+    // Backed out of deleting the day's game log or rest note: the day stays as it was.
+    if (ok === "cancelled") setLocalDayTypes((prev) => ({ ...prev, [day]: before }));
+    else if (ok === false) setSaveError("Couldn't save that — check your connection and try again.");
   };
 
   // Logging a game for whatever date is selected here — not just the last couple of
@@ -3839,8 +3842,8 @@ function ProgressPage({ user }) {
   });
   const streak = activeUser ? trainingStreak(activeUser, joinedKey) : 0;
 
-  // Only games on days still marked as game days: a log stays saved when its game is taken off the
-  // calendar (and comes back if the day is marked a game again), but it isn't a game any more.
+  // Only games on days still marked as game days (taking a game off the calendar deletes its log;
+  // this also keeps any log left from before that out of the stats).
   const games = Object.entries(activeUser?.gameLogs || {})
     .filter(([date]) => personalDayType(activeUser, date) === "game")
     .sort(([a], [b]) => a.localeCompare(b))
@@ -8003,11 +8006,32 @@ function AppInner() {
     if (ok) setUser((prev) => ({ ...prev, ...patch }));
     return ok;
   };
+  // Returns "cancelled" when the goalie backs out of deleting the day's game log or rest note.
   const setDayType = async (dateStr, type) => {
     // "none" (not deletion) so clearing a Sunday turns its automatic rest day back into training.
     const value = type || "none";
-    const ok = await updateUserFields(user.id, { dayTypes: { [dateStr]: value } });
-    if (ok) setUser((prev) => ({ ...prev, dayTypes: { ...(prev.dayTypes || {}), [dateStr]: value } }));
+    // A day that stops being a game / rest day loses its game log / rest note, after a warning.
+    const log = value !== "game" ? (user.gameLogs || {})[dateStr] : undefined;
+    const dropLog = log !== undefined;
+    const dropNote = value !== "rest" && dateStr in (user.restNotes || {});
+    const note = dropNote ? user.restNotes[dateStr] : "";
+    if (log || note) {
+      const sure = await confirmDialog(log
+        ? { title: "Remove this game?", message: `The stats you logged for it${log.opponent ? ` (vs ${log.opponent})` : ""} will be deleted too.`, confirmLabel: "Remove game", danger: true }
+        : { title: "Remove this rest day?", message: "The note you wrote for it will be deleted too.", confirmLabel: "Remove rest day", danger: true });
+      if (!sure) return "cancelled";
+    }
+    const ok = await updateUserFields(user.id, {
+      dayTypes: { [dateStr]: value },
+      ...(dropLog ? { removeGameLogs: [dateStr] } : {}),
+      ...(dropNote ? { removeRestNotes: [dateStr] } : {}),
+    });
+    if (ok) setUser((prev) => {
+      const next = { ...prev, dayTypes: { ...(prev.dayTypes || {}), [dateStr]: value } };
+      if (dropLog) { const { [dateStr]: _gone, ...rest } = prev.gameLogs || {}; next.gameLogs = rest; }
+      if (dropNote) { const { [dateStr]: _gone, ...rest } = prev.restNotes || {}; next.restNotes = rest; }
+      return next;
+    });
     return ok;
   };
   const setGameLog = async (dateStr, log) => {
