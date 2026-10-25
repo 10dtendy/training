@@ -2658,8 +2658,10 @@ function CreaseMap({ items, view = "crease", active = null, onPick, editing = fa
       })}
 
       {goalies.map((p, n) => {
-        const isFirst = n === 0;
-        const m = MOVE_BY_ID[p.move];
+        // The filled red marker: the start, or on the drill page the step that's been tapped.
+        const pickedStep = !editing && goalies.some((q) => isActive(q.i));
+        const isFirst = pickedStep ? isActive(p.i) : n === 0;
+        const m = pickedStep && n === 0 && !isFirst ? { color: "red" } : MOVE_BY_ID[p.move]; // the start as a plain red ring
         const pick = !editing && onPick;
         return (
           <g key={"pt" + p.i} data-idx={editing ? p.i : undefined}
@@ -3031,12 +3033,14 @@ function DrillBody({ drill }) {
               <CreaseMap items={items} view={drill.movementMapView} active={activeStep === null ? null : stepItems[activeStep]} onPick={(i) => toggleStep(stepItems.indexOf(i))} />
             </div>
           )}
+          {/* Tapping a step fills its number red (and its marker on the map); step 1, the starting
+              position, shows as a red ring meanwhile so only one number is solid red. */}
           {drill.steps.length > 0 && <ol className="steps">{drill.steps.map((s, i) => (
-            goalies[i] ? (
-              <li key={i} className={"step-row" + (activeStep === i ? " step-row--active" : "")} onClick={() => toggleStep(i)}>
-                <span className={stepBadgeClass(goalies, i)}>{i + 1}</span><span>{s}</span>
-              </li>
-            ) : <li key={i}><span className="step-num">{i + 1}</span><span>{s}</span></li>
+            <li key={i} className={"step-row" + (activeStep === i ? " step-row--active" : "")} onClick={() => toggleStep(i)}>
+              <span className={activeStep === i ? "step-num step-num--start"
+                : activeStep !== null && i === 0 && goalies[0] ? "step-num step-num--red"
+                : stepBadgeClass(goalies, i)}>{i + 1}</span><span>{s}</span>
+            </li>
           ))}</ol>}
         </section>
         )}
