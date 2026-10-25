@@ -3839,7 +3839,10 @@ function ProgressPage({ user }) {
   });
   const streak = activeUser ? trainingStreak(activeUser, joinedKey) : 0;
 
+  // Only games on days still marked as game days: a log stays saved when its game is taken off the
+  // calendar (and comes back if the day is marked a game again), but it isn't a game any more.
   const games = Object.entries(activeUser?.gameLogs || {})
+    .filter(([date]) => personalDayType(activeUser, date) === "game")
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, g]) => ({ date, ...g }));
   // Tallies for the 4 boxes next to the heatmap — counted straight from `cells`/`games`
