@@ -3617,7 +3617,6 @@ function ProfileCalendar({ dayTypes, onSetDayType, onClose, gameLogs, restNotes,
 
   return (
     <div className="calendar-admin profile-calendar">
-      <h3 className="profile-calendar-title">Games & Rest</h3>
       <p className="planner-hint">Mark your game and rest days for this month.</p>
       <div className="calendar-admin-nav">
         <button className="icon-btn" onClick={() => setMonthOffset((m) => m - 1)}><ChevronLeft size={16} /></button>
@@ -3661,7 +3660,7 @@ function ProfileCalendar({ dayTypes, onSetDayType, onClose, gameLogs, restNotes,
       </div>
       <div className="profile-calendar-actions">
         <span className="profile-calendar-selected">
-          {selected}
+          {(() => { const d = dateFromKey(selected); return `${WEEKDAY_NAMES[d.getDay()]}, ${d.getDate()} ${MONTH_NAMES[d.getMonth()]}`; })()}
           {selectedType && <span className={"chip chip--" + selectedType}> {selectedType === "game" ? "Game day" : "Rest day"}</span>}
         </span>
         <div className="profile-calendar-buttons">
@@ -3737,6 +3736,13 @@ function trainingStreak(u, joinedKey) {
 // share one canvas so the two trends are visible together — each line reads against
 // its own range rather than a common unit, which is why the numeric averages sit
 // above the chart rather than a second axis.
+// A game's date as "Sep 4" (withDay: "Fri, Sep 4") instead of the raw "2026-09-04".
+function gameDateLabel(dateStr, withDay = true) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const label = `${MONTH_NAMES[m - 1].slice(0, 3)} ${d}`;
+  return withDay ? `${WEEKDAY_NAMES[new Date(y, m - 1, d).getDay()].slice(0, 3)}, ${label}` : label;
+}
+
 function SavePctLineChart({ games }) {
   const width = 640, height = 200, padding = 32;
   if (games.length === 0) return <p className="chart-empty">Log a game to see your save % and goals against trend.</p>;
@@ -3752,10 +3758,7 @@ function SavePctLineChart({ games }) {
   const pathFor = (pts) => pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   // "Sep 4" rather than the raw "2026-09-04" — compact enough to sit under each point
   // without the dates running into each other on a chart with more than a few games.
-  const dateLabel = (dateStr) => {
-    const [, m, d] = dateStr.split("-").map(Number);
-    return `${MONTH_NAMES[m - 1].slice(0, 3)} ${d}`;
-  };
+  const dateLabel = (dateStr) => gameDateLabel(dateStr, false);
   return (
     <>
       <svg viewBox={`0 0 ${width} ${height}`} className="chart-svg" preserveAspectRatio="none">
@@ -3935,10 +3938,10 @@ function ProgressPage({ user }) {
           </div>
         </div>
         <div className="stats-grid progress-stats-col">
-          <div className="stat-card"><span className="stat-num">{trainingDaysCount}</span><span className="stat-label">Complete days</span></div>
-          <div className="stat-card"><span className="stat-num">{restDaysCount}</span><span className="stat-label">Rest days</span></div>
-          <div className="stat-card"><span className="stat-num">{gamesLoggedCount}</span><span className="stat-label">Games logged</span></div>
-          <div className="stat-card"><span className="stat-num">{partialDaysCount}</span><span className="stat-label">Partially complete days</span></div>
+          <div className="stat-card"><span className="stat-num">{trainingDaysCount}</span><span className="stat-label">{trainingDaysCount === 1 ? "Complete day" : "Complete days"}</span></div>
+          <div className="stat-card"><span className="stat-num">{restDaysCount}</span><span className="stat-label">{restDaysCount === 1 ? "Rest day" : "Rest days"}</span></div>
+          <div className="stat-card"><span className="stat-num">{gamesLoggedCount}</span><span className="stat-label">{gamesLoggedCount === 1 ? "Game logged" : "Games logged"}</span></div>
+          <div className="stat-card"><span className="stat-num">{partialDaysCount}</span><span className="stat-label">{partialDaysCount === 1 ? "Partially complete day" : "Partially complete days"}</span></div>
         </div>
       </section>
 
@@ -3978,7 +3981,7 @@ function ProgressPage({ user }) {
               <tbody>
                 {[...games].reverse().map((g) => (
                   <tr key={g.date}>
-                    <td>{g.date}</td>
+                    <td className="gameperf-date">{gameDateLabel(g.date)}</td>
                     <td>{g.homeAway === "home" ? "vs" : "@"} {g.opponent}</td>
                     <td><span className={"gamelog-result-badge gamelog-result-badge--" + g.result}>{g.result}</span></td>
                     {g.dressedOnly ? (
@@ -4610,7 +4613,7 @@ function AdminDrills({ content, updateContent }) {
                   <tr key={d.id}>
                     <td>{d.title}</td>
                     <td>{d.category ? <span className="chip"><Tag size={10} /> {d.category}</span> : <span className="dot">—</span>}</td>
-                    <td>{d.duration}</td>
+                    <td>{(d.duration || "").trim() || <span className="admin-table-empty">—</span>}</td>
                     <td><button className={"status-pill" + (d.published ? " status-pill--live" : "")} onClick={() => togglePublish(d.id)}>{d.published ? <Eye size={12} /> : <EyeOff size={12} />} {d.published ? "Published" : "Draft"}</button></td>
                     <td className="admin-row-actions">
                       <button className="icon-btn" onClick={() => setPreviewDrill(planForLevel(d, planLevel, planDay))} aria-label="Preview"><Play size={14} /></button>
@@ -5715,7 +5718,7 @@ function AdminOffIce({ content, updateContent }) {
                   <tr key={o.id}>
                     <td>{o.title}</td>
                     <td>{o.category ? <span className="chip"><Tag size={10} /> {o.category}</span> : <span className="dot">—</span>}</td>
-                    <td>{o.duration}</td><td>{o.exercises.length}</td>
+                    <td>{(o.duration || "").trim() || <span className="admin-table-empty">—</span>}</td><td>{o.exercises.length}</td>
                     <td><button className={"status-pill" + (o.published ? " status-pill--live" : "")} onClick={() => togglePublish(o.id)}>{o.published ? <Eye size={12} /> : <EyeOff size={12} />} {o.published ? "Published" : "Draft"}</button></td>
                     <td className="admin-row-actions">
                       <button className="icon-btn" onClick={() => setPreviewOffice(planForLevel(o, planLevel, planDay))} aria-label="Preview"><Play size={14} /></button>
@@ -8559,6 +8562,8 @@ button:focus {
 .chart-legend-swatch--ga { background: var(--text-dim); }
 .chart-empty { font-size: 13px; color: var(--text-faint); padding: 30px 0; text-align: center; }
 .gameperf-table-wrap { overflow-x: auto; }
+.gameperf-date { white-space: nowrap; }
+.admin-table-empty { color: var(--text-faint); }
 .focus-glow { height: 2px; width: 60px; background: var(--accent); border-radius: 2px; box-shadow: 0 0 16px 2px var(--accent); margin: 20px 0 14px; position: relative; z-index: 1; }
 .card--compact { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; gap: 4px; }
 
@@ -8589,6 +8594,8 @@ button:focus {
 .ticket-right { display: flex; align-items: flex-end; gap: 24px; flex: 1; }
 .ticket-download-btn { margin-left: auto; }
 .ticket-calendar-group { display: flex; flex-direction: column; align-items: center; }
+.ticket-calendar-group .eyebrow-calendar-btn { width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); transition: border-color .15s ease, color .15s ease; }
+.ticket-calendar-group .eyebrow-calendar-btn:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ---------------- BUTTONS ---------------- */
 .btn { display: inline-flex; align-items: center; gap: 8px; padding: 13px 22px; border-radius: 30px; font-size: 14px; font-weight: 600; transition: all .18s ease; white-space: nowrap; }
@@ -8698,6 +8705,7 @@ button:focus {
 
 /* ---------------- PROFILE ---------------- */
 .profile-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 36px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.profile-card > .btn { min-width: 210px; justify-content: center; }
 .profile-avatar-wrap { position: relative; margin-bottom: 14px; }
 .profile-avatar { width: 64px; height: 64px; border-radius: 50%; background: var(--accent-dim); color: var(--accent); display: flex; align-items: center; justify-content: center; font-family: 'Archivo'; font-weight: 900; font-size: 22px; overflow: hidden; }
 .profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
@@ -8726,7 +8734,7 @@ button:focus {
    square cells: (340px - 6*6px gaps) / 7 columns = ~43.4px cells, ×5 + 4×6px gaps). */
 /* margin-top pushes this down to start level with .heat-grid instead of the "Last 5
    weeks" heading above it (that heading is 16px tall with a 16px margin-bottom). */
-.progress-stats-col { flex: 0 1 340px; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 32px; margin-bottom: 0; height: 241px; }
+.progress-stats-col { flex: 1 1 340px; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 32px; margin-bottom: 0; height: 241px; }
 .heat-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; max-width: 340px; margin-bottom: 16px; }
 .heat-cell { width: 100%; aspect-ratio: 1; border-radius: 5px; }
 .heat-cell--none { background: var(--surface-2); }
@@ -8734,7 +8742,7 @@ button:focus {
 .heat-cell--full { background: var(--accent); }
 .heat-cell--game { background: var(--game-color); }
 .heat-cell--rest { background: var(--rest-color); }
-.heat-legend { display: flex; gap: 18px; font-size: 12px; color: var(--text-dim); align-items: center; flex-wrap: wrap; }
+.heat-legend { display: grid; grid-template-columns: repeat(3, max-content); gap: 8px 18px; font-size: 12px; color: var(--text-dim); align-items: center; }
 .heat-legend span { display: flex; align-items: center; gap: 6px; }
 .heat-legend i.heat-cell { width: 11px; height: 11px; display: inline-block; }
 
@@ -8826,7 +8834,8 @@ button:focus {
 .icon-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; color: var(--text-dim); border-radius: 6px; }
 .icon-btn:hover { color: var(--text); background: var(--surface-2); }
 .icon-btn:disabled { opacity: 0.3; cursor: default; pointer-events: none; }
-.status-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 4px 9px; border-radius: 20px; background: var(--surface-2); color: var(--text-faint); }
+.status-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 4px 9px; border-radius: 20px; background: var(--surface-2); color: var(--text-faint); white-space: nowrap; }
+button.status-pill:hover { color: var(--text); }
 .status-pill--live { background: var(--accent-dim); color: var(--accent); }
 .calendar-admin { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 24px; }
 .calendar-admin-nav { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 16px; font-size: 13px; font-weight: 600; }
@@ -8837,7 +8846,6 @@ button:focus {
 .calendar-admin-cell.assigned { background: var(--accent-dim); color: var(--accent); }
 .calendar-admin-cell.selected { outline: 2px solid var(--accent); }
 .profile-calendar { max-width: 760px; margin: 24px auto 0; text-align: left; }
-.profile-calendar-title { font-size: 16px; margin-bottom: 6px; }
 /* Game and rest days use the same colors everywhere (Games & Rest calendar, Progress calendar);
    red stays for training. */
 .daytype-cell--game, .chip--game { background: var(--game-color); color: #dbe6f5; }
@@ -9370,6 +9378,9 @@ button:focus {
   .main { padding: 0 16px calc(96px + env(safe-area-inset-bottom)); }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .profile-grid { flex-wrap: wrap; gap: 20px; }
+  .progress-stats-col { margin-top: 0; height: auto; }
+  .drill-volume { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; }
+  .drill-volume-tile { min-width: 0; padding: 12px; }
   .auth-side { padding: 36px 20px 28px; }
   .auth-badge { width: 220px; }
   .auth-headline { font-size: 23px; margin: 18px 0 10px; }
