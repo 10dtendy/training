@@ -7890,10 +7890,11 @@ function AppInner() {
 
   // "Today" is worked out when the app loads. A browser tab or home-screen app can stay open for
   // days, so once the date has changed the page reloads: that shows the new day's training and
-  // records that they opened the app today (so their list doesn't wait for them). It's checked when
-  // the app comes back into view and once a minute (a window left open and visible overnight never
-  // "comes back"). It only reloads when nothing could be lost — not in the admin panel, not while
-  // typing, not with a window open on top; otherwise a "new day" bar offers a Refresh button.
+  // records that they opened the app today (so their list doesn't wait for them). It's checked at
+  // midnight in the device's own time zone (for a window left open and visible overnight) and when
+  // the app comes back into view (timers don't run while a computer sleeps or a phone parks the
+  // app). It only reloads when nothing could be lost — not in the admin panel, not while typing, not
+  // with a window open on top; otherwise a "new day" bar offers a Refresh button.
   const [newDay, setNewDay] = useState(false);
   const isAdminRef = useRef(isAdmin);
   isAdminRef.current = isAdmin;
@@ -7910,12 +7911,14 @@ function AppInner() {
     document.addEventListener("visibilitychange", check);
     window.addEventListener("focus", check);
     window.addEventListener("pageshow", check);
-    const timer = setInterval(check, 60 * 1000);
+    const now = new Date();
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1); // local time, DST-safe
+    const timer = setTimeout(check, midnight - now + 1000);
     return () => {
       document.removeEventListener("visibilitychange", check);
       window.removeEventListener("focus", check);
       window.removeEventListener("pageshow", check);
-      clearInterval(timer);
+      clearTimeout(timer);
     };
   }, [!!user]);
 
