@@ -7888,24 +7888,36 @@ function AppInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.email]);
 
-  // "Today" is worked out when the app loads. A phone can keep the home-screen app open in the
-  // background for days, so when a goalie comes back to it on a later date, reload it: that shows
-  // the new day's training and records that they opened the app today (so their list doesn't
-  // wait for them). Coaches are left alone so an admin form they're partway through isn't lost.
+  // "Today" is worked out when the app loads. A browser tab or home-screen app can stay open for
+  // days, so once the date has changed the page reloads: that shows the new day's training and
+  // records that they opened the app today (so their list doesn't wait for them). It's checked when
+  // the app comes back into view and once a minute (a window left open and visible overnight never
+  // "comes back"). It only reloads when nothing could be lost — not in the admin panel, not while
+  // typing, not with a window open on top; otherwise a "new day" bar offers a Refresh button.
+  const [newDay, setNewDay] = useState(false);
+  const isAdminRef = useRef(isAdmin);
+  isAdminRef.current = isAdmin;
   useEffect(() => {
-    if (!user || user.role === "coach") return;
+    if (!user) return;
     const check = () => {
-      if (document.visibilityState === "visible" && dateKey(new Date()) !== dateKey(TODAY_DATE)) window.location.reload();
+      if (document.visibilityState !== "visible" || dateKey(new Date()) === dateKey(TODAY_DATE)) return;
+      const busy = isAdminRef.current
+        || document.activeElement?.matches?.("input, textarea, select, [contenteditable='true']")
+        || document.querySelector(".content-preview-overlay, .app-dialog-overlay");
+      if (busy) setNewDay(true);
+      else window.location.reload();
     };
     document.addEventListener("visibilitychange", check);
     window.addEventListener("focus", check);
     window.addEventListener("pageshow", check);
+    const timer = setInterval(check, 60 * 1000);
     return () => {
       document.removeEventListener("visibilitychange", check);
       window.removeEventListener("focus", check);
       window.removeEventListener("pageshow", check);
+      clearInterval(timer);
     };
-  }, [user?.role, !!user]);
+  }, [!!user]);
 
   // Record that this account opened the app today (a block only starts on a day they're in the app).
   useEffect(() => {
@@ -8169,6 +8181,12 @@ function AppInner() {
         </div>
       )}
 
+      {newDay && (
+        <div className="new-day-banner no-print" role="status">
+          <CalendarIcon size={15} /> It's a new day. Refresh to see today's training.
+          <button className="btn btn--primary btn--small" onClick={() => window.location.reload()}>Refresh</button>
+        </div>
+      )}
       {saveFailed && (
         <div className="save-failed-banner no-print" role="alert">
           <AlertTriangle size={15} /> Your last change couldn't be saved, so the page was refreshed to match what is stored. Please make the change again.
@@ -8754,6 +8772,9 @@ button:focus {
 .admin-nav-item.active { color: var(--accent); background: var(--accent-dim); }
 .save-failed-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 16px 0; padding: 10px 14px; border-radius: 10px; background: rgba(239,68,68,0.14); color: #ef4444; font-size: 13px; }
 .save-failed-banner button { margin-left: auto; color: inherit; text-decoration: underline; }
+.new-day-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 16px 0; padding: 10px 10px 10px 14px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--text); font-size: 13px; }
+.new-day-banner svg { color: var(--accent); }
+.new-day-banner .btn { margin-left: auto; }
 .training-block-search { display: flex; align-items: center; gap: 10px; padding: 0 14px; margin-bottom: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--text-dim); }
 .training-block-search input { flex: 1; min-width: 0; background: transparent; border: none; outline: none; padding: 13px 0; color: var(--text); font-size: 14px; }
 .training-block-search-count { font-size: 12px; white-space: nowrap; }
